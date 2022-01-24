@@ -115,7 +115,7 @@ namespace Modules.Utilities
             });
         }
         //--------------------------------------------------------------------------------------------------------------
-        public static IObservable<Unit> LerpRotation(this Transform _transform, int _milliseconds, Vector3 _targetRotation, bool _isLocal, Easing.Ease _ease = Easing.Ease.EaseInOutQuad)
+        public static IObservable<Unit> LerpRotationAngle(this Transform _transform, int _milliseconds, Vector3 _targetRotation, bool _isLocal, Easing.Ease _ease = Easing.Ease.EaseInOutQuad)
         {
 
             return Observable.Create<Unit>(_observer =>
@@ -144,6 +144,55 @@ namespace Modules.Utilities
                                 _transform.localEulerAngles = _targetRotation;
                             else
                                 _transform.eulerAngles = _targetRotation;
+
+                            _observer.OnNext(default(Unit));
+                            _observer.OnCompleted();
+
+                        }
+                    );
+
+                return Disposable.Create(() => disposable?.Dispose());
+            });
+        }
+
+
+
+
+        //--------------------------------------------------------------------------------------------------------------
+        public static IObservable<Unit> LerpRotation(this Transform _transform, int _milliseconds, Quaternion _targetRotation, bool _isLocal, Easing.Ease _ease = Easing.Ease.EaseInOutQuad)
+        {
+
+            return Observable.Create<Unit>(_observer =>
+            {
+                var progress = 0f;
+                var startRot = _isLocal ? _transform.localRotation : _transform.rotation;
+                Quaternion valueTarget = startRot;
+                IDisposable disposable = LerpThread
+                    .Execute(
+                        _milliseconds,
+                        _count =>
+                        {
+                            progress += Time.deltaTime / (_milliseconds * GlobalConstant.MILLISECONDS_TO_SECONDS);
+                            var x = EasingFormula.EasingFloat(_ease, startRot.x, _targetRotation.x, progress);
+                            var y = EasingFormula.EasingFloat(_ease, startRot.y, _targetRotation.y, progress);
+                            var z = EasingFormula.EasingFloat(_ease, startRot.z, _targetRotation.z, progress);
+                            var w = EasingFormula.EasingFloat(_ease, startRot.w, _targetRotation.w, progress);
+
+                            valueTarget.Set(x, y, z, w); 
+                            
+                            if (_isLocal)
+                                _transform.localRotation = valueTarget;
+                            else
+                                _transform.rotation = valueTarget;
+
+
+                        },
+                        () =>
+                        {
+                            if (_isLocal)
+                                _transform.localRotation = _targetRotation;
+                            else
+                                _transform.rotation = _targetRotation;
 
                             _observer.OnNext(default(Unit));
                             _observer.OnCompleted();
