@@ -1,0 +1,18 @@
+using System.Collections;
+using System.Collections.Generic;
+using UnityEngine;
+
+[CreateAssetMenu(fileName = "BuildSettingInfo", menuName = "[Utility] Create BuildSettingInfo.asset", order = 100)]
+public class UnityBuildSettingInfo : ScriptableObject
+{
+    [Header("After Build")]
+    public bool m_EnableSound;
+    public bool m_EnableCopyFolder;
+    
+    public List<string> m_CopyFolderNameList;
+    public bool m_EnableSendMessage;
+
+    public string m_APISend =
+        "https://api.telegram.org/bot1671713978:AAGGuzmbA2IQlZlQz66Z9yNWtckivBZZuuw/sendMessage?chat_id=1575164820&text=";
+
+}
