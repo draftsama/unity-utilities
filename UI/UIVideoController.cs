@@ -20,13 +20,17 @@ namespace Modules.Utilities
 
         [SerializeField] public bool m_PlayOnAwake = true;
         [SerializeField] public bool m_Loop = false;
+        [SerializeField] public bool m_FadeAnimation = false;
+        [SerializeField] public int m_FadeTime = 500;
 
         private RawImage _Preview;
         private VideoPlayer _VideoPlayer;
         private CanvasGroup _CanvasGroup;
-
         private Action<Unit> _OnEnd;
 
+        private IDisposable _FadeDisposable;
+
+        private bool _Stoping = false;
         public enum PathType
         {
             StreamAssets,
@@ -76,7 +80,7 @@ namespace Modules.Utilities
 
         private void VideoPlayerOnstarted(VideoPlayer _source)
         {
-            _CanvasGroup.SetAlpha(1);
+            SetVideoAlpha(1);
         }
 
         private void VideoPlayerOnloopPointReached(VideoPlayer _source)
@@ -85,12 +89,13 @@ namespace Modules.Utilities
             if (m_Loop) _VideoPlayer.Play();
             else
             {
-                _CanvasGroup.SetAlpha(0);
+                if(!_Stoping)
+                  SetVideoAlpha(0);
                 _OnEnd?.Invoke(default);
             }
         }
 
-
+        
         private void OnDisable()
         {
             _VideoPlayer.started -= VideoPlayerOnstarted;
@@ -123,11 +128,26 @@ namespace Modules.Utilities
         {
             if (_VideoPlayer.isPlaying)
             {
-                _VideoPlayer.Stop();
-                _CanvasGroup.SetAlpha(0);
+                _Stoping = true;
+                SetVideoAlpha(0,_onCompleted: () =>
+                {
+                    _VideoPlayer.Stop();
+                    _Stoping = false;
+                });
             }
         }
 
+        private void  SetVideoAlpha(float _alpha ,bool _force = false,Action _onCompleted = null)
+        {
+            _FadeDisposable?.Dispose();
+            if (m_FadeAnimation && !_force)
+                _FadeDisposable =  _CanvasGroup.LerpAlpha(m_FadeTime, _alpha,true,_onCompleted).AddTo(this);
+            else
+            {
+                _CanvasGroup.SetAlpha(_alpha);
+                _onCompleted?.Invoke();
+            }
+        }
         public void Seek(int _frame)
         {
             if (!_VideoPlayer.isPrepared)
