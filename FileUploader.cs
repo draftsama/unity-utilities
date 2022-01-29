@@ -1,7 +1,9 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,7 +13,7 @@ namespace Modules.Utilities
     {
         
         public static async Task<string> UploadFile(string _url, string _key, string _filePath,
-            CancellationToken _token, IProgress<UploadProgress> _progress = null,
+            CancellationToken _token,Dictionary<string,string> _fromData, IProgress<UploadProgress> _progress = null,
             string _method = "PUT")
         {
             using (var fs = File.OpenRead(_filePath))
@@ -24,21 +26,12 @@ namespace Modules.Utilities
                         using (var content = new MultipartFormDataContent())
                         {
                             content.Add(streamContent, _key, fileInfo.Name);
-
-                            // using (var st = await content.ReadAsStreamAsync())
-                            // {
-                            //     while (true)
-                            //     {
-                            //
-                            //         var length = st.ReadByte();
-                            //         UnityEngine.Debug.Log(length);
-                            //         if (length <= 0)
-                            //         {
-                            //             return "End";
-                            //         }
-                            //     }
-                            //
-                            // }
+                            foreach (var data in _fromData)
+                            {
+                                var text = new StringContent(data.Value, Encoding.UTF8, "application/json");
+                                content.Add(text,data.Key);
+                            }
+                            
                             using (
                                 var message = _method.Equals("PUT")
                                     ? await client.PutAsync(_url, content, _token)
