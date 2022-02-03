@@ -1,6 +1,4 @@
 using System;
-using System.Collections;
-using System.Collections.Generic;
 using System.IO;
 using UniRx;
 using UnityEngine;
@@ -38,6 +36,8 @@ namespace Modules.Utilities
             Absolute
         }
 
+        public VideoPlayer m_VideoPlayer => _VideoPlayer;
+
         private void Awake()
         {
             _Preview = GetComponent<RawImage>();
@@ -46,6 +46,17 @@ namespace Modules.Utilities
             _VideoPlayer.isLooping = false;
             _VideoPlayer.playOnAwake = false;
             _CanvasGroup.SetAlpha(0);
+            
+            SetupURL(m_FileName, m_PathType, m_FolderName);
+
+        }
+
+        public void SetupURL(string _filename,PathType _pathType = PathType.Relative,string _foldername = "Resources")
+        {
+            m_FileName = _filename;
+            m_PathType = _pathType;
+            m_FolderName = _foldername;
+            
             var filePath = string.Empty;
 
             if (m_PathType == PathType.StreamAssets)

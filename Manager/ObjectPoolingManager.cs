@@ -1,19 +1,36 @@
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 
-public class ObjectPoolingManager
+public class ObjectPoolingManager : MonoBehaviour
 {
+    private static ObjectPoolingManager instance;
 
+    private static ObjectPoolingManager CreateInstance()
+    {
+        if (instance == null)
+        {
+            GameObject go = new GameObject("ObjectPoolingManager");
+            instance = go.AddComponent<ObjectPoolingManager>();
+        }
 
-    public static List<PoolObject> m_PoolObjectList = new List<PoolObject>();
+        return instance;
+    }
+
+    private void Awake()
+    {
+        DontDestroyOnLoad(gameObject);
+    }
+
+    public  List<PoolObject> m_PoolObjectList = new List<PoolObject>();
     public static GameObject CreateObject(string _group, GameObject _prefab, Vector3 _position, Quaternion _rotation, Transform _parent = null)
     {
-
+        CreateInstance();
         GameObject result = null;
-        for (int i = 0; i < m_PoolObjectList.Count; i++)
+        for (int i = 0; i < instance.m_PoolObjectList.Count; i++)
         {
-            var poolObj = m_PoolObjectList[i];
+            var poolObj = instance.m_PoolObjectList[i];
             if (!poolObj.m_GameObject.activeInHierarchy && poolObj.m_Group.Equals(_group))
             {
                 poolObj.m_GameObject.transform.position = _position;
@@ -28,7 +45,7 @@ public class ObjectPoolingManager
         if (result == null)
         {
             result = GameObject.Instantiate(_prefab, _position, _rotation, _parent);
-            m_PoolObjectList.Add(new PoolObject(_group, result));
+            instance.m_PoolObjectList.Add(new PoolObject(_group, result));
         }
 
         var poolEvent = result.GetComponent<IPoolObjectEvent>();
@@ -40,10 +57,10 @@ public class ObjectPoolingManager
     public static void KillObject(GameObject _target)
     {
 
-        for (int i = 0; i < m_PoolObjectList.Count; i++)
+        for (int i = 0; i < instance.m_PoolObjectList.Count; i++)
         {
-            var poolObj = m_PoolObjectList[i];
-            if (_target.GetInstanceID() == poolObj.m_GameObject.GetInstanceID() && poolObj.m_GameObject.activeInHierarchy)
+            var poolObj = instance.m_PoolObjectList[i];
+            if (_target.GetInstanceID() == poolObj.m_GameObject.GetInstanceID() && poolObj.m_GameObject.activeInHierarchy && poolObj.m_GameObject.activeSelf)
             {
                 poolObj.m_GameObject.SetActive(false);
                 var poolEvent = poolObj.m_GameObject.GetComponent<IPoolObjectEvent>();
@@ -55,17 +72,19 @@ public class ObjectPoolingManager
 
     public static void ClearAll()
     {
-        for (int i = 0; i < m_PoolObjectList.Count; i++)
+        for (int i = 0; i < instance.m_PoolObjectList.Count; i++)
         {
-            var poolObj = m_PoolObjectList[i];
+            var poolObj = instance.m_PoolObjectList[i];
             GameObject.DestroyImmediate(poolObj.m_GameObject, true);
         }
-        m_PoolObjectList.Clear();
+        instance.m_PoolObjectList.Clear();
 
     }
 
-
-
+    private void OnDestroy()
+    {
+        instance.m_PoolObjectList.Clear();
+    }
 }
 
 [System.Serializable]
