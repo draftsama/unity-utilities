@@ -33,9 +33,11 @@ public class ObjectPoolingManager : MonoBehaviour
             var poolObj = instance.m_PoolObjectList[i];
             if (!poolObj.m_GameObject.activeInHierarchy && poolObj.m_Group.Equals(_group))
             {
+              
+                if(_parent != null)poolObj.m_GameObject.transform.SetParent(_parent,true);
                 poolObj.m_GameObject.transform.position = _position;
                 poolObj.m_GameObject.transform.rotation = _rotation;
-                if(_parent != null)poolObj.m_GameObject.transform.SetParent(_parent);
+                
                 poolObj.m_GameObject.SetActive(true);
                 result = poolObj.m_GameObject;
                 break;
