@@ -1,6 +1,7 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 
 public class ObjectPoolingManager : MonoBehaviour
@@ -56,6 +57,11 @@ public class ObjectPoolingManager : MonoBehaviour
         return result;
     }
 
+    public static PoolObject[] GetObjects(string _group)
+    {
+        return instance.m_PoolObjectList.Where(_ => _.m_Group.Equals(_group)).ToArray();
+    }
+
     public static void KillObject(GameObject _target)
     {
 
@@ -87,6 +93,7 @@ public class ObjectPoolingManager : MonoBehaviour
     {
         instance.m_PoolObjectList.Clear();
     }
+  
 }
 
 [System.Serializable]
@@ -94,11 +101,13 @@ public class PoolObject
 {
     public GameObject m_GameObject;
     public string m_Group;
+    public Transform m_Transform;
 
     public PoolObject(string _group, GameObject _gameObject)
     {
         this.m_Group = _group;
         this.m_GameObject = _gameObject;
+        this.m_Transform = _gameObject.transform;
     }
 
 }
