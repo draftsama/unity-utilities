@@ -61,10 +61,9 @@ public class ObjectPoolingManager : MonoBehaviour
     {
         return instance.m_PoolObjectList.Where(_ => _.m_Group.Equals(_group)).ToArray();
     }
-
-    public static void KillObject(GameObject _target)
+   
+    public static bool Kill(GameObject _target)
     {
-
         for (int i = 0; i < instance.m_PoolObjectList.Count; i++)
         {
             var poolObj = instance.m_PoolObjectList[i];
@@ -73,12 +72,32 @@ public class ObjectPoolingManager : MonoBehaviour
                 poolObj.m_GameObject.SetActive(false);
                 var poolEvent = poolObj.m_GameObject.GetComponent<IPoolObjectEvent>();
                 poolEvent?.OnEndObject();
-                break;
+
+                return true;
             }
         }
+
+        return false;
     }
 
-    public static void ClearAll()
+    public static bool Terminate(GameObject _target)
+    {
+        for (int i = 0; i < instance.m_PoolObjectList.Count; i++)
+        {
+            var poolObj = instance.m_PoolObjectList[i];
+            if (_target.GetInstanceID() == poolObj.m_GameObject.GetInstanceID() && poolObj.m_GameObject.activeInHierarchy && poolObj.m_GameObject.activeSelf)
+            {
+                instance.m_PoolObjectList.Remove(poolObj);
+                GameObject.DestroyImmediate(poolObj.m_GameObject, true);
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static void TerminateAll()
     {
         for (int i = 0; i < instance.m_PoolObjectList.Count; i++)
         {
@@ -91,7 +110,7 @@ public class ObjectPoolingManager : MonoBehaviour
 
     private void OnDestroy()
     {
-        instance.m_PoolObjectList.Clear();
+        TerminateAll();
     }
   
 }
