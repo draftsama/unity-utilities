@@ -25,6 +25,12 @@ public class ObjectPoolingManager : MonoBehaviour
     }
 
     public  List<PoolObject> m_PoolObjectList = new List<PoolObject>();
+
+    public static GameObject CreateObject(string _group, GameObject _prefab, Transform _parent = null)
+    {
+        return CreateObject(_group, _prefab, _prefab.transform.position, _prefab.transform.rotation, _parent);
+    }
+
     public static GameObject CreateObject(string _group, GameObject _prefab, Vector3 _position, Quaternion _rotation, Transform _parent = null)
     {
         CreateInstance();
@@ -78,6 +84,20 @@ public class ObjectPoolingManager : MonoBehaviour
         }
 
         return false;
+    }
+    public static bool KillGroup(string _group)
+    {
+        var list = GetObjects(_group);
+        if (list == null) return false;
+        for (int i = 0; i < list.Length; i++)
+        {
+            var poolObj = list[i];
+            poolObj.m_GameObject.SetActive(false);
+            var poolEvent = poolObj.m_GameObject.GetComponent<IPoolObjectEvent>();
+            poolEvent?.OnEndObject();
+        }
+
+        return true;
     }
 
     public static bool Terminate(GameObject _target)
