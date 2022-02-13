@@ -67,6 +67,10 @@ public class ObjectPoolingManager : MonoBehaviour
     {
         return instance.m_PoolObjectList.Where(_ => _.m_Group.Equals(_group)).ToArray();
     }
+    public static PoolObject[] GetObjects()
+    {
+        return instance.m_PoolObjectList.ToArray();
+    }
    
     public static bool Kill(GameObject _target)
     {
