@@ -22,10 +22,10 @@ public class ObjectPoolingManager : MonoBehaviour
         }
 
     }
-
+    
     private void Awake()
     {
-        DontDestroyOnLoad(gameObject);
+      //  DontDestroyOnLoad(gameObject);
     }
 
     public  List<PoolObject> m_PoolObjectList = new List<PoolObject>();
@@ -140,7 +140,7 @@ public class ObjectPoolingManager : MonoBehaviour
         for (int i = 0; i < Instance.m_PoolObjectList.Count; i++)
         {
             var poolObj = Instance.m_PoolObjectList[i];
-            GameObject.DestroyImmediate(poolObj.m_GameObject, true);
+            GameObject.Destroy(poolObj.m_GameObject);
         }
         Instance.m_PoolObjectList.Clear();
 
