@@ -24,9 +24,7 @@ namespace Modules.Utilities
             {
                 foreach (var player in m_AudioPlayerlist)
                 {
-                    if (!player.gameObject.activeSelf) continue;
-                    if (!player.isPlaying)
-                        player.gameObject.SetActive(false);
+                    player.gameObject.SetActive(player.isPlaying);
                 }
             }).AddTo(this);
         }
@@ -75,7 +73,11 @@ namespace Modules.Utilities
                 {
                     if (_CurrentBGMAudio != null) _CurrentBGMAudio.volume = 1 - _value;
                     audioPlayer.volume = _value;
-                }, () => { _CurrentBGMAudio = audioPlayer; }).AddTo(instance);
+                }, () =>
+                {
+                    if (_CurrentBGMAudio != null)_CurrentBGMAudio.Stop();
+                    _CurrentBGMAudio = audioPlayer;
+                }).AddTo(instance);
         }
 
         public static void PlayFX(string _name, float _volume = 1f)
