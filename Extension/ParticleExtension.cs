@@ -1,7 +1,11 @@
 ﻿using System;
-
+using System.Threading;
 using UniRx;
 using UnityEngine;
+#if UNITASK
+using Cysharp.Threading.Tasks;
+#endif
+
 
 namespace Modules.Utilities
 {
@@ -13,44 +17,100 @@ namespace Modules.Utilities
             emission.enabled = _enable;
         }
 
-        public static IObservable<Unit> LerpAlpha(this ParticleSystem _particle, float _targetAlpha, float _second, Easing.Ease _ease = Easing.Ease.EaseInOutQuad)
+        public static IDisposable LerpAlpha(this ParticleSystem _particle, float _targetAlpha, float _second,
+            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false, Action _onCompleted = null)
         {
-            return Observable.Create<Unit>
-            (
-                _observer => 
+            var progress = 0f;
+            var mainParticle = _particle.main;
+            var main = mainParticle;
+            var startColor = mainParticle.startColor.color;
+            var startAlpha = startColor.a;
+
+            IDisposable disposable = null;
+            disposable = Observable.EveryUpdate().Subscribe(_ =>
+            {
+                var deltaTime = _ignoreTimeScale ? Time.unscaledDeltaTime : Time.deltaTime;
+
+                progress += deltaTime / _second;
+
+                if (progress < 1)
+                {
+                    var currentAlpha = EasingFormula.EasingFloat(_ease, startAlpha, _targetAlpha, progress);
+                    var currentColor = startColor;
+                    currentColor.a = currentAlpha;
+                    main.startColor = currentColor;
+                }
+                else
+                {
+                    disposable?.Dispose();
+                    var currentColor = startColor;
+                    currentColor.a = _targetAlpha;
+                    main.startColor = currentColor;
+                    _onCompleted?.Invoke();
+                }
+            });
+
+            return disposable;
+        }
+
+#if UNITASK
+        public static UniTask LerpAlphaAsync(this ParticleSystem _particle, float _targetAlpha, float _second,
+            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false,
+            CancellationToken _token = default)
+        {
+            var token = _token;
+            if (token == default) token = _particle.GetCancellationTokenOnDestroy();
+
+            var uts = new UniTaskCompletionSource();
+            UniTask.Void(async () =>
+            {
+                try
                 {
                     var progress = 0f;
                     var mainParticle = _particle.main;
                     var main = mainParticle;
                     var startColor = mainParticle.startColor.color;
                     var startAlpha = startColor.a;
-                    IDisposable disposable = LerpThread
-                    .Execute
-                    (
-                        Mathf.RoundToInt(_second * GlobalConstant.SECONDS_TO_MILLISECONDS),
-                        _count =>
+
+
+                    while (!token.IsCancellationRequested)
+                    {
+                        var deltaTime = _ignoreTimeScale ? Time.unscaledDeltaTime : Time.deltaTime;
+
+                        progress += deltaTime / _second;
+
+                        if (progress < 1)
                         {
-                            progress += Time.deltaTime / _second;
                             var currentAlpha = EasingFormula.EasingFloat(_ease, startAlpha, _targetAlpha, progress);
                             var currentColor = startColor;
                             currentColor.a = currentAlpha;
                             main.startColor = currentColor;
-                        },
-                        () =>
+                        }
+                        else
                         {
                             var currentColor = startColor;
                             currentColor.a = _targetAlpha;
-                            
                             main.startColor = currentColor;
-                            _observer.OnNext(default(Unit));
-                            _observer.OnCompleted();
-
+                            uts.TrySetResult();
+                            break;
                         }
-                    );
 
-                    return Disposable.Create(() => disposable?.Dispose());
+                        await UniTask.Yield();
+                    }
                 }
-            );
+                catch (OperationCanceledException) when (_token.IsCancellationRequested)
+                {
+                    uts.TrySetCanceled();
+                }
+                catch (System.Exception e)
+                {
+                    uts.TrySetException(e);
+                }
+            });
+
+
+            return uts.Task;
         }
+#endif
     }
 }
