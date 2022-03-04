@@ -1,12 +1,12 @@
-# unity-utilities
+# Unity Utilities
 
-##Requirement 
+## Requirement 
 - [Unirx](https://github.com/neuecc/UniRx)
 - [UniTask](https://github.com/Cysharp/UniTask) (Optional)
 
 
 
-###How to add submodule by command line
+### How to add submodule by command line
 ```bash
 git submodule add  <url> <relative_path>
 ```
