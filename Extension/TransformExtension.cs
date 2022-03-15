@@ -383,6 +383,52 @@ namespace Modules.Utilities
 
             return uts.Task;
         }
+        
+        public static IUniTaskAsyncEnumerable<AsyncUnit> FloatingAnimationAsyncEnumerable(
+            this Transform _transform, float _speed, float _radius, bool _isLocal = false,
+            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false)
+        {
+            // writer(IAsyncWriter<T>) has `YieldAsync(value)` method.
+            return UniTaskAsyncEnumerable.Create<AsyncUnit>(async (writer, token) =>
+            {
+                float progress = 0;
+                var position = _isLocal?_transform.localPosition:_transform.position;
+    
+                Vector3 currentPos = position;
+                Vector3 startPos = position;
+                Vector3 targetPos = RandomPosition(_radius) + startPos;
+                Vector3 valueTarget;
+                await UniTask.Yield();
+                while (!token.IsCancellationRequested)
+                {
+                    //  await writer.YieldAsync(default);
+                    var deltaTime = _ignoreTimeScale ? Time.unscaledDeltaTime : Time.deltaTime;
+                    progress += deltaTime * _speed * 0.1f;
+                    valueTarget= EasingFormula.EaseTypeVector(_ease, currentPos, targetPos, progress);
+                    
+                    if (_isLocal)
+                        _transform.localPosition = valueTarget;
+                    else
+                        _transform.position = valueTarget;
+                    
+                    if (progress >= 1)
+                    {
+                        targetPos = RandomPosition(_radius) + startPos;
+                        currentPos = _isLocal?_transform.localPosition:_transform.position;
+                        progress = 0;
+                    }
+
+                    await UniTask.Yield();
+                }
+            });
+        }
+        
+        static Vector3 RandomPosition(float _radius)
+        {
+            float angle = UnityEngine.Random.Range(0, 360);
+            float randomRadius = UnityEngine.Random.Range(0, _radius);
+            return Quaternion.Euler(0, 0, angle) * new Vector3(0, randomRadius, 0);
+        }
 
 #endif
     }
