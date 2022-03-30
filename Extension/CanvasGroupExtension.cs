@@ -16,56 +16,30 @@ namespace Modules.Utilities
         private const Easing.Ease _DEFAULT_EASE_TYPE = Easing.Ease.Linear;
 
         private const int _DEFAULT_SOURCE_CURRENT_ALPHA = -1;
-        //--------------------------------------------------------------------------------------------------------------
-
-        public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            Action _onComplete = null)
-        {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _DEFAULT_EASE_TYPE,
-                true, false, _onComplete);
-        }
+    
 
         //--------------------------------------------------------------------------------------------------------------
         public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
             bool _ignoreTimeScale = false, Action _onComplete = null)
         {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _DEFAULT_EASE_TYPE,
-                true, _ignoreTimeScale, _onComplete);
+            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA,_ignoreTimeScale, _DEFAULT_EASE_TYPE,
+                true, _onComplete);
         }
 
         //--------------------------------------------------------------------------------------------------------------
         public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _adjustInteractAble = true, bool _ignoreTimeScale = false, Action _onComplete = null)
+            bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true ,Action _onComplete = null)
         {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _DEFAULT_EASE_TYPE,
-                _adjustInteractAble, _ignoreTimeScale, _onComplete);
+            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA,_ignoreTimeScale, _ease,
+                _adjustInteractAble, _onComplete);
         }
 
 
         //--------------------------------------------------------------------------------------------------------------
 
-        public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target, float _start,
-            bool _adjustInteractAble = true, bool _ignoreTimeScale = false, Action _onComplete = null)
-        {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _start, _DEFAULT_EASE_TYPE, _adjustInteractAble,
-                _ignoreTimeScale, _onComplete);
-        }
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        public static IDisposable EasingLerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true, bool _ignoreTimeScale = false,
-            Action _onComplete = null)
-        {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _ease,
-                _adjustInteractAble, _ignoreTimeScale, _onComplete);
-        }
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        public static IDisposable EasingLerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            float _start, Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true,
-            bool _ignoreTimeScale = false, Action _onComplete = null)
+         static IDisposable EasingLerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
+            float _start, bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true,
+             Action _onComplete = null)
         {
             var progress = 0f;
             var current = Math.Abs(_start - _DEFAULT_SOURCE_CURRENT_ALPHA) < GlobalConstant.FLOAT_MINIMUM_TOLERANCE
