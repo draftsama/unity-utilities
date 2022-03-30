@@ -152,7 +152,7 @@ namespace Modules.Utilities
         {
             _FadeDisposable?.Dispose();
             if (m_FadeAnimation && !_force)
-                _FadeDisposable =  _CanvasGroup.LerpAlpha(m_FadeTime, _alpha,true,false,_onCompleted).AddTo(this);
+                _FadeDisposable =  _CanvasGroup.LerpAlphaWithoutInteractable(m_FadeTime, _alpha,_onComplete: _onCompleted).AddTo(this);
             else
             {
                 _CanvasGroup.SetAlpha(_alpha);

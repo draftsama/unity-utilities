@@ -20,18 +20,18 @@ namespace Modules.Utilities
 
         //--------------------------------------------------------------------------------------------------------------
         public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _ignoreTimeScale = false, Action _onComplete = null)
+            bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE, Action _onComplete = null)
         {
             return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA,_ignoreTimeScale, _DEFAULT_EASE_TYPE,
                 true, _onComplete);
         }
 
         //--------------------------------------------------------------------------------------------------------------
-        public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true ,Action _onComplete = null)
+        public static IDisposable LerpAlphaWithoutInteractable(this CanvasGroup _source, int _milliseconds, float _target,
+            bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE,Action _onComplete = null)
         {
             return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA,_ignoreTimeScale, _ease,
-                _adjustInteractAble, _onComplete);
+                false, _onComplete);
         }
 
 
