@@ -9,7 +9,6 @@ namespace Modules.Utilities
     {
         public bool m_EnableSound;
         public bool m_EnableCopyFolder;
-
         public List<string> m_CopyFolderNameList;
         public bool m_EnableSendMessage;
 
