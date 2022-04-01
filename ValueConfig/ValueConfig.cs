@@ -61,6 +61,10 @@ namespace Modules.Utilities
                             return (T)System.Convert.ChangeType(list[i].floatValue, typeof(T));
                         case Value.ValueType.BooleanType:
                             return (T)System.Convert.ChangeType(list[i].boolValue, typeof(T));
+                        case Value.ValueType.Vector2Type:
+                            return (T)System.Convert.ChangeType(list[i].vector2Value, typeof(T));
+                        case Value.ValueType.Vector3Type:
+                            return (T)System.Convert.ChangeType(list[i].vector3Value, typeof(T));
                     }
                 }
             }

@@ -25,6 +25,7 @@ namespace Modules.Utilities
             //Show existing window instance. If one doesn't exist, make one.
             EditorWindow.GetWindow(typeof(ConfigWindowEditor), true, "Config Setting", true);
             LoadData();
+            scrollPos = Vector2.zero;
         }
 
 
@@ -49,9 +50,15 @@ namespace Modules.Utilities
 
             }
         }
+        static Vector2 scrollPos = Vector2.zero;
+
+        static float bottomHeight = 100;
+        private const float _DEFAULT_BOTTOM_HEIGHT = 100;
         void OnGUI()
         {
-            GUILayout.Label("Base Settings", EditorStyles.boldLabel);
+
+
+
             EditorGUILayout.BeginHorizontal();
             _Asset = EditorGUILayout.ObjectField("Asset", _Asset, typeof(ValueConfigAsset), true) as ValueConfigAsset;
 
@@ -60,14 +67,18 @@ namespace Modules.Utilities
                 CreateConfigAsset();
             }
 
-
             EditorGUILayout.EndHorizontal();
+            EditorGUILayout.Space();
             if (_Asset != null)
             {
+                scrollPos = EditorGUILayout.BeginScrollView(scrollPos, GUILayout.Height(position.height - bottomHeight));
+                bottomHeight = _DEFAULT_BOTTOM_HEIGHT;
+
                 serializedObject.UpdateIfRequiredOrScript();
 
                 EditorGUILayout.PropertyField(m_ValueCollectionProperty, true);
 
+                EditorGUILayout.EndScrollView();
 
                 var items = m_ValueCollectionProperty.FindPropertyRelative("m_Items");
                 var max = items.arraySize;
@@ -79,6 +90,8 @@ namespace Modules.Utilities
                     if (keyList.Contains(key.stringValue))
                     {
                         EditorGUILayout.HelpBox($"Index:{i} key:{key.stringValue} - This key is duplicate", MessageType.Error);
+
+                        bottomHeight += 34;
                     }
 
                     keyList.Add(key.stringValue);

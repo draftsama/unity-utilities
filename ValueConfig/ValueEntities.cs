@@ -19,10 +19,12 @@ namespace Modules.Utilities
         [SerializeField] public int intValue;
         [SerializeField] public float floatValue;
         [SerializeField] public bool boolValue;
+        [SerializeField] public Vector2 vector2Value;
+        [SerializeField] public Vector3 vector3Value;
 
         public enum ValueType
         {
-            StringType = 0, IntType = 1, FloatType = 2, BooleanType = 3
+            StringType = 0, IntType = 1, FloatType = 2, BooleanType = 3,Vector2Type = 4,Vector3Type = 5
         }
 
     }
@@ -97,9 +99,15 @@ namespace Modules.Utilities
                 case Value.ValueType.BooleanType:
                     PropertyField("Bool Value", "boolValue", property, ref currentRect);
                     break;
+                case Value.ValueType.Vector2Type:
+                    PropertyField("Vector2 Value", "vector2Value", property, ref currentRect);
+                    break;
+                case Value.ValueType.Vector3Type:
+                    PropertyField("Vector3 Value", "vector3Value", property, ref currentRect);
+                    break;
             }
 
-            height = currentRect.y - position.y;
+            height = currentRect.y - position.y + 18;
             EditorGUI.EndProperty();
 
         }
