@@ -13,7 +13,7 @@ namespace Modules.Utilities
     public class ValueConfigAsset : ScriptableObject
     {
 
-        public ValueCollection m_ValueCollection;
+        [SerializeField]public ValueCollection m_ValueCollection;
         [SerializeField] public bool m_NeedUpdate;
     }
 

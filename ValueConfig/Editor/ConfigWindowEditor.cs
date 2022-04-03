@@ -76,10 +76,12 @@ namespace Modules.Utilities
 
                 serializedObject.UpdateIfRequiredOrScript();
 
-                EditorGUILayout.PropertyField(m_ValueCollectionProperty, true);
+               EditorGUILayout.PropertyField(m_ValueCollectionProperty, true);
 
                 EditorGUILayout.EndScrollView();
 
+
+                //notify
                 var items = m_ValueCollectionProperty.FindPropertyRelative("m_Items");
                 var max = items.arraySize;
                 List<string> keyList = new List<string>();
@@ -104,8 +106,9 @@ namespace Modules.Utilities
             {
 
                 if (_Asset != null)
-                {
+                {       
 
+                   // Debug.Log(serializedObject.);
                     if (serializedObject != null)
                     {
                         m_NeedUpdateProperty.boolValue = true;
