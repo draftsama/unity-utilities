@@ -80,7 +80,7 @@ namespace Modules.Utilities
 
         }
 
-        public static void SaveCurrentValueConfig(ValueCollection valueCollection)
+        public static void SaveCurrentValueConfig()
         {
 
             if (_Current != null)
