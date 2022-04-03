@@ -156,7 +156,46 @@ namespace Modules.Utilities
 
         }
 
+        public static bool SetValue<T>(string key, T value)
+        {
+            if (_Current == null)
+                return false;
 
+             var items = _Current.Items;
+
+            for (int i = 0; i < items.Count; i++)
+            {
+                if (items[i].key == key)
+                {
+                    switch (items[i].valueType)
+                    {
+                        case Value.ValueType.StringType:
+                            items[i].stringValue = value.ToString();
+                            break;
+                        case Value.ValueType.IntType:
+                            items[i].intValue = (int)Convert.ChangeType(value, typeof(int));
+                            break;
+                        case Value.ValueType.FloatType:
+                            items[i].floatValue = (float)Convert.ChangeType(value, typeof(float));
+                            break;
+                        case Value.ValueType.BooleanType:
+                            items[i].boolValue = (bool)Convert.ChangeType(value, typeof(bool));
+                            break;
+                        case Value.ValueType.Vector2Type:
+                            items[i].vector2Value = (Vector2)Convert.ChangeType(value, typeof(Vector2));
+                            break;
+                        case Value.ValueType.Vector3Type:
+                            items[i].vector3Value = (Vector3)Convert.ChangeType(value, typeof(Vector3));
+                            break;
+                    }
+                }
+            }
+                
+            
+            return false;
+
+
+        }
         public static T GetValue<T>(string key)
         {
             if (_Current == null || _Current.Items.Count == 0) return default(T);

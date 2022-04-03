@@ -13,7 +13,7 @@ namespace Modules.Utilities
 
 
     [System.Serializable]
-    public struct Value
+    public class Value
     {
         [SerializeField] public string key;
         [SerializeField] public ValueType valueType;
@@ -28,6 +28,7 @@ namespace Modules.Utilities
         {
             StringType = 0, IntType = 1, FloatType = 2, BooleanType = 3, Vector2Type = 4, Vector3Type = 5
         }
+
 
     }
 
