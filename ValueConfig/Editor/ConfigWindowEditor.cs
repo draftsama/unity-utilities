@@ -127,7 +127,7 @@ namespace Modules.Utilities
                     m_NeedUpdateProperty.boolValue = false;
                     serializedObject.ApplyModifiedProperties();
                     EditorUtility.SetDirty(_Asset);
-                    ValueConfig.SaveJsonFile(_Asset.m_ValueCollection);
+                    ValueConfig.SaveValueConfig(_Asset.m_ValueCollection);
 
                 }
                 if (_Asset.m_NeedUpdate && GUILayout.Button("Update"))
@@ -135,7 +135,7 @@ namespace Modules.Utilities
                     m_NeedUpdateProperty.boolValue = false;
                     serializedObject.ApplyModifiedProperties();
                     EditorUtility.SetDirty(_Asset);
-                    ValueConfig.SaveJsonFile(_Asset.m_ValueCollection);
+                    ValueConfig.SaveValueConfig(_Asset.m_ValueCollection);
 
                 }
 
