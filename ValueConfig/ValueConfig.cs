@@ -3,7 +3,6 @@ using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using Newtonsoft.Json;
 using UnityEngine;
 
 namespace Modules.Utilities
@@ -72,8 +71,12 @@ namespace Modules.Utilities
             else
             {
                 var asset = Resources.Load<ValueConfigAsset>("Config/ValueConfig");
-                ValueConfig.SaveValueConfig(asset.m_ValueCollection);
-                _Current = asset.m_ValueCollection;
+                if (asset)
+                {
+                    ValueConfig.SaveValueConfig(asset.m_ValueCollection);
+                    _Current = asset.m_ValueCollection;
+                }
+
 
             }
 
@@ -161,7 +164,7 @@ namespace Modules.Utilities
             if (_Current == null)
                 return false;
 
-             var items = _Current.Items;
+            var items = _Current.Items;
 
             for (int i = 0; i < items.Count; i++)
             {
@@ -190,8 +193,8 @@ namespace Modules.Utilities
                     }
                 }
             }
-                
-            
+
+
             return false;
 
 
