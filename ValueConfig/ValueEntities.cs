@@ -122,7 +122,6 @@ namespace Modules.Utilities
     [CustomPropertyDrawer(typeof(Value))]
     public class ValuePropertyDrawer : PropertyDrawer
     {
-        bool show = true;
         float height = 92;
         float heightLine = 18;
         float space = 5;

@@ -40,7 +40,11 @@ namespace Modules.Utilities
         static string RunCommand(string _cmd)
         {
             ProcessStartInfo start = new ProcessStartInfo();
+#if UNITY_EDITOR_WIN
+            start.FileName = "cmd.exe";
+#elif UNITY_EDITOR_OSX
             start.FileName = "/bin/zsh";
+#endif
             start.Arguments = "-c \" " + _cmd + " \"";
             start.UseShellExecute = false; // Do not use OS shell
             start.CreateNoWindow = true; // We don't need new window
@@ -119,9 +123,14 @@ namespace Modules.Utilities
         {
             if (type == LogType.Error)
             {
+
                 // FAILED TO BUILD, STOP LISTENING FOR ERRORS
                 if (_UnityBuildSettingInfo.m_EnableSound)
+#if UNITY_EDITOR_WIN
+                    RunCommand("rundll32 user32.dll,MessageBeep");
+#elif UNITY_EDITOR_OSX
                     RunCommand("afplay /System/Library/Sounds/Glass.aiff");
+#endif
                 Application.logMessageReceived -= OnBuildError;
                 if (_UnityBuildSettingInfo.m_EnableSendMessage)
                     SendMessage($"[Build Fail!] \nName: {Application.productName} \nVersion: {Application.version}");
@@ -147,8 +156,11 @@ namespace Modules.Utilities
                     }
 
                 if (_UnityBuildSettingInfo.m_EnableSound)
+#if UNITY_EDITOR_WIN
+                    RunCommand("rundll32 user32.dll,MessageBeep");
+#elif UNITY_EDITOR_OSX
                     RunCommand("afplay /System/Library/Sounds/Glass.aiff");
-
+#endif
                 if (_UnityBuildSettingInfo.m_EnableSendMessage)
                     SendMessage(
                         $"[Build Success!] \nName: {Application.productName} \nVersion: {Application.version} \nPlatform : {report.summary.platform}");
