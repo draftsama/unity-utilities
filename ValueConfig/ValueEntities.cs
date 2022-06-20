@@ -2,6 +2,7 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using System.Linq;
+using System;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -32,7 +33,7 @@ namespace Modules.Utilities
     }
 
     [System.Serializable]
-    public class ValueCollection
+    public class ValueCollection 
     {
         [SerializeField] private List<Value> m_Items = new List<Value>();
         public Value this[string key]
@@ -97,6 +98,7 @@ namespace Modules.Utilities
             this.m_Items.Add(v);
 
         }
+
 
     }
 
