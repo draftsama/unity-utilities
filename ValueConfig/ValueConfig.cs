@@ -14,7 +14,6 @@ namespace Modules.Utilities
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void OnInitRuntime()
         {
-            Debug.Log("OnInitRuntime");
             _Current = InitValueConfig();
         }
 
