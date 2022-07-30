@@ -15,7 +15,10 @@ namespace Modules.Utilities
     {
 
         [SerializeField] private List<ResourceResponse> m_ResourceResponseList;
-
+        protected override void Awake() {
+            base.Awake();
+            DontDestroyOnLoad(gameObject);
+        }
         void Start()
         {
             m_ResourceResponseList = new List<ResourceResponse>();
