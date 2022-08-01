@@ -75,7 +75,7 @@ namespace Modules.Utilities
                     audioPlayer.volume = _value;
                 }, () =>
                 {
-                    if (_CurrentBGMAudio != null)_CurrentBGMAudio.Stop();
+                    if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
                     _CurrentBGMAudio = audioPlayer;
                 }).AddTo(instance);
         }
@@ -91,6 +91,22 @@ namespace Modules.Utilities
             audioPlayer.volume = _volume;
             audioPlayer.PlayOneShot(clip);
         }
+        public static void StopBGM(float _fade = 0)
+        {
+            var instance = GetInstance();
+
+            _fade = Mathf.Clamp(_fade, 0, float.PositiveInfinity);
+            LerpThread.FloatLerp(Mathf.RoundToInt(_fade * GlobalConstant.SECONDS_TO_MILLISECONDS), 0, 1)
+                .Subscribe(_value =>
+                {
+                    if (_CurrentBGMAudio != null) _CurrentBGMAudio.volume = 1 - _value;
+                }, () =>
+                {
+                    _CurrentBGMAudio?.Stop();
+                    _CurrentBGMAudio = null;
+                }).AddTo(instance);
+        }
+
 
         private AudioSource GetAudioSource()
         {

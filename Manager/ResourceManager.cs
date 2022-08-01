@@ -27,9 +27,9 @@ namespace Modules.Utilities
         {
             Instance = null;
         }
-        public IObservable<Unit> LoadAllResource()
+        public IObservable<List<ResourceResponse>> LoadAllResource()
         {
-            return Observable.Create<Unit>(_observer =>
+            return Observable.Create<List<ResourceResponse>>(_observer =>
             {
 
                 if (!Directory.Exists(GetFolderResourcePath()))
@@ -64,7 +64,7 @@ namespace Modules.Utilities
                             downloaded++;
                             if (downloaded >= resourceResponseList.Count)
                             {
-                                _observer.OnNext(default);
+                                _observer.OnNext(m_ResourceResponseList);
                                 _observer.OnCompleted();
                             }
                         }, _observer.OnError);
@@ -72,7 +72,7 @@ namespace Modules.Utilities
                 else
                 {
                     //no file
-                    _observer.OnNext(default);
+                    _observer.OnNext(m_ResourceResponseList);
                     _observer.OnCompleted();
                 }
 
