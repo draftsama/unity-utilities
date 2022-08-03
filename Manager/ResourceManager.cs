@@ -11,27 +11,45 @@ using UnityEngine.Events;
 namespace Modules.Utilities
 {
 
-    public class ResourceManager : Singleton<ResourceManager>
+    public class ResourceManager : MonoBehaviour
     {
 
+        private static ResourceManager _Instance;
+
         [SerializeField] private List<ResourceResponse> m_ResourceResponseList;
-        protected override void Awake() {
-            base.Awake();
+        private void Awake()
+        {
+            _Instance = this;
+            m_ResourceResponseList = new List<ResourceResponse>();
+
             DontDestroyOnLoad(gameObject);
         }
         void Start()
         {
-            m_ResourceResponseList = new List<ResourceResponse>();
+        }
+        private static ResourceManager GetInstance()
+        {
+            if (_Instance == null)
+            {
+                GameObject go = new GameObject("ResourceManager", typeof(ResourceManager));
+                _Instance = go.GetComponent<ResourceManager>();
+            }
+
+            return _Instance;
         }
         private void OnDestroy()
         {
-            Instance = null;
+            _Instance = null;
         }
-        public IObservable<List<ResourceResponse>> LoadAllResource()
+
+
+
+        //-------- Public Methods --------//
+        public static IObservable<List<ResourceResponse>> LoadAllResource()
         {
             return Observable.Create<List<ResourceResponse>>(_observer =>
             {
-
+                var instance = GetInstance();
                 if (!Directory.Exists(GetFolderResourcePath()))
                     throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
 
@@ -60,11 +78,11 @@ namespace Modules.Utilities
                         .Concat()
                         .Subscribe(_ =>
                         {
-                            m_ResourceResponseList.Add(_);
+                            instance.m_ResourceResponseList.Add(_);
                             downloaded++;
                             if (downloaded >= resourceResponseList.Count)
                             {
-                                _observer.OnNext(m_ResourceResponseList);
+                                _observer.OnNext(instance.m_ResourceResponseList);
                                 _observer.OnCompleted();
                             }
                         }, _observer.OnError);
@@ -72,7 +90,7 @@ namespace Modules.Utilities
                 else
                 {
                     //no file
-                    _observer.OnNext(m_ResourceResponseList);
+                    _observer.OnNext(instance.m_ResourceResponseList);
                     _observer.OnCompleted();
                 }
 
@@ -81,10 +99,12 @@ namespace Modules.Utilities
         }
 
 
-        public IObservable<Unit> LoadResourceByPaths(string[] _paths)
+        public static IObservable<Unit> LoadResourceByPaths(string[] _paths)
         {
             return Observable.Create<Unit>(_observer =>
             {
+                var instance = GetInstance();
+
                 IDisposable disposable = null;
                 List<ResourceResponse> responselist = new List<ResourceResponse>();
 
@@ -93,7 +113,7 @@ namespace Modules.Utilities
                     var path = _paths[i];
                     if (!File.Exists(path)) continue;
 
-                    var exists = m_ResourceResponseList.Where(_ => _.m_FilePath == path).FirstOrDefault();
+                    var exists = instance.m_ResourceResponseList.Where(_ => _.m_FilePath == path).FirstOrDefault();
                     if (exists == null)
                     {
                         FileInfo fileInfo = new FileInfo(path);
@@ -116,7 +136,7 @@ namespace Modules.Utilities
                         .Concat()
                         .Subscribe(_ =>
                         {
-                            m_ResourceResponseList.Add(_);
+                            instance.m_ResourceResponseList.Add(_);
                             downloaded++;
                             if (downloaded >= responselist.Count)
                             {
@@ -135,31 +155,33 @@ namespace Modules.Utilities
                 return Disposable.Create(() => { disposable?.Dispose(); });
             });
         }
-        public void ClearAllResource()
+        public static void ClearAllResource()
         {
-            for (int i = 0; i < m_ResourceResponseList.Count; i++)
+            var instance = GetInstance();
+            for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
             {
-                if (m_ResourceResponseList[i].m_Texture != null) DestroyImmediate(m_ResourceResponseList[i].m_Texture, true);
-                if (m_ResourceResponseList[i].m_AudioClip != null) DestroyImmediate(m_ResourceResponseList[i].m_AudioClip, true);
+                if (instance.m_ResourceResponseList[i].m_Texture != null) DestroyImmediate(instance.m_ResourceResponseList[i].m_Texture, true);
+                if (instance.m_ResourceResponseList[i].m_AudioClip != null) DestroyImmediate(instance.m_ResourceResponseList[i].m_AudioClip, true);
             }
 
-            m_ResourceResponseList.Clear();
-            m_ResourceResponseList = new List<ResourceResponse>();
+            instance.m_ResourceResponseList.Clear();
+            instance.m_ResourceResponseList = new List<ResourceResponse>();
 
         }
 
-        public IObservable<ResourceResponse> GetResource(string _name, ResourceResponse.ResourceType _type)
+        public static IObservable<ResourceResponse> GetResource(string _name, ResourceResponse.ResourceType _type)
         {
             return Observable.Create<ResourceResponse>(_observer =>
             {
-
+                var instance = GetInstance();
                 ResourceResponse response = null;
                 IDisposable disposable = null;
-                for (int i = 0; i < m_ResourceResponseList.Count; i++)
+                
+                for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
                 {
-                    if (m_ResourceResponseList[i].m_Name.Equals(_name) && m_ResourceResponseList[i].m_ResourceType == _type)
+                    if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)
                     {
-                        response = m_ResourceResponseList[i];
+                        response = instance.m_ResourceResponseList[i];
                         break;
                     }
                 }
@@ -196,7 +218,7 @@ namespace Modules.Utilities
 
                         disposable = LoadResources(CreateResourceResponse(fileInfo.FullName)).Subscribe(_ =>
                          {
-                             m_ResourceResponseList.Add(_);
+                             instance.m_ResourceResponseList.Add(_);
                              _observer.OnNext(_);
                              _observer.OnCompleted();
                          }, _observer.OnError);
@@ -218,7 +240,9 @@ namespace Modules.Utilities
 
 
         }
-        private ResourceResponse CreateResourceResponse(string _path)
+
+        //-------- Private Methods --------//
+        private static ResourceResponse CreateResourceResponse(string _path)
         {
             var fileInfo = new FileInfo(_path);
 
@@ -259,7 +283,7 @@ namespace Modules.Utilities
 
             return response;
         }
-        private string GetSearchPattern(ResourceResponse.ResourceType _type)
+        private static string GetSearchPattern(ResourceResponse.ResourceType _type)
         {
             string searchPattern = string.Empty;
             if (_type == ResourceResponse.ResourceType.Texture)
@@ -274,7 +298,7 @@ namespace Modules.Utilities
             return searchPattern;
 
         }
-        private IObservable<ResourceResponse> LoadResources(ResourceResponse _dataInfo)
+        private static IObservable<ResourceResponse> LoadResources(ResourceResponse _dataInfo)
         {
             return Observable.Create<ResourceResponse>(_observer =>
             {
@@ -320,7 +344,7 @@ namespace Modules.Utilities
         }
 
 
-        private string GetFolderResourcePath()
+        private static string GetFolderResourcePath()
         {
             return Path.Combine(Environment.CurrentDirectory, "Resources");
         }

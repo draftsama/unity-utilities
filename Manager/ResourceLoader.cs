@@ -15,7 +15,7 @@ namespace Modules.Utilities
         public UnityEventAudio m_OnLoadAudioCompleted;
         void Start()
         {
-            ResourceManager.Instance.GetResource(m_FileName, m_Type).Subscribe(_ =>
+            ResourceManager.GetResource(m_FileName, m_Type).Subscribe(_ =>
             {
                 
                 if (_ != null)
