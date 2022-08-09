@@ -249,9 +249,8 @@ namespace Modules.Utilities
                 }
             }
 
-
             var path = Path.Combine(Environment.CurrentDirectory, "value.config.json");
-            File.WriteAllText(path, jsonObject.ToString());
+            File.WriteAllText(path, jsonObject.ToString(true));
 
         }
 
