@@ -85,11 +85,14 @@ namespace Modules.Utilities
 
         #endregion
 
+#if !UNITY_EDITOR && UNITY_STANDALONE_WIN
+
         #region Private Variables
         private WindowHandler _windowsHandler;
 
 
         #endregion
+#endif
 
         #region Private Methods
 
@@ -109,7 +112,11 @@ namespace Modules.Utilities
         private void OnDestroy()
         {
             _Instance = null;
+#if !UNITY_EDITOR && UNITY_STANDALONE_WIN
+
             _windowsHandler = null;
+#endif
+
         }
 
         public void SetRefeshRate(int refreshRate)
