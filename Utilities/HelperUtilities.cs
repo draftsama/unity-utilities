@@ -50,5 +50,31 @@ namespace Modules.Utilities
 
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
         }
+
+        public static float VectorToDegree(Vector2 _vector)
+        {
+            return Mathf.Atan2(_vector.y, _vector.x) * Mathf.Rad2Deg;
+        }
+        public static Vector2 DegreeToVector(float _degree)
+        {
+            //degree to radian
+            float radians = _degree * (Mathf.PI / 180f);
+            Vector2 degreeVector = new Vector2(Mathf.Cos(radians), Mathf.Sin(radians));
+
+            if (degreeVector.x > degreeVector.y)
+            {
+                var ratio = 1f / degreeVector.x;
+                return degreeVector * ratio;
+            }
+            else
+            {
+                var ratio = 1f / degreeVector.y;
+                return degreeVector * ratio;
+            }
+
+        }
+
+
+
     }
 }
