@@ -19,7 +19,7 @@ namespace Modules.Utilities
         private static SerializedProperty m_NeedUpdateProperty;
 
 
-        [MenuItem("Utilities/Config Setiing")]
+        [MenuItem("Utilities/Config Setting")]
         public static void ShowWindow()
         {
             //Show existing window instance. If one doesn't exist, make one.
@@ -76,7 +76,7 @@ namespace Modules.Utilities
 
                 serializedObject.UpdateIfRequiredOrScript();
 
-               EditorGUILayout.PropertyField(m_ValueCollectionProperty, true);
+                EditorGUILayout.PropertyField(m_ValueCollectionProperty, true);
 
                 EditorGUILayout.EndScrollView();
 
@@ -106,9 +106,9 @@ namespace Modules.Utilities
             {
 
                 if (_Asset != null)
-                {       
+                {
 
-                   // Debug.Log(serializedObject.);
+                    // Debug.Log(serializedObject.);
                     if (serializedObject != null)
                     {
                         m_NeedUpdateProperty.boolValue = true;

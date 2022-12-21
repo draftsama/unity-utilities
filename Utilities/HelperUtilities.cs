@@ -74,7 +74,13 @@ namespace Modules.Utilities
 
         }
 
+        public static int RandomIndexNotCurrent(int _currentIndex, int _max)
+        {
+            var index = UnityEngine.Random.Range(0, _max);
 
+            if (index == _currentIndex) return RandomIndexNotCurrent(_currentIndex, _max);
+            else return index;
+        }
 
     }
 }
