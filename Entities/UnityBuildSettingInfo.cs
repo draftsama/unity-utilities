@@ -7,7 +7,7 @@ namespace Modules.Utilities
     [CreateAssetMenu(fileName = "BuildSettingInfo", menuName = "[Utility] Create BuildSettingInfo.asset", order = 0)]
     public class UnityBuildSettingInfo : ScriptableObject
     {
-        public bool m_EnableSound;
+        public bool m_EnableSoundNotify;
         public bool m_EnableCopyFolder;
         public List<string> m_CopyFolderNameList;
         public bool m_EnableSendMessage;

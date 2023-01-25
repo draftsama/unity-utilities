@@ -99,9 +99,9 @@ namespace Modules.Utilities
         }
 
 
-        public static IObservable<Unit> LoadResourceByPaths(string[] _paths)
+        public static IObservable<List<ResourceResponse>> LoadResourceByPaths(string[] _paths)
         {
-            return Observable.Create<Unit>(_observer =>
+            return Observable.Create<List<ResourceResponse>>(_observer =>
             {
                 var instance = GetInstance();
 
@@ -140,7 +140,7 @@ namespace Modules.Utilities
                             downloaded++;
                             if (downloaded >= responselist.Count)
                             {
-                                _observer.OnNext(default);
+                                _observer.OnNext(responselist);
                                 _observer.OnCompleted();
                             }
                         }, _observer.OnError);
@@ -148,7 +148,7 @@ namespace Modules.Utilities
                 else
                 {
                     //no file
-                    _observer.OnNext(default);
+                    _observer.OnNext(null);
                     _observer.OnCompleted();
                 }
 
@@ -176,7 +176,7 @@ namespace Modules.Utilities
                 var instance = GetInstance();
                 ResourceResponse response = null;
                 IDisposable disposable = null;
-                
+
                 for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
                 {
                     if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)

@@ -125,7 +125,7 @@ namespace Modules.Utilities
             {
 
                 // FAILED TO BUILD, STOP LISTENING FOR ERRORS
-                if (_UnityBuildSettingInfo.m_EnableSound)
+                if (_UnityBuildSettingInfo.m_EnableSoundNotify)
 #if UNITY_EDITOR_WIN
                     RunCommand("rundll32 user32.dll,MessageBeep");
 #elif UNITY_EDITOR_OSX
@@ -155,7 +155,7 @@ namespace Modules.Utilities
                         CopyDirectory(dirSrc, dirTarget, true);
                     }
 
-                if (_UnityBuildSettingInfo.m_EnableSound)
+                if (_UnityBuildSettingInfo.m_EnableSoundNotify)
 #if UNITY_EDITOR_WIN
                     RunCommand("rundll32 user32.dll,MessageBeep");
 #elif UNITY_EDITOR_OSX
