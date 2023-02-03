@@ -17,6 +17,7 @@ namespace Modules.Utilities
         [SerializeField] public PathType m_PathType = PathType.Relative;
 
         [SerializeField] public bool m_PlayOnAwake = true;
+        [SerializeField] public bool m_PrepareOnAwake = true;
         [SerializeField] public bool m_Loop = false;
         [SerializeField] public bool m_FadeAnimation = false;
         [SerializeField] public int m_FadeTime = 500;
@@ -46,17 +47,17 @@ namespace Modules.Utilities
             _VideoPlayer.isLooping = false;
             _VideoPlayer.playOnAwake = false;
             _CanvasGroup.SetAlpha(0);
-            
-            SetupURL(m_FileName, m_PathType, m_FolderName);
 
+            SetupURL(m_FileName, m_PathType, m_FolderName);
+            _VideoPlayer.Prepare();
         }
 
-        public void SetupURL(string _filename,PathType _pathType = PathType.Relative,string _foldername = "Resources")
+        public void SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
         {
             m_FileName = _filename;
             m_PathType = _pathType;
             m_FolderName = _foldername;
-            
+
             var filePath = string.Empty;
 
             if (m_PathType == PathType.StreamAssets)
@@ -87,6 +88,7 @@ namespace Modules.Utilities
         {
             _VideoPlayer.started += VideoPlayerOnstarted;
             _VideoPlayer.loopPointReached += VideoPlayerOnloopPointReached;
+
         }
 
         private void VideoPlayerOnstarted(VideoPlayer _source)
@@ -97,16 +99,20 @@ namespace Modules.Utilities
         private void VideoPlayerOnloopPointReached(VideoPlayer _source)
         {
             //end video
-            if (m_Loop) _VideoPlayer.Play();
+            if (m_Loop)
+            {
+                if (!_Stoping)
+                    _VideoPlayer.Play();
+            }
             else
             {
-                if(!_Stoping)
-                  SetVideoAlpha(0);
+                if (!_Stoping)
+                    SetVideoAlpha(0);
                 _OnEnd?.Invoke(default);
             }
         }
 
-        
+
         private void OnDisable()
         {
             _VideoPlayer.started -= VideoPlayerOnstarted;
@@ -122,7 +128,7 @@ namespace Modules.Utilities
             if (m_PlayOnAwake) _VideoPlayer.Play();
         }
 
-//------------------------------------ Public Method ----------------------------------
+        //------------------------------------ Public Method ----------------------------------
         public void Play()
         {
             if (!_VideoPlayer.isPlaying)
@@ -137,10 +143,10 @@ namespace Modules.Utilities
 
         public void Stop()
         {
-            if (_VideoPlayer.isPlaying)
+            if (_VideoPlayer.isPlaying && !_Stoping)
             {
                 _Stoping = true;
-                SetVideoAlpha(0,_onCompleted: () =>
+                SetVideoAlpha(0, _onCompleted: () =>
                 {
                     _VideoPlayer.Stop();
                     _Stoping = false;
@@ -148,11 +154,11 @@ namespace Modules.Utilities
             }
         }
 
-        private void  SetVideoAlpha(float _alpha ,bool _force = false,Action _onCompleted = null)
+        private void SetVideoAlpha(float _alpha, bool _force = false, Action _onCompleted = null)
         {
             _FadeDisposable?.Dispose();
             if (m_FadeAnimation && !_force)
-                _FadeDisposable =  _CanvasGroup.LerpAlphaWithoutInteractable(m_FadeTime, _alpha,_onComplete: _onCompleted).AddTo(this);
+                _FadeDisposable = _CanvasGroup.LerpAlphaWithoutInteractable(m_FadeTime, _alpha, _onComplete: _onCompleted).AddTo(this);
             else
             {
                 _CanvasGroup.SetAlpha(_alpha);
@@ -166,6 +172,8 @@ namespace Modules.Utilities
                 Debug.Log("Video Not Prepared.");
                 return;
             }
+            if (!_VideoPlayer.isPlaying)
+                _VideoPlayer.Play();
 
             _VideoPlayer.frame = _frame;
         }
