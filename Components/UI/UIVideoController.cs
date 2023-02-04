@@ -20,6 +20,8 @@ namespace Modules.Utilities
         [SerializeField] public bool m_PrepareOnAwake = true;
         [SerializeField] public bool m_Loop = false;
         [SerializeField] public bool m_FadeAnimation = false;
+        [SerializeField] public bool m_FadeAudio = false;
+
         [SerializeField] public int m_FadeTime = 500;
 
         private RawImage _Preview;
@@ -28,6 +30,7 @@ namespace Modules.Utilities
         private Action<Unit> _OnEnd;
 
         private IDisposable _FadeDisposable;
+        private IDisposable _FadeAudioDisposable;
 
         private bool _Stoping = false;
         public enum PathType
@@ -163,6 +166,15 @@ namespace Modules.Utilities
             {
                 _CanvasGroup.SetAlpha(_alpha);
                 _onCompleted?.Invoke();
+            }
+
+            _FadeAudioDisposable?.Dispose();
+            if (m_FadeAudio && !_force)
+            {
+                _FadeAudioDisposable = LerpThread.FloatLerp(m_FadeTime, 1f - _alpha, _alpha).Subscribe(_ =>
+                {
+                    _VideoPlayer.SetDirectAudioVolume(0, _);
+                });
             }
         }
         public void Seek(int _frame)
