@@ -1,8 +1,11 @@
+using System;
+using System.IO;
 using System.Collections;
 using System.Collections.Generic;
 using UniRx;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.UI;
 
 namespace Modules.Utilities
 {
@@ -11,26 +14,38 @@ namespace Modules.Utilities
 
         public string m_FileName;
         public ResourceManager.ResourceResponse.ResourceType m_Type;
+
         public UnityEventTexture2D m_OnLoadTextureCompleted;
         public UnityEventAudio m_OnLoadAudioCompleted;
+
+
+        private void Awake()
+        {
+
+        }
         void Start()
         {
             ResourceManager.GetResource(m_FileName, m_Type).Subscribe(_ =>
             {
-                
+
                 if (_ != null)
                 {
-
-                    if (_.m_ResourceType == ResourceManager.ResourceResponse.ResourceType.Texture)
-                    {
-                        m_OnLoadTextureCompleted?.Invoke(_.m_Texture);
-                    }
-                    else if (_.m_ResourceType == ResourceManager.ResourceResponse.ResourceType.AudioClip)
-                    {
-                        m_OnLoadAudioCompleted?.Invoke(_.m_AudioClip);
-                    }
+                    ApplyResource(_);
                 }
+
             }).AddTo(this);
+        }
+
+        void ApplyResource(ResourceManager.ResourceResponse res)
+        {
+            if (res.m_ResourceType == ResourceManager.ResourceResponse.ResourceType.Texture)
+            {
+                m_OnLoadTextureCompleted?.Invoke(res.m_Texture);
+            }
+            else if (res.m_ResourceType == ResourceManager.ResourceResponse.ResourceType.AudioClip)
+            {
+                m_OnLoadAudioCompleted?.Invoke(res.m_AudioClip);
+            }
         }
 
 

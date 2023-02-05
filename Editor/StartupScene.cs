@@ -89,6 +89,8 @@ public static class StartupScene
     private static void SetClear()
     {
         PlayerPrefs.SetString("STARTUP_SCENE", string.Empty);
+        SessionState.SetString("OLD_SCENE", string.Empty);
+
         Debug.Log($"Clear Startup Scene");
 
     }

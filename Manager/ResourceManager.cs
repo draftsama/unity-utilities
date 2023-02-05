@@ -53,13 +53,16 @@ namespace Modules.Utilities
                 if (!Directory.Exists(GetFolderResourcePath()))
                     throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
 
-                DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
                 List<ResourceResponse> resourceResponseList = new List<ResourceResponse>();
+                var files = Directory.GetFiles(GetFolderResourcePath(), "*.*", SearchOption.AllDirectories)
+                .Where(file => new string[] { ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".oog" }
+                        .Contains(Path.GetExtension(file)))
+                        .ToList();
 
-                for (int j = 0; j < directoryInfo.GetFiles().Length; j++)
+                for (int i = 0; i < files.Count; i++)
                 {
 
-                    var response = CreateResourceResponse(directoryInfo.GetFiles()[j].FullName);
+                    var response = CreateResourceResponse(files[i]);
 
                     if (response != null) resourceResponseList.Add(response);
 
@@ -179,6 +182,8 @@ namespace Modules.Utilities
 
                 for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
                 {
+
+
                     if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)
                     {
                         response = instance.m_ResourceResponseList[i];
@@ -195,13 +200,19 @@ namespace Modules.Utilities
                 else
                 {
                     if (!Directory.Exists(GetFolderResourcePath()))
-                        throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
+                    {
+                        //no folder resource
+                        _observer.OnNext(null);
+                        _observer.OnCompleted();
+                        return Disposable.Create(() => { disposable?.Dispose(); });
+
+                    }
 
                     DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
 
                     string searchPattern = GetSearchPattern(_type);
 
-                    if (directoryInfo == null || directoryInfo.GetFiles().Length == 0)
+                    if (directoryInfo == null)
                     {
                         //no file
                         _observer.OnNext(null);
@@ -211,7 +222,18 @@ namespace Modules.Utilities
                     }
 
 
-                    FileInfo fileInfo = directoryInfo.GetFiles().Where(_ => _.Name.Equals(_name) && Regex.Match(_.Extension, searchPattern).Success).First();
+
+                    var parts = Regex.Split(_name, @"\.");
+                    if (parts.Length < 2)
+                    {
+                        _observer.OnNext(null);
+                        _observer.OnCompleted();
+                        return Disposable.Create(() => { disposable?.Dispose(); });
+                    }
+                    var extension = parts.Last();
+                    var fileInfo = directoryInfo.GetFiles("*." + extension, SearchOption.AllDirectories)
+                    .Where(_file => _file.Name.Equals(_name))
+                    .FirstOrDefault();
 
                     if (fileInfo != null)
                     {
