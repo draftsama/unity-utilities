@@ -327,7 +327,7 @@ namespace Modules.Utilities
 
                 IDisposable disposable = null;
                 var filePath = $"file://{_dataInfo.m_FilePath}";
-                Debug.Log($"Load Resource : {_dataInfo.m_FilePath}");
+                // Debug.Log($"Load Resource : {_dataInfo.m_FilePath}");
                 if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.Texture)
                 {
                     disposable = ObservableWebRequest
