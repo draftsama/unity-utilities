@@ -12,46 +12,57 @@ namespace Modules.Utilities
 {
     public static class FileLoader
     {
+
+
+        //not support audio files
         public static async Task<byte[]> LoadFileAsync(string filePath, IProgress<float> progress = null, CancellationToken cancellationToken = default)
         {
+
 
             if (!File.Exists(filePath))
             {
                 throw new FileNotFoundException("File not found", filePath);
             }
 
+            var bytes = default(byte[]);
 
-            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
+            using (var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, bufferSize: 4096, useAsync: true))
             {
-                var buffer = new byte[fileStream.Length];
-                var bytesRead = 0;
-                var bytesRemaining = buffer.Length;
-
-                while (bytesRemaining > 0)
+                using (var binaryReader = new BinaryReader(fileStream))
                 {
-                    cancellationToken.ThrowIfCancellationRequested();
+                    var totalBytes = (int)fileStream.Length;
+                    var bytesProcessed = 0;
+                    var buffer = new byte[4096];
 
-                    var numRead = await fileStream.ReadAsync(buffer, bytesRead, bytesRemaining, cancellationToken);
-                    if (numRead == 0)
+                    while (bytesProcessed < totalBytes)
                     {
-                        // End of file
-                        break;
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var bytesRead = await binaryReader.BaseStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken);
+                        if (bytesRead == 0)
+                        {
+                            break;
+                        }
+
+                        bytesProcessed += bytesRead;
+                        if (progress != null)
+                        {
+                            var percentage = (float)bytesRead / totalBytes;
+                            progress?.Report(percentage);
+                        }
                     }
 
-                    bytesRead += numRead;
-                    bytesRemaining -= numRead;
-
-                    // Report progress
-                    if (progress != null)
-                    {
-                        var percentComplete = (float)bytesRead / (float)buffer.Length;
-                        progress.Report(percentComplete);
-                    }
+                    bytes = buffer;
                 }
-
-                return buffer;
             }
+
+            return bytes;
         }
+
+
+
+
+
         public static async Task<byte[]> DownloadFileAsync(string url, IProgress<float> progress = null, CancellationToken cancellationToken = default)
         {
             if (!NetworkUtility.IsValidURL(url))

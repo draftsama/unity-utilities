@@ -1,3 +1,5 @@
+using System;
+using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using Modules.Utilities;
@@ -11,14 +13,26 @@ namespace Modules.Utilities
         private static AudioManager _Instance;
         private static AudioSource _CurrentBGMAudio;
 
+        [SerializeField] public List<string> m_ResourceNames = new List<string>();
+
 
         [SerializeField] public List<AudioClip> m_Audiolist = new List<AudioClip>();
-        [SerializeField] private List<AudioSource> m_AudioPlayerlist = new List<AudioSource>();
+        private List<AudioSource> m_AudioPlayerlist = new List<AudioSource>();
 
         private void Awake()
         {
             _Instance = this;
             DontDestroyOnLoad(this);
+
+            if (m_ResourceNames.Count > 0)
+                ResourceManager.GetResources(m_ResourceNames.ToArray()).Subscribe(_res =>
+                {
+                    if (_res != null && _res.Count > 0)
+                    {
+                        AddAudioList(_res.Select(x => x.m_AudioClip).ToList());
+                    }
+
+                }).AddTo(this);
 
             Observable.EveryUpdate().Subscribe(_ =>
             {
@@ -27,7 +41,10 @@ namespace Modules.Utilities
                     player.gameObject.SetActive(player.isPlaying);
                 }
             }).AddTo(this);
+
+
         }
+
 
         private static AudioManager GetInstance()
         {
@@ -53,7 +70,7 @@ namespace Modules.Utilities
                 instance.m_Audiolist.Add(_audioClip);
         }
 
-        public static void PlayBGM(string _name, float _transitionTime, float _volume = 1f, bool _loop = true)
+        public static void PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true)
         {
             var instance = GetInstance();
             var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
@@ -62,7 +79,7 @@ namespace Modules.Utilities
 
             var audioPlayer = instance.GetAudioSource();
             audioPlayer.loop = _loop;
-            audioPlayer.volume = _volume;
+            audioPlayer.volume = _CurrentBGMAudio == null ? 0f : _volume;
 
             audioPlayer.PlayOneShot(clip);
 
@@ -77,7 +94,27 @@ namespace Modules.Utilities
                 {
                     if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
                     _CurrentBGMAudio = audioPlayer;
+
+                    Debug.Log("PlayBGM :" + _CurrentBGMAudio);
                 }).AddTo(instance);
+        }
+
+        static IDisposable SetBGMVolumeDisposable;
+        public static void SetBGMVolume(float _volumeTarget, float _transitionTime = 0f)
+        {
+            if (_CurrentBGMAudio == null) return;
+            SetBGMVolumeDisposable?.Dispose();
+            var start = _CurrentBGMAudio.volume;
+
+            _transitionTime = Mathf.Clamp(_transitionTime, 0, float.PositiveInfinity);
+            SetBGMVolumeDisposable = LerpThread.FloatLerp(Mathf.RoundToInt(_transitionTime * GlobalConstant.SECONDS_TO_MILLISECONDS), start, _volumeTarget)
+                 .Subscribe(_value =>
+                 {
+                     _CurrentBGMAudio.volume = _value;
+                 }, () =>
+                 {
+                     _CurrentBGMAudio.volume = _volumeTarget;
+                 }).AddTo(GetInstance());
         }
 
         public static void PlayFX(string _name, float _volume = 1f)

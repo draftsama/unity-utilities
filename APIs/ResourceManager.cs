@@ -1,12 +1,11 @@
 using System;
-using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using UniRx;
 using UnityEngine;
-using UnityEngine.Events;
+
 
 namespace Modules.Utilities
 {
@@ -172,6 +171,76 @@ namespace Modules.Utilities
 
         }
 
+
+        public static IObservable<List<ResourceResponse>> GetResources(string[] _name)
+        {
+            return Observable.Create<List<ResourceResponse>>(_observer =>
+            {
+                var instance = GetInstance();
+                IDisposable disposable = null;
+                List<ResourceResponse> responselist = new List<ResourceResponse>();
+                List<ResourceResponse> loaderList = new List<ResourceResponse>();
+
+
+                DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
+
+
+                for (int i = 0; i < _name.Length; i++)
+                {
+                    var fileName = _name[i];
+                    var resource = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == fileName);
+                    if (resource != null)
+                    {
+                        responselist.Add(resource);
+                    }
+                    else
+                    {
+                        if (directoryInfo == null || !Directory.Exists(GetFolderResourcePath()))
+                            continue;
+
+
+                        var extension = new FileInfo(fileName).Extension;
+                        var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
+                        Debug.Log($"Loaded file '{fileInfo.FullName}'");
+                        if (fileInfo != null)
+                            loaderList.Add(CreateResourceResponse(fileInfo.FullName));
+                    }
+                }
+                var downloaded = 0;
+                if (loaderList.Count > 0)
+                {
+                    disposable = loaderList
+                                           .Select(_ => LoadResources(_))
+                                           .ToList()
+                                           .Concat()
+                                           .Subscribe(_ =>
+                                           {
+                                               instance.m_ResourceResponseList.Add(_);
+                                               downloaded++;
+                                               if (downloaded >= loaderList.Count)
+                                               {
+
+                                                   responselist.AddRange(loaderList);
+                                                   _observer.OnNext(responselist);
+                                                   _observer.OnCompleted();
+                                               }
+                                           }, _observer.OnError);
+
+
+                }
+                else
+                {
+                    _observer.OnNext(responselist);
+                    _observer.OnCompleted();
+                }
+
+
+                return Disposable.Create(() => { disposable?.Dispose(); });
+
+            });
+        }
+
+
         public static IObservable<ResourceResponse> GetResource(string _name, ResourceResponse.ResourceType _type)
         {
             return Observable.Create<ResourceResponse>(_observer =>
@@ -268,17 +337,15 @@ namespace Modules.Utilities
         {
             var fileInfo = new FileInfo(_path);
 
-            var resourceType = ResourceResponse.ResourceType.None;
+            var resourceType = GetResourceType(fileInfo.Extension);
+            if (resourceType == ResourceResponse.ResourceType.None) return null;
+            // Debug.Log($"===> {fileInfo.FullName} = {resourceType}");
+
             var audioType = AudioType.UNKNOWN;
 
-            if (Regex.Match(fileInfo.Extension, GetSearchPattern(ResourceResponse.ResourceType.Texture)).Success)
-            {
-                resourceType = ResourceResponse.ResourceType.Texture;
-            }
-            else if (Regex.Match(fileInfo.Extension, GetSearchPattern(ResourceResponse.ResourceType.AudioClip)).Success)
-            {
-                resourceType = ResourceResponse.ResourceType.AudioClip;
 
+            if (resourceType == ResourceResponse.ResourceType.AudioClip)
+            {
 
                 if (Regex.Match(fileInfo.Extension, ".ogg").Success)
                 {
@@ -291,10 +358,9 @@ namespace Modules.Utilities
 
                 }
             }
-            else
-            {
-                return null;
-            }
+
+
+
 
 
             ResourceResponse response = new ResourceResponse();
@@ -320,6 +386,22 @@ namespace Modules.Utilities
             return searchPattern;
 
         }
+        private static ResourceResponse.ResourceType GetResourceType(string _extension)
+        {
+
+            if (Regex.Match(_extension, ".png|.jpg|.jpeg", RegexOptions.IgnoreCase).Success)
+            {
+                return ResourceResponse.ResourceType.Texture;
+            }
+            else if (Regex.Match(_extension, ".ogg|.wav|.mp3", RegexOptions.IgnoreCase).Success)
+            {
+                return ResourceResponse.ResourceType.AudioClip;
+            }
+            else
+                return ResourceResponse.ResourceType.None;
+
+
+        }
         private static IObservable<ResourceResponse> LoadResources(ResourceResponse _dataInfo)
         {
             return Observable.Create<ResourceResponse>(_observer =>
@@ -327,7 +409,6 @@ namespace Modules.Utilities
 
                 IDisposable disposable = null;
                 var filePath = $"file://{_dataInfo.m_FilePath}";
-                // Debug.Log($"Load Resource : {_dataInfo.m_FilePath}");
                 if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.Texture)
                 {
                     disposable = ObservableWebRequest
