@@ -18,7 +18,7 @@ namespace Modules.Utilities
 
         [SerializeField] public List<AudioClip> m_Audiolist = new List<AudioClip>();
         private List<AudioSource> m_AudioPlayerlist = new List<AudioSource>();
-
+        private static Action<Unit> OnLoadResourcesCompletedAction;
         private void Awake()
         {
             _Instance = this;
@@ -30,6 +30,7 @@ namespace Modules.Utilities
                     if (_res != null && _res.Count > 0)
                     {
                         AddAudioList(_res.Select(x => x.m_AudioClip).ToList());
+                        OnLoadResourcesCompletedAction?.Invoke(default);
                     }
 
                 }).AddTo(this);
@@ -45,6 +46,10 @@ namespace Modules.Utilities
 
         }
 
+        public static IObservable<Unit> OnLoadResourcesCompleted()
+        {
+            return Observable.FromEvent<Unit>(_e => OnLoadResourcesCompletedAction += _e, _e => OnLoadResourcesCompletedAction -= _e);
+        }
 
         private static AudioManager GetInstance()
         {
@@ -95,7 +100,6 @@ namespace Modules.Utilities
                     if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
                     _CurrentBGMAudio = audioPlayer;
 
-                    Debug.Log("PlayBGM :" + _CurrentBGMAudio);
                 }).AddTo(instance);
         }
 

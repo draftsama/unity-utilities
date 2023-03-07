@@ -201,7 +201,7 @@ namespace Modules.Utilities
 
                         var extension = new FileInfo(fileName).Extension;
                         var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
-                        Debug.Log($"Loaded file '{fileInfo.FullName}'");
+                        //Debug.Log($"Loaded file '{fileInfo.FullName}'");
                         if (fileInfo != null)
                             loaderList.Add(CreateResourceResponse(fileInfo.FullName));
                     }
