@@ -1,4 +1,6 @@
-﻿using System.Linq;
+﻿using System.Text.RegularExpressions;
+using System.Reflection;
+using System.Linq;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -167,6 +169,15 @@ public class ResourceImageLoaderEditor : Editor
     SerializedProperty _AutoSizeModeProperty;
     ResourceImageLoader _Instance;
     Texture2D _Texture;
+
+    private string _ResourceFolder;
+
+    private string _CurrentNameInput;
+
+    private string[] _FilePathsFilter;
+
+    private int _InputNameID;
+
     private void OnEnable()
     {
         _Instance = target as ResourceImageLoader;
@@ -176,13 +187,47 @@ public class ResourceImageLoaderEditor : Editor
         _BorderProperty = serializedObject.FindProperty("m_Border");
         _AutoSizeModeProperty = serializedObject.FindProperty("m_AutoSizeMode");
 
+        _ResourceFolder = Path.Combine(Environment.CurrentDirectory, "Resources");
+
+        _CurrentNameInput = string.Empty;
+        _InputNameID = GUIUtility.GetControlID(FocusType.Keyboard);
     }
 
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
 
+        EditorGUI.BeginChangeCheck();
+
         EditorGUILayout.PropertyField(_FileNameProperty);
+
+        if (EditorGUI.EndChangeCheck())
+            _InputNameID = GUIUtility.keyboardControl;
+
+
+        if (_FilePathsFilter != null && _FilePathsFilter.Length > 0 && GUIUtility.keyboardControl == _InputNameID)
+        {
+            EditorGUILayout.BeginVertical("box");
+
+            GUI.color = Color.cyan;
+            // GUI.contentColor = Color.white;
+            foreach (var file in _FilePathsFilter)
+            {
+                var name = Path.GetFileName(file);
+
+                if (GUILayout.Button(name))
+                {
+                    _FileNameProperty.stringValue = name;
+                    LoadImage(_FileNameProperty.stringValue);
+                    GUIUtility.keyboardControl = 0;
+
+                }
+            }
+            GUI.color = Color.white;
+            EditorGUILayout.EndVertical();
+        }
+
+
         EditorGUILayout.PropertyField(_TypeProperty);
 
         //sprite type
@@ -197,70 +242,68 @@ public class ResourceImageLoaderEditor : Editor
 
         EditorGUILayout.BeginHorizontal();
         GUI.color = Color.green;
-        if (GUILayout.Button("Browse"))
-        {
-            var folder = Path.Combine(Environment.CurrentDirectory, "Resources");
-            if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
-            string path = EditorUtility.OpenFilePanelWithFilters("Select Image", folder, new string[] { "Image Files", "png,jpg,jpeg" });
-            if (!string.IsNullOrEmpty(path))
-            {
-                _FileNameProperty.stringValue = Path.GetFileName(path);
+        // if (GUILayout.Button("Browse"))
+        // {
+        //     if (!Directory.Exists(_ResourceFolder)) Directory.CreateDirectory(_ResourceFolder);
+        //     string path = EditorUtility.OpenFilePanelWithFilters("Select Image", _ResourceFolder, new string[] { "Image Files", "png,jpg,jpeg" });
+        //     if (!string.IsNullOrEmpty(path))
+        //     {
+        //         _FileNameProperty.stringValue = Path.GetFileName(path);
 
-                var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
-                var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
-                if (!Directory.Exists(assetfolder)) Directory.CreateDirectory(assetfolder);
-                var filePath = Path.Combine(assetfolder, _FileNameProperty.stringValue);
-                var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
+        //         var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
+        //         var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
+        //         if (!Directory.Exists(assetfolder)) Directory.CreateDirectory(assetfolder);
+        //         var filePath = Path.Combine(assetfolder, _FileNameProperty.stringValue);
+        //         var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
 
-                if (File.Exists(filePath))
-                {
-                    if (!EditorUtility.DisplayDialog("File already exists", $"Resource Name : {_FileNameProperty.stringValue}", "Replace", "Cancel"))
-                    {
-                        return;
-                    }
-                }
+        //         if (File.Exists(filePath))
+        //         {
+        //             if (!EditorUtility.DisplayDialog("File already exists", $"Resource Name : {_FileNameProperty.stringValue}", "Replace", "Cancel"))
+        //             {
+        //                 return;
+        //             }
+        //         }
 
 
-                File.Copy(path, filePath, true);
-                AssetDatabase.Refresh();
-                _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-                _Instance.ApplyImage(_Texture);
-
+        //         File.Copy(path, filePath, true);
+        //         AssetDatabase.Refresh();
+        //         _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+        //         _Instance.ApplyImage(_Texture);
 
 
 
-            }
-        }
+
+        //     }
+        // }
 
         if (GUILayout.Button("Load"))
         {
-            var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
-            var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
 
-
-            _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-            if (_Texture == null)
-            {
-                var folder = Path.Combine(Environment.CurrentDirectory, "Resources");
-                var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
-                var filePath = Path.Combine(assetfolder, _FileNameProperty.stringValue);
-
-                var path = Directory.GetFiles(folder, "*.*", SearchOption.AllDirectories)
-                      .FirstOrDefault(file => Path.GetFileName(file) == _FileNameProperty.stringValue);
-
-                if (!string.IsNullOrEmpty(path))
-                {
-                    File.Copy(path, filePath, true);
-                    AssetDatabase.Refresh();
-                    _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-                }
-            }
-
-            _Instance.ApplyImage(_Texture);
-
+            LoadImage(_FileNameProperty.stringValue);
 
         }
         EditorGUILayout.EndHorizontal();
+        GUI.color = Color.white;
+
+        if (_CurrentNameInput != _FileNameProperty.stringValue || _FileNameProperty.stringValue == string.Empty)
+        {
+            _CurrentNameInput = _FileNameProperty.stringValue;
+
+            Regex regexPattern = new Regex(_CurrentNameInput, RegexOptions.IgnoreCase);
+
+
+            _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
+                                .Where(file => new string[] { ".png", ".jpg", ".jpeg" }.Contains(Path.GetExtension(file)) && regexPattern.IsMatch(Path.GetFileName(file)) && Path.GetFileName(file) != _CurrentNameInput)
+                                .Take(10)
+                                .ToArray();
+
+
+
+        }
+
+
+
+
         if (GUI.changed)
         {
 
@@ -268,6 +311,32 @@ public class ResourceImageLoaderEditor : Editor
             serializedObject.ApplyModifiedProperties();
             _Instance.UpdateLayout();
         }
+    }
+
+    public void LoadImage(string _filename)
+    {
+        var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
+        var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
+
+
+        _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+        if (_Texture == null)
+        {
+            var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
+            var filePath = Path.Combine(assetfolder, _filename);
+
+            var path = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
+                  .FirstOrDefault(file => Path.GetFileName(file) == _filename);
+
+            if (!string.IsNullOrEmpty(path))
+            {
+                File.Copy(path, filePath, true);
+                AssetDatabase.Refresh();
+                _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+            }
+        }
+
+        _Instance.ApplyImage(_Texture);
     }
 
 }
