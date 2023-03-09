@@ -1,4 +1,5 @@
-﻿using System;
+﻿using System.Linq;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
@@ -43,6 +44,58 @@ namespace Modules.Utilities
         private RectTransform _RectTransform;
 
         private AspectRatioFitter _AspectRatioFitter;
+
+        public void ApplyImage(Texture2D _texture)
+        {
+            _Source = _texture;
+
+            if (m_Type == Type.Image)
+            {
+                var image = gameObject.GetComponent<Image>();
+
+                if (image != null)
+                {
+                    if (Application.isPlaying)
+                        Destroy(image);
+                    else
+                        DestroyImmediate(image);
+                }
+
+                var rawImage = gameObject.GetComponent<RawImage>();
+                if (rawImage == null) rawImage = gameObject.AddComponent<RawImage>();
+
+                rawImage.texture = _Source;
+            }
+            else if (m_Type == Type.Sprite)
+            {
+
+                var sprite = Sprite.Create(
+                    _Source,
+                    new Rect(0, 0, _Source.width, _Source.height),
+                    Vector2.one * 0.5f,
+                    100,
+                    1,
+                    SpriteMeshType.Tight,
+                    m_Border, false);
+
+
+                var rawImage = gameObject.GetComponent<RawImage>();
+
+                if (rawImage != null)
+                {
+                    if (Application.isPlaying)
+                        Destroy(rawImage);
+                    else
+                        DestroyImmediate(rawImage);
+                }
+
+                var image = gameObject.GetComponent<Image>();
+                if (image == null) image = gameObject.AddComponent<Image>();
+                image.type = m_ImageType;
+                image.sprite = sprite;
+            }
+            UpdateLayout();
+        }
         private void Awake()
         {
             _RectTransform = GetComponent<RectTransform>();
@@ -53,47 +106,14 @@ namespace Modules.Utilities
 
                 if (_ != null && _.m_Texture != null)
                 {
-                    _Source = _.m_Texture;
-
-                    if (m_Type == Type.Image)
-                    {
-                        var image = gameObject.GetComponent<Image>();
-                        if (image != null) Destroy(image);
-
-                        var rawImage = gameObject.GetComponent<RawImage>();
-                        if (rawImage == null) rawImage = gameObject.AddComponent<RawImage>();
-
-                        rawImage.texture = _Source;
-                    }
-                    else if (m_Type == Type.Sprite)
-                    {
-
-                        var sprite = Sprite.Create(
-                            _Source,
-                            new Rect(0, 0, _Source.width, _Source.height),
-                            Vector2.one * 0.5f,
-                            100,
-                            1,
-                            SpriteMeshType.Tight,
-                            m_Border, false);
-
-
-                        var rawImage = gameObject.GetComponent<RawImage>();
-                        if (rawImage != null) Destroy(rawImage);
-
-                        var image = gameObject.GetComponent<Image>();
-                        if (image == null) image = gameObject.AddComponent<Image>();
-                        image.type = m_ImageType;
-                        image.sprite = sprite;
-                    }
-                    UpdateLayout();
+                    ApplyImage(_.m_Texture);
                 }
             }).AddTo(this);
 
 
         }
 
-        private void UpdateLayout()
+        public void UpdateLayout()
         {
             if (_AspectRatioFitter == null) _AspectRatioFitter = GetComponent<AspectRatioFitter>();
             if (_RectTransform == null) _RectTransform = GetComponent<RectTransform>();
@@ -119,10 +139,7 @@ namespace Modules.Utilities
 
             }
         }
-        private void OnValidate()
-        {
-            UpdateLayout();
-        }
+
 
         public void SetLayoutHorizontal()
         {
@@ -148,9 +165,11 @@ public class ResourceImageLoaderEditor : Editor
     SerializedProperty _ImageTypeProperty;
     SerializedProperty _BorderProperty;
     SerializedProperty _AutoSizeModeProperty;
-
+    ResourceImageLoader _Instance;
+    Texture2D _Texture;
     private void OnEnable()
     {
+        _Instance = target as ResourceImageLoader;
         _FileNameProperty = serializedObject.FindProperty("m_FileName");
         _TypeProperty = serializedObject.FindProperty("m_Type");
         _ImageTypeProperty = serializedObject.FindProperty("m_ImageType");
@@ -176,12 +195,78 @@ public class ResourceImageLoaderEditor : Editor
 
         EditorGUILayout.PropertyField(_AutoSizeModeProperty);
 
+        EditorGUILayout.BeginHorizontal();
+        GUI.color = Color.green;
+        if (GUILayout.Button("Browse"))
+        {
+            var folder = Path.Combine(Environment.CurrentDirectory, "Resources");
+            if (!Directory.Exists(folder)) Directory.CreateDirectory(folder);
+            string path = EditorUtility.OpenFilePanelWithFilters("Select Image", folder, new string[] { "Image Files", "png,jpg,jpeg" });
+            if (!string.IsNullOrEmpty(path))
+            {
+                _FileNameProperty.stringValue = Path.GetFileName(path);
 
+                var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
+                var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
+                if (!Directory.Exists(assetfolder)) Directory.CreateDirectory(assetfolder);
+                var filePath = Path.Combine(assetfolder, _FileNameProperty.stringValue);
+                var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
+
+                if (File.Exists(filePath))
+                {
+                    if (!EditorUtility.DisplayDialog("File already exists", $"Resource Name : {_FileNameProperty.stringValue}", "Replace", "Cancel"))
+                    {
+                        return;
+                    }
+                }
+
+
+                File.Copy(path, filePath, true);
+                AssetDatabase.Refresh();
+                _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+                _Instance.ApplyImage(_Texture);
+
+
+
+
+            }
+        }
+
+        if (GUILayout.Button("Load"))
+        {
+            var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
+            var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
+
+
+            _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+            if (_Texture == null)
+            {
+                var folder = Path.Combine(Environment.CurrentDirectory, "Resources");
+                var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
+                var filePath = Path.Combine(assetfolder, _FileNameProperty.stringValue);
+
+                var path = Directory.GetFiles(folder, "*.*", SearchOption.AllDirectories)
+                      .FirstOrDefault(file => Path.GetFileName(file) == _FileNameProperty.stringValue);
+
+                if (!string.IsNullOrEmpty(path))
+                {
+                    File.Copy(path, filePath, true);
+                    AssetDatabase.Refresh();
+                    _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+                }
+            }
+
+            _Instance.ApplyImage(_Texture);
+
+
+        }
+        EditorGUILayout.EndHorizontal();
         if (GUI.changed)
         {
 
             EditorUtility.SetDirty(target);
             serializedObject.ApplyModifiedProperties();
+            _Instance.UpdateLayout();
         }
     }
 
