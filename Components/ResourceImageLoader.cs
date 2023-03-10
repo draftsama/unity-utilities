@@ -293,7 +293,7 @@ public class ResourceImageLoaderEditor : Editor
 
 
             _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                                .Where(file => new string[] { ".png", ".jpg", ".jpeg" }.Contains(Path.GetExtension(file)) && regexPattern.IsMatch(Path.GetFileName(file)) && Path.GetFileName(file) != _CurrentNameInput)
+                                .Where(file => new string[] { ".png", ".jpg", ".jpeg" }.Contains(Path.GetExtension(file)) && regexPattern.IsMatch(Path.GetFileName(file)))
                                 .Take(10)
                                 .ToArray();
 
