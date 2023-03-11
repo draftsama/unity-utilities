@@ -85,8 +85,8 @@ namespace Modules.Utilities
             var audioPlayer = instance.GetAudioSource();
             audioPlayer.loop = _loop;
             audioPlayer.volume = _CurrentBGMAudio == null ? 0f : _volume;
-
-            audioPlayer.PlayOneShot(clip);
+            audioPlayer.clip = clip;
+            audioPlayer.Play();
 
 
             _transitionTime = Mathf.Clamp(_transitionTime, 0, float.PositiveInfinity);
@@ -143,6 +143,7 @@ namespace Modules.Utilities
                     if (_CurrentBGMAudio != null) _CurrentBGMAudio.volume = 1 - _value;
                 }, () =>
                 {
+                    _CurrentBGMAudio.clip = null;
                     _CurrentBGMAudio?.Stop();
                     _CurrentBGMAudio = null;
                 }).AddTo(instance);
