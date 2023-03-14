@@ -330,6 +330,9 @@ public class ResourceImageLoaderEditor : Editor
 
             if (!string.IsNullOrEmpty(path))
             {
+                if (!Directory.Exists(assetfolder))
+                    Directory.CreateDirectory(assetfolder);
+
                 File.Copy(path, filePath, true);
                 AssetDatabase.Refresh();
                 _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
