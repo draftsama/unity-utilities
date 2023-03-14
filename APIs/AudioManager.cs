@@ -20,6 +20,14 @@ namespace Modules.Utilities
         [SerializeField] public List<AudioClip> m_Audiolist = new List<AudioClip>();
         private List<AudioSource> m_AudioPlayerlist = new List<AudioSource>();
         private static Action<Unit> OnLoadResourcesCompletedAction;
+
+        private bool _IsPause = false;
+
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            _IsPause = pauseStatus;
+        }
+
         private void Awake()
         {
             _Instance = this;
@@ -40,9 +48,13 @@ namespace Modules.Utilities
 
             Observable.EveryUpdate().Subscribe(_ =>
             {
-                foreach (var player in m_AudioPlayerlist)
+                if (!_IsPause)
                 {
-                    player.gameObject.SetActive(player.isPlaying);
+                    foreach (var player in m_AudioPlayerlist)
+                    {
+
+                        player.gameObject.SetActive(player.isPlaying);
+                    }
                 }
             }).AddTo(this);
 
@@ -133,7 +145,8 @@ namespace Modules.Utilities
 
             var audioPlayer = instance.GetAudioSource();
             audioPlayer.volume = _volume;
-            audioPlayer.PlayOneShot(clip);
+            audioPlayer.clip = clip;
+            audioPlayer.Play();
         }
         public static void StopBGM(float _fade = 0)
         {
