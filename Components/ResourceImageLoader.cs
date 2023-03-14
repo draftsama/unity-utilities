@@ -319,9 +319,8 @@ public class ResourceImageLoaderEditor : Editor
         var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
 
 
-        _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-        if (_Texture == null)
-        {
+        
+        
             var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
             var filePath = Path.Combine(assetfolder, _filename);
 
@@ -337,7 +336,6 @@ public class ResourceImageLoaderEditor : Editor
                 AssetDatabase.Refresh();
                 _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
             }
-        }
 
         _Instance.ApplyImage(_Texture);
     }
