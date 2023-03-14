@@ -11,8 +11,9 @@ namespace Modules.Utilities
     public class AudioManager : MonoBehaviour
     {
         private static AudioManager _Instance;
-        private static AudioSource _CurrentBGMAudio;
 
+        private static AudioSource _CurrentBGMAudio;
+        public static bool ResourcesIsLoaded { get; private set; }
         [SerializeField] public List<string> m_ResourceNames = new List<string>();
 
 
@@ -30,7 +31,9 @@ namespace Modules.Utilities
                     if (_res != null && _res.Count > 0)
                     {
                         AddAudioList(_res.Select(x => x.m_AudioClip).ToList());
+                        // Debug.Log("Load Audio Completed");
                         OnLoadResourcesCompletedAction?.Invoke(default);
+                        ResourcesIsLoaded = true;
                     }
 
                 }).AddTo(this);
