@@ -148,6 +148,13 @@ namespace Modules.Utilities
             audioPlayer.clip = clip;
             audioPlayer.Play();
         }
+
+        public static bool HasAudio(string _name)
+        {
+            var instance = GetInstance();
+            return instance.m_Audiolist.FirstOrDefault(_ => _.name == _name) != null;
+
+        }
         public static void StopBGM(float _fade = 0)
         {
             var instance = GetInstance();
