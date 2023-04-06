@@ -1,7 +1,10 @@
+using System.Threading;
 using System;
 using System.IO;
+using Cysharp.Threading.Tasks;
 using UniRx;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.UI;
 using UnityEngine.Video;
 
@@ -28,6 +31,7 @@ namespace Modules.Utilities
         private VideoPlayer _VideoPlayer;
         private CanvasGroup _CanvasGroup;
         private Action<Unit> _OnEnd;
+        private UnityEvent _OnEndEventHandler = new UnityEvent();
 
         private IDisposable _FadeDisposable;
         private IDisposable _FadeAudioDisposable;
@@ -112,6 +116,7 @@ namespace Modules.Utilities
                 if (!_Stoping)
                     SetVideoAlpha(0);
                 _OnEnd?.Invoke(default);
+                _OnEndEventHandler?.Invoke();
             }
         }
 
@@ -206,6 +211,11 @@ namespace Modules.Utilities
         {
             return Observable.FromEvent<Unit>(_event => _OnEnd += _event,
                 _event => _OnEnd -= _event);
+        }
+
+        public IUniTaskAsyncEnumerable<AsyncUnit> OnEndAsyncEnumerable(CancellationToken _token)
+        {
+            return new UnityEventHandlerAsyncEnumerable(_OnEndEventHandler, _token);
         }
     }
 }

@@ -2,10 +2,8 @@
 using System.Threading;
 using UniRx;
 using UnityEngine;
-#if UNITASK
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
-#endif
 
 namespace Modules.Utilities
 {
@@ -176,7 +174,6 @@ namespace Modules.Utilities
             float randomRadius = UnityEngine.Random.Range(0, _radius);
             return Quaternion.Euler(0, 0, angle) * new Vector3(0, randomRadius, 0);
         }
-#if UNITASK
 
         public static IUniTaskAsyncEnumerable<AsyncUnit> FloatingAnimationAsyncEnumerable(
             this RectTransform _rectTransform, float _speed, float _radius,
@@ -396,6 +393,5 @@ namespace Modules.Utilities
 
             return uts.Task;
         }
-#endif
     }
 }

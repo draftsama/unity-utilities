@@ -1,8 +1,15 @@
-﻿using System;
+﻿using System.Threading;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using UniRx;
 using UnityEngine;
+using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks.Linq;
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Modules.Utilities
 {
@@ -50,13 +57,19 @@ namespace Modules.Utilities
             });
         }
 
-        private void OnValidate()
+        public IUniTaskAsyncEnumerable<AsyncUnit> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad)
         {
-            if (m_Fill != null)
-                SetProgress(m_StartProgress);
+            return UniTaskAsyncEnumerable.Create<AsyncUnit>(async (writer, token) =>
+            {
+                await LerpThread.FloatLerpAsyncEnumerable(_millisecond, Progress, _progress, _ease).ForEachAsync(SetProgress);
+            });
         }
+
+
+
         public void SetProgress(float _progress)
         {
+            if (m_Fill == null) return;
             Progress = Mathf.Clamp01(_progress);
 
             if (m_Direction == Direction.Horizontal)
@@ -118,4 +131,38 @@ namespace Modules.Utilities
             }
         }
     }
+
+#if UNITY_EDITOR
+
+    [CustomEditor(typeof(ProgressBar))]
+    public class ProgressBarEditor : Editor
+    {
+        private ProgressBar _Instance;
+        private SerializedProperty _StartProgressProp;
+        private void OnEnable()
+        {
+            _Instance = target as ProgressBar;
+
+            _StartProgressProp = serializedObject.FindProperty("m_StartProgress");
+
+        }
+
+        public override void OnInspectorGUI()
+        {
+            serializedObject.Update();
+            DrawDefaultInspector();
+
+            if (GUI.changed)
+            {
+                _StartProgressProp.floatValue = Mathf.Clamp01(_StartProgressProp.floatValue);
+
+                _Instance.SetProgress(_StartProgressProp.floatValue);
+                EditorUtility.SetDirty(_Instance);
+                serializedObject.ApplyModifiedProperties();
+            }
+        }
+
+    }
+
+#endif
 }

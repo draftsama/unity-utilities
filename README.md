@@ -2,7 +2,7 @@
 
 ## Requirement 
 - [Unirx](https://github.com/neuecc/UniRx)
-- [UniTask](https://github.com/Cysharp/UniTask) (Optional)
+- [UniTask](https://github.com/Cysharp/UniTask) 
 
 
 

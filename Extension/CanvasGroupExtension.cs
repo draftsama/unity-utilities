@@ -2,10 +2,8 @@ using System;
 using System.Threading;
 using UnityEngine;
 using UniRx;
-
-#if UNITASK
 using Cysharp.Threading.Tasks;
-#endif
+
 
 namespace Modules.Utilities
 {
@@ -16,30 +14,30 @@ namespace Modules.Utilities
         private const Easing.Ease _DEFAULT_EASE_TYPE = Easing.Ease.Linear;
 
         private const int _DEFAULT_SOURCE_CURRENT_ALPHA = -1;
-    
+
 
         //--------------------------------------------------------------------------------------------------------------
         public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE, Action _onComplete = null)
+            bool _ignoreTimeScale = false, Easing.Ease _ease = _DEFAULT_EASE_TYPE, Action _onComplete = null)
         {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA,_ignoreTimeScale, _DEFAULT_EASE_TYPE,
+            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _ignoreTimeScale, _DEFAULT_EASE_TYPE,
                 true, _onComplete);
         }
 
         //--------------------------------------------------------------------------------------------------------------
         public static IDisposable LerpAlphaWithoutInteractable(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE,Action _onComplete = null)
+            bool _ignoreTimeScale = false, Easing.Ease _ease = _DEFAULT_EASE_TYPE, Action _onComplete = null)
         {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA,_ignoreTimeScale, _ease,
+            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _ignoreTimeScale, _ease,
                 false, _onComplete);
         }
 
 
         //--------------------------------------------------------------------------------------------------------------
 
-         static IDisposable EasingLerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            float _start, bool _ignoreTimeScale = false,Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true,
-             Action _onComplete = null)
+        static IDisposable EasingLerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
+           float _start, bool _ignoreTimeScale = false, Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true,
+            Action _onComplete = null)
         {
             var progress = 0f;
             var current = Math.Abs(_start - _DEFAULT_SOURCE_CURRENT_ALPHA) < GlobalConstant.FLOAT_MINIMUM_TOLERANCE
@@ -71,7 +69,6 @@ namespace Modules.Utilities
             return disposable;
         }
 
-#if UNITASK
 
         //---------------------------------------------------------------------------------------------------------------
         public static UniTask LerpAlphaAsync(this CanvasGroup _source, int _milliseconds,
@@ -137,7 +134,6 @@ namespace Modules.Utilities
 
             return uts.Task;
         }
-#endif
         //--------------------------------------------------------------------------------------------------------------
 
         public static bool SetInteractive(this CanvasGroup _source, bool _interactAble)

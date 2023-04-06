@@ -2,9 +2,7 @@
 using System.Threading;
 using UniRx;
 using UnityEngine;
-#if UNITASK
 using Cysharp.Threading.Tasks;
-#endif
 
 
 namespace Modules.Utilities
@@ -53,7 +51,6 @@ namespace Modules.Utilities
             return disposable;
         }
 
-#if UNITASK
         public static UniTask LerpAlphaAsync(this ParticleSystem _particle, float _targetAlpha, float _second,
             Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false,
             CancellationToken _token = default)
@@ -111,6 +108,5 @@ namespace Modules.Utilities
 
             return uts.Task;
         }
-#endif
     }
 }
