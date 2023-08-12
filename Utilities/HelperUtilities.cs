@@ -50,6 +50,26 @@ namespace Modules.Utilities
 
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
         }
+        public static Vector2 CalculateViewportSize(Vector3 target, Camera camera = null)
+        {
+            // If camera is not provided, try getting the main camera
+            if (camera == null && !Camera.main.TryGetComponent(out camera))
+            {
+                Debug.LogWarning("No Camera");
+                return Vector2.zero;
+            }
+
+            // Calculate the distance once
+            float distance = Vector3.Distance(camera.transform.position, target);
+
+            // Calculate viewport points
+            Vector3 bottomLeft = camera.ViewportToWorldPoint(new Vector3(0, 0, distance));
+            Vector3 topRight = camera.ViewportToWorldPoint(new Vector3(1, 1, distance));
+
+            // Calculate and return size
+            return (Vector2)(topRight - bottomLeft);
+
+        }
 
         public static float VectorToDegree(Vector2 _vector)
         {
