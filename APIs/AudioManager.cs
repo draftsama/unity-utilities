@@ -5,6 +5,10 @@ using System.Linq;
 using Modules.Utilities;
 using UniRx;
 using UnityEngine;
+using System.Threading;
+using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks.Linq;
+
 
 namespace Modules.Utilities
 {
@@ -39,24 +43,24 @@ namespace Modules.Utilities
                     if (_res != null && _res.Count > 0)
                     {
                         AddAudioList(_res.Select(x => x.m_AudioClip).ToList());
-                        // Debug.Log("Load Audio Completed");
+                        Debug.Log("Load Audio Completed");
                         OnLoadResourcesCompletedAction?.Invoke(default);
                         ResourcesIsLoaded = true;
                     }
 
                 }).AddTo(this);
 
-            Observable.EveryUpdate().Subscribe(_ =>
-            {
-                if (!_IsPause)
-                {
-                    foreach (var player in m_AudioPlayerlist)
-                    {
+            // Observable.EveryUpdate().Subscribe(_ =>
+            // {
+            //     if (!_IsPause)
+            //     {
+            //         foreach (var player in m_AudioPlayerlist)
+            //         {
 
-                        player.gameObject.SetActive(player.isPlaying);
-                    }
-                }
-            }).AddTo(this);
+            //             player.gameObject.SetActive(player.isPlaying);
+            //         }
+            //     }
+            // }).AddTo(this);
 
 
         }
@@ -90,33 +94,53 @@ namespace Modules.Utilities
                 instance.m_Audiolist.Add(_audioClip);
         }
 
-        public static void PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true)
+       
+        public static void PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true, CancellationToken _token = default)
         {
             var instance = GetInstance();
-            var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
+            if (_token == default) _token = instance.GetCancellationTokenOnDestroy();
 
-            if (clip == null) return;
-
-            var audioPlayer = instance.GetAudioSource();
-            audioPlayer.loop = _loop;
-            audioPlayer.volume = _CurrentBGMAudio == null ? 0f : _volume;
-            audioPlayer.clip = clip;
-            audioPlayer.Play();
+            UniTask.Create(async () =>
+            {
+                await UniTask.WaitUntil(() => ResourcesIsLoaded, cancellationToken: _token);
+                Debug.Log($"PlayBGM: {_name}");
 
 
-            _transitionTime = Mathf.Clamp(_transitionTime, 0, float.PositiveInfinity);
-            LerpThread.FloatLerp(Mathf.RoundToInt(_transitionTime * GlobalConstant.SECONDS_TO_MILLISECONDS), 0, 1)
-                .Subscribe(_value =>
+                var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
+
+                if (clip == null)
                 {
-                    if (_CurrentBGMAudio != null) _CurrentBGMAudio.volume = 1 - _value;
-                    audioPlayer.volume = _value;
-                }, () =>
-                {
-                    if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
-                    _CurrentBGMAudio = audioPlayer;
+                    Debug.LogWarning($"AudioManager: {_name}: clip is null");
+                    return;
+                }
 
-                }).AddTo(instance);
+
+                var audioPlayer = instance.GetAudioSource();
+                audioPlayer.gameObject.SetActive(true);
+                audioPlayer.loop = _loop;
+                audioPlayer.volume = _CurrentBGMAudio == null ? 0f : _volume;
+                audioPlayer.clip = clip;
+                audioPlayer.Play();
+
+                _transitionTime = Mathf.Clamp(_transitionTime, 0, float.PositiveInfinity);
+                var miliseconds = Mathf.RoundToInt(_transitionTime * GlobalConstant.SECONDS_TO_MILLISECONDS);
+
+                await LerpThread.FloatLerpAsyncEnumerable(miliseconds, 0, 1).ForEachAsync(_value =>
+                    {
+                        if (_CurrentBGMAudio != null) _CurrentBGMAudio.volume = 1 - _value;
+                        audioPlayer.volume = _value;
+                    }, _token);
+
+                if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
+                _CurrentBGMAudio = audioPlayer;
+
+            })
+            .AttachExternalCancellation(_token).Forget();
+
         }
+
+
+
 
         static IDisposable SetBGMVolumeDisposable;
         public static void SetBGMVolume(float _volumeTarget, float _transitionTime = 0f)
@@ -136,18 +160,21 @@ namespace Modules.Utilities
                  }).AddTo(GetInstance());
         }
 
-        public static void PlayFX(string _name, float _volume = 1f)
+        public static AudioSource PlayFX(string _name, float _volume = 1f)
         {
             var instance = GetInstance();
             var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
 
-            if (clip == null) return;
+            if (clip == null) return null;
 
             var audioPlayer = instance.GetAudioSource();
             audioPlayer.volume = _volume;
             audioPlayer.clip = clip;
             audioPlayer.Play();
+            return audioPlayer;
         }
+
+
 
         public static bool HasAudio(string _name)
         {

@@ -142,6 +142,29 @@ namespace Modules.Utilities
             if (!_VideoPlayer.isPlaying)
                 _VideoPlayer.Play();
         }
+        public async UniTask PlayAsync(CancellationToken _token = default)
+        {
+            if (_VideoPlayer.isPlaying)
+                return;
+
+            if(_token == default)
+                _token = this.GetCancellationTokenOnDestroy();
+
+            _VideoPlayer.Play();
+
+            try
+            {
+                    //wait until video end
+                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying);
+                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying == false);
+            }
+            catch (System.OperationCanceledException)
+            {
+                _VideoPlayer.Stop();
+            }
+
+          
+        }
 
         public void Pause()
         {
@@ -217,5 +240,7 @@ namespace Modules.Utilities
         {
             return new UnityEventHandlerAsyncEnumerable(_OnEndEventHandler, _token);
         }
+
+
     }
 }

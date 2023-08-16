@@ -18,6 +18,7 @@ public class ObjectPoolingManager : MonoBehaviour
                 instance = go.AddComponent<ObjectPoolingManager>();
             }
 
+
             return instance;
         }
 
@@ -145,12 +146,14 @@ public class ObjectPoolingManager : MonoBehaviour
 
     public static void KillAll(bool _terminate = false)
     {
-        for (int i = 0; i < Instance.m_PoolingObjectList.Count; i++)
+        // Debug.Log($"KillAll : {Instance.m_PoolingObjectList.Count}");
+        while (Instance.m_PoolingObjectList.Count > 0)
         {
-            var poolObj = Instance.m_PoolingObjectList[i];
-            Kill(poolObj, _terminate);
+            var poolObj = Instance.m_PoolingObjectList[0];
+            var result = Kill(poolObj, _terminate);
+            // Debug.Log($"KillAll : {result}");
         }
-        if (_terminate) Instance.m_PoolingObjectList.Clear();
+       
 
     }
 

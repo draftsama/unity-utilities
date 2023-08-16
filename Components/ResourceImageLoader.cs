@@ -9,7 +9,8 @@ using Modules.Utilities;
 using UnityEngine;
 using UniRx;
 using UnityEngine.UI;
-#if UNITY_EDITOR 
+using System.Threading.Tasks;
+#if UNITY_EDITOR
 using UnityEditor;
 #endif
 
@@ -218,6 +219,9 @@ public class ResourceImageLoaderEditor : Editor
                 if (GUILayout.Button(name))
                 {
                     _FileNameProperty.stringValue = name;
+                    //delay load image
+
+
                     LoadImage(_FileNameProperty.stringValue);
                     GUIUtility.keyboardControl = 0;
 
@@ -313,8 +317,13 @@ public class ResourceImageLoaderEditor : Editor
         }
     }
 
-    public void LoadImage(string _filename)
+    public async void LoadImage(string _filename)
     {
+        //delay load image
+
+        await Task.Delay(100); 
+
+
         var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
         var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
 
