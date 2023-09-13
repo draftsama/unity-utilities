@@ -21,7 +21,7 @@ namespace Modules.Utilities
     {
         public enum Type
         {
-            Image, Sprite, FirstMaterial
+            Image, Sprite
         }
         public enum AutoSizeMode
         {

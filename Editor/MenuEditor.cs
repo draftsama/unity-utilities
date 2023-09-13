@@ -13,7 +13,10 @@ public class MenuEditor
     {
 
         string folderPath = Path.Combine(Environment.CurrentDirectory, "Resources");
-
+        if (!Directory.Exists(folderPath))
+        {
+            Directory.CreateDirectory(folderPath);
+        }
 #if UNITY_EDITOR_WIN
         Process.Start("explorer.exe", folderPath);
 #elif UNITY_EDITOR_OSX

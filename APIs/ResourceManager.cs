@@ -5,6 +5,9 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using UniRx;
 using UnityEngine;
+using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks.Linq;
+using UnityEngine.Networking;
 
 
 namespace Modules.Utilities
@@ -332,6 +335,77 @@ namespace Modules.Utilities
 
         }
 
+        // using UniTask
+
+
+        public static async UniTask<ResourceResponse> GetResourceAsync(string _name, ResourceResponse.ResourceType _type)
+        {
+            await UniTask.Yield();
+            var instance = GetInstance();
+            ResourceResponse response = null;
+
+            for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
+            {
+                if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)
+                {
+                    response = instance.m_ResourceResponseList[i];
+                    break;
+                }
+            }
+
+            if (response != null)
+            {
+                return response;
+            }
+            else
+            {
+
+                if (!Directory.Exists(GetFolderResourcePath()))
+                {
+                    //no folder resource
+                    return null;
+                }
+
+                DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
+
+                string searchPattern = GetSearchPattern(_type);
+
+                if (directoryInfo == null)
+                {
+                    //no file
+                    return null;
+                }
+
+
+
+                var parts = Regex.Split(_name, @"\.");
+                if (parts.Length < 2)
+                {
+                    return null;
+
+                }
+                var extension = parts.Last();
+                var fileInfo = directoryInfo.GetFiles("*." + extension, SearchOption.AllDirectories)
+                .Where(_file => _file.Name.Equals(_name))
+                .FirstOrDefault();
+
+                if (fileInfo != null)
+                {
+                   return await LoadResourcesAsync(CreateResourceResponse(fileInfo.FullName));
+
+                }
+                else
+                {
+                    return null;
+                }
+
+            }
+
+        }
+
+
+
+
         //-------- Private Methods --------//
         private static ResourceResponse CreateResourceResponse(string _path)
         {
@@ -446,6 +520,62 @@ namespace Modules.Utilities
             });
         }
 
+
+        private static async UniTask<ResourceResponse> LoadResourcesAsync(ResourceResponse _dataInfo)
+        {
+
+            var filePath = $"file://{_dataInfo.m_FilePath}";
+            if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.Texture)
+            {
+                //get texture
+                var reqTexture = await UnityWebRequestTexture.GetTexture(filePath).SendWebRequest();
+                var texture = DownloadHandlerTexture.GetContent(reqTexture);
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.Apply();
+                _dataInfo.m_Texture = texture;
+
+
+                if (_Instance.m_ResourceResponseList.Contains(_dataInfo))
+                {
+                    var index = _Instance.m_ResourceResponseList.IndexOf(_dataInfo);
+                    _Instance.m_ResourceResponseList[index] = _dataInfo;
+                }
+                else
+                {
+                    _Instance.m_ResourceResponseList.Add(_dataInfo);
+
+                }
+
+                return _dataInfo;
+
+
+            }
+            else if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.AudioClip)
+            {
+
+                //get audio
+                var req = await UnityWebRequestMultimedia.GetAudioClip(filePath, _dataInfo.m_AudioType).SendWebRequest();
+                var audio = DownloadHandlerAudioClip.GetContent(req);
+                audio.name = _dataInfo.m_Name;
+                _dataInfo.m_AudioClip = audio;
+                if (_Instance.m_ResourceResponseList.Contains(_dataInfo))
+                {
+                    var index = _Instance.m_ResourceResponseList.IndexOf(_dataInfo);
+                    _Instance.m_ResourceResponseList[index] = _dataInfo;
+                }
+                else
+                {
+                    _Instance.m_ResourceResponseList.Add(_dataInfo);
+                }
+                return _dataInfo;
+
+            }
+
+            return null;
+
+
+
+        }
 
         private static string GetFolderResourcePath()
         {
