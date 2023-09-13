@@ -107,7 +107,7 @@ namespace UniRx
             IDictionary<string, string> _headers, IProgress<float> _progress = null)
         {
             return ObservableUnity.FromCoroutine<UnityWebRequest>((_observer, _cancellation) =>
-                FetchRequest(UnityWebRequest.Post(_url, _postData), new System.Text.UTF8Encoding().GetBytes(_postData), _headers, _observer, _progress, _cancellation));
+                FetchRequest(UnityWebRequest.PostWwwForm(_url, _postData), new System.Text.UTF8Encoding().GetBytes(_postData), _headers, _observer, _progress, _cancellation));
         }
 
         public static IObservable<UnityWebRequest> DeleteRequest(string _url,
