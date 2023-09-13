@@ -21,7 +21,7 @@ namespace Modules.Utilities
     {
         public enum Type
         {
-            Image, Sprite
+            Image, Sprite, FirstMaterial
         }
         public enum AutoSizeMode
         {
@@ -110,6 +110,8 @@ namespace Modules.Utilities
                 if (_ != null && _.m_Texture != null)
                 {
                     ApplyImage(_.m_Texture);
+                }else{
+                    gameObject.SetActive(false);
                 }
             }).AddTo(this);
 

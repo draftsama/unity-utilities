@@ -45,6 +45,7 @@ namespace Modules.Utilities
         }
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
+        public bool m_IsPlaying => _VideoPlayer != null &&  _VideoPlayer.isPlaying;
 
         private void Awake()
         {
@@ -144,37 +145,41 @@ namespace Modules.Utilities
         }
         public async UniTask PlayAsync(CancellationToken _token = default)
         {
-            if (_VideoPlayer.isPlaying)
-                return;
 
-            if(_token == default)
+            if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
 
-            _VideoPlayer.Play();
 
             try
             {
-                    //wait until video end
+
+                if (_VideoPlayer.isPlaying)
+                    return;
+
+                _VideoPlayer.Play();
+
+                //wait until video end
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying);
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying == false);
             }
             catch (System.OperationCanceledException)
             {
+                Debug.Log("Video Canceled.");
                 _VideoPlayer.Stop();
             }
 
-          
+
         }
 
         public void Pause()
         {
-            if (!_VideoPlayer.isPaused)
+            if (_VideoPlayer && !_VideoPlayer.isPaused)
                 _VideoPlayer.Pause();
         }
 
         public void Stop()
         {
-            if (_VideoPlayer.isPlaying && !_Stoping)
+            if (_VideoPlayer && _VideoPlayer.isPlaying && !_Stoping)
             {
                 _Stoping = true;
                 SetVideoAlpha(0, _onCompleted: () =>
@@ -220,6 +225,8 @@ namespace Modules.Utilities
 
         public void Seek(float _progress)
         {
+
+
             if (!_VideoPlayer.isPrepared)
             {
                 Debug.Log("Video Not Prepared.");

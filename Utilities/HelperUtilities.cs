@@ -8,7 +8,7 @@ namespace Modules.Utilities
     {
 
 
-        public static bool BoxCollider2DInCameraView(Vector3 _position, BoxCollider2D _boxCollider, Camera _camera)
+        public static bool IsBoxCollider2DInCameraView(Vector3 _position, BoxCollider2D _boxCollider, Camera _camera)
         {
             //work with Orthographic camera only
             if (_camera == null)
@@ -31,7 +31,7 @@ namespace Modules.Utilities
             return _position.x <= right && _position.x >= -right && _position.y <= top && _position.y >= -top;
         }
 
-        public static bool PositionInCameraView(Vector3 _position, Camera _camera, out Vector2 _screenPosition)
+        public static bool IsPositionInCameraView(Vector3 _position, Camera _camera, out Vector2 _screenPosition)
         {
             _screenPosition = Vector2.zero;
             if (_camera == null)
@@ -69,6 +69,33 @@ namespace Modules.Utilities
             // Calculate and return size
             return (Vector2)(topRight - bottomLeft);
 
+        }
+        public static Bounds CalculateBoxColliderFromMeshs(Transform _target, bool _isIncludeChildren = false )
+        {
+            if (_target == null)
+            {
+                Debug.LogWarning($"Target is null");
+                return new Bounds();
+            }
+
+            var renderers = _isIncludeChildren ? _target.GetComponentsInChildren<Renderer>() : new Renderer[1] { _target.GetComponent<Renderer>() };
+
+            if (renderers == null || renderers.Length == 0)
+            {
+                Debug.LogWarning($"No Renderer");
+                return new Bounds();
+            }
+
+            var bounds = new Bounds();
+
+            foreach (var renderer in renderers)
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+
+            return bounds;
+
+           
         }
 
         public static float VectorToDegree(Vector2 _vector)

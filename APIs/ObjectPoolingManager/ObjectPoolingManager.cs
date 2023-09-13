@@ -146,14 +146,23 @@ public class ObjectPoolingManager : MonoBehaviour
 
     public static void KillAll(bool _terminate = false)
     {
-        // Debug.Log($"KillAll : {Instance.m_PoolingObjectList.Count}");
-        while (Instance.m_PoolingObjectList.Count > 0)
+
+        try
         {
-            var poolObj = Instance.m_PoolingObjectList[0];
-            var result = Kill(poolObj, _terminate);
-            // Debug.Log($"KillAll : {result}");
+            // Debug.Log($"KillAll : {Instance.m_PoolingObjectList.Count}");
+            for (int i = Instance.m_PoolingObjectList.Count - 1; i >= 0; i--)
+            {
+                var poolObj = Instance.m_PoolingObjectList[i];
+                var result = Kill(poolObj, _terminate);
+                // Debug.Log($"{i} : {result}");
+            }
         }
-       
+        catch (System.Exception e)
+        {
+            Debug.LogError($"KillAll : {e.Message}");
+        }
+
+
 
     }
 
