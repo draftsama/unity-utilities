@@ -33,6 +33,9 @@ namespace Modules.Utilities
         {
             if (_Instance == null)
             {
+                _Instance = FindObjectOfType<ResourceManager>();
+                if (_Instance != null) return _Instance;
+                
                 GameObject go = new GameObject("ResourceManager", typeof(ResourceManager));
                 _Instance = go.GetComponent<ResourceManager>();
             }
@@ -336,6 +339,35 @@ namespace Modules.Utilities
         }
 
         // using UniTask
+        public static async UniTask<Texture2D> GetTextureAsync(string _name){
+
+            var res = await GetResourceAsync(_name, ResourceResponse.ResourceType.Texture);
+            return res != null ? res.m_Texture : null;
+        }
+        public static async UniTask<Texture2D[]> GetTexturesAsync(string[] _names)
+        {
+            var resArray = await GetResourcesAsync(_names, ResourceResponse.ResourceType.Texture);
+            //return texture array from resource response array
+            //if response is null then texture is null
+            return resArray.Select(_ => _ != null?_.m_Texture:null ).ToArray();
+           
+        }
+
+        public static async UniTask<AudioClip> GetAudioClipAsync(string _name)
+        {
+            var res = await GetResourceAsync(_name, ResourceResponse.ResourceType.AudioClip);
+            return res != null ? res.m_AudioClip : null;
+        }
+
+        public static async UniTask<AudioClip[]> GetAudioClipsAsync(string[] _names)
+        {
+            var resArray = await GetResourcesAsync(_names, ResourceResponse.ResourceType.AudioClip);
+            return resArray.Select(_ => _ != null ? _.m_AudioClip : null).ToArray();
+        }
+
+
+
+        
 
 
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name, ResourceResponse.ResourceType _type)
@@ -343,7 +375,7 @@ namespace Modules.Utilities
             await UniTask.Yield();
             var instance = GetInstance();
             ResourceResponse response = null;
-
+            //get from cache
             for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
             {
                 if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)
@@ -403,6 +435,19 @@ namespace Modules.Utilities
 
         }
 
+        public static async UniTask<ResourceResponse[]> GetResourcesAsync(string[] _fileNames,ResourceResponse.ResourceType _type)
+        {
+            var responselist = new ResourceResponse[_fileNames.Length];
+            for (int i = 0; i < _fileNames.Length; i++)
+            {
+                var fileName = _fileNames[i];
+                var res = await GetResourceAsync(fileName, _type);
+                responselist[i] = res;
+
+            }
+            return responselist;
+
+        }
 
 
 

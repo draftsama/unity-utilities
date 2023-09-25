@@ -14,7 +14,10 @@ public class ObjectPoolingManager : MonoBehaviour
         {
             if (instance == null)
             {
-                GameObject go = new GameObject("ObjectPoolingManager");
+                instance = FindObjectOfType<ObjectPoolingManager>();
+                if(instance != null)return instance;
+
+                var go = new GameObject("ObjectPoolingManager");
                 instance = go.AddComponent<ObjectPoolingManager>();
             }
 
@@ -71,7 +74,7 @@ public class ObjectPoolingManager : MonoBehaviour
             Instance.m_PoolingObjectList.Add(poolingObject);
         }
 
-        var poolEvent = result.GetComponent<IPoolObjectEvent>();
+        var poolEvent = result.GetComponent<IPoolingObjectEvent>();
         poolEvent?.OnStartObject();
 
         return result;
@@ -86,27 +89,27 @@ public class ObjectPoolingManager : MonoBehaviour
         return Instance.m_PoolingObjectList.ToArray();
     }
 
-    public static bool AddObject(PoolingObject _poolObject)
+    public static bool RegisterObject(string _group, GameObject _go)
     {
-        if (Instance.m_PoolingObjectList.Contains(_poolObject))
+        //check if object already registered
+        if (Instance.m_PoolingObjectList.Any(_ => _.gameObject == _go))
             return false;
 
-        Instance.m_PoolingObjectList.Add(_poolObject);
-
+        var poolingObject = _go.AddComponent<PoolingObject>();
+        poolingObject.Init(_group);
+        Instance.m_PoolingObjectList.Add(poolingObject);
         return true;
     }
-    public static bool RemoveObject(PoolingObject _poolObject)
+
+    public static bool UnregisterObject(GameObject _go)
     {
-        Debug.Log($"RemoveObject");
-        if (Instance == null) return false;
-
-        if (!Instance.m_PoolingObjectList.Contains(_poolObject))
-            return false;
-
-
-        Instance.m_PoolingObjectList.Remove(_poolObject);
+        var poolObj = _go.GetComponent<PoolingObject>();
+        if (poolObj == null) return false;
+        if (!Instance.m_PoolingObjectList.Contains(poolObj)) return false;
+        Instance.m_PoolingObjectList.Remove(poolObj);
         return true;
     }
+
     public static bool Kill(GameObject _object, bool _terminate = false)
     {
         PoolingObject poolObj = _object.GetComponent<PoolingObject>();
@@ -119,7 +122,7 @@ public class ObjectPoolingManager : MonoBehaviour
         if (_poolObj == null) return false;
         if (!Instance.m_PoolingObjectList.Contains(_poolObj)) return false;
         var obj = _poolObj.gameObject;
-        var poolEvent = obj.GetComponent<IPoolObjectEvent>();
+        var poolEvent = obj.GetComponent<IPoolingObjectEvent>();
         poolEvent?.OnEndObject();
         obj.SetActive(false);
 
@@ -179,7 +182,7 @@ public class ObjectPoolingManager : MonoBehaviour
 
 
 
-public interface IPoolObjectEvent
+public interface IPoolingObjectEvent
 {
     public void OnStartObject();
     public void OnEndObject();

@@ -14,7 +14,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
     [SerializeField][HideInInspector] private int _CurrentMaterialIndex = 0;
     [SerializeField][HideInInspector] private int _CurrentTexturePropertyIndex = 0;
-
+    [SerializeField] private TextureWrapMode m_TextureWrapMode;
 
     async void Start()
     {
@@ -29,7 +29,6 @@ public class ResourceTextureLoader : ResourceLoaderBase
     {
 #if UNITY_EDITOR
 
-        Debug.Log(_EditorSource);
         if (_EditorSource != null)
         {
             ApplyImage(_EditorSource);
@@ -39,7 +38,8 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
     public override void ApplyImage(Texture2D _texture)
     {
-        base.ApplyImage(_texture);
+        _texture.wrapMode = m_TextureWrapMode;
+
 
         var renderers = GetComponentsInChildren<Renderer>();
 
@@ -50,7 +50,6 @@ public class ResourceTextureLoader : ResourceLoaderBase
             var propName = materials[_CurrentMaterialIndex].GetPropertyNames(MaterialPropertyType.Texture)
                 .ElementAtOrDefault(_CurrentTexturePropertyIndex);
 
-            Debug.Log(propName);
             materials[_CurrentMaterialIndex].SetTexture(propName, _texture);
         }
 
@@ -76,6 +75,10 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
         var instance = target as ResourceTextureLoader;
         var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
         var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
+        var textureWrapMode = serializedObject.FindProperty("m_TextureWrapMode");
+
+        EditorGUILayout.PropertyField(textureWrapMode);
+
         //get all materials in this object
         var renderers = instance.GetComponentsInChildren<Renderer>();
 
@@ -100,8 +103,6 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
             {
 
                 index = EditorGUILayout.Popup("Material", index, popupMaterialsName.ToArray());
-
-
             }
             else
             {
@@ -140,7 +141,7 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
             GUI.backgroundColor = Color.white;
 
         }
-        catch (System.Exception e)
+        catch (System.Exception)
         {
             EditorGUILayout.HelpBox("Material not found", MessageType.Error);
 
