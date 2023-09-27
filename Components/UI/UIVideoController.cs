@@ -8,6 +8,8 @@ using UnityEngine.Events;
 using UnityEngine.UI;
 using UnityEngine.Video;
 
+
+
 namespace Modules.Utilities
 {
     [RequireComponent((typeof(CanvasGroup)))]
@@ -22,10 +24,11 @@ namespace Modules.Utilities
         [SerializeField] public bool m_PlayOnAwake = true;
         [SerializeField] public bool m_PrepareOnAwake = true;
         [SerializeField] public bool m_Loop = false;
-        [SerializeField] public bool m_FadeAnimation = false;
+        [SerializeField] public bool m_FadeVideo = false;
         [SerializeField] public bool m_FadeAudio = false;
 
         [SerializeField] public int m_FadeTime = 500;
+        [SerializeField] public float m_Progress = 0f;
 
         private RawImage _Preview;
         private VideoPlayer _VideoPlayer;
@@ -33,10 +36,8 @@ namespace Modules.Utilities
         private Action<Unit> _OnEnd;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
 
-        private IDisposable _FadeDisposable;
-        private IDisposable _FadeAudioDisposable;
-
         private bool _Stoping = false;
+        private bool _IgnoreFadeOut = false;
         public enum PathType
         {
             StreamAssets,
@@ -45,7 +46,10 @@ namespace Modules.Utilities
         }
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
-        public bool m_IsPlaying => _VideoPlayer != null &&  _VideoPlayer.isPlaying;
+        public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
+
+
+        private CancellationTokenSource _Cts = new CancellationTokenSource();
 
         private void Awake()
         {
@@ -56,8 +60,11 @@ namespace Modules.Utilities
             _VideoPlayer.playOnAwake = false;
             _CanvasGroup.SetAlpha(0);
 
-            SetupURL(m_FileName, m_PathType, m_FolderName);
-            _VideoPlayer.Prepare();
+            if (m_PrepareOnAwake)
+            {
+                SetupURL(m_FileName, m_PathType, m_FolderName);
+                _VideoPlayer.Prepare();
+            }
         }
 
         public void SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
@@ -92,82 +99,130 @@ namespace Modules.Utilities
             _VideoPlayer.renderMode = VideoRenderMode.APIOnly;
         }
 
-        private void OnEnable()
-        {
-            _VideoPlayer.started += VideoPlayerOnstarted;
-            _VideoPlayer.loopPointReached += VideoPlayerOnloopPointReached;
-
-        }
-
-        private void VideoPlayerOnstarted(VideoPlayer _source)
-        {
-            SetVideoAlpha(1);
-        }
-
-        private void VideoPlayerOnloopPointReached(VideoPlayer _source)
-        {
-            //end video
-            if (m_Loop)
-            {
-                if (!_Stoping)
-                    _VideoPlayer.Play();
-            }
-            else
-            {
-                if (!_Stoping)
-                    SetVideoAlpha(0);
-                _OnEnd?.Invoke(default);
-                _OnEndEventHandler?.Invoke();
-            }
-        }
 
 
         private void OnDisable()
         {
-            _VideoPlayer.started -= VideoPlayerOnstarted;
-            _VideoPlayer.loopPointReached -= VideoPlayerOnloopPointReached;
+
+            if (_Cts != null)
+            {
+                _Cts.Cancel();
+                _Cts.Dispose();
+                _Cts = null;
+            }
         }
 
         void Start()
         {
-            Observable.EveryUpdate().Where(_ => _VideoPlayer.isPlaying).Subscribe(_ =>
-            {
-                _Preview.texture = _VideoPlayer.texture;
-            }).AddTo(this);
-            if (m_PlayOnAwake) _VideoPlayer.Play();
+
+            if (m_PlayOnAwake) PlayAsync().Forget();
         }
 
         //------------------------------------ Public Method ----------------------------------
-        public void Play()
+
+        public async UniTaskVoid PlayAsync(bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, CancellationToken _token = default)
         {
-            if (!_VideoPlayer.isPlaying)
-                _VideoPlayer.Play();
-        }
-        public async UniTask PlayAsync(CancellationToken _token = default)
-        {
+
+            if (_VideoPlayer.isPlaying)
+                return;
+
+            // Debug.Log("Play Video");
 
             if (_token == default)
-                _token = this.GetCancellationTokenOnDestroy();
-
+            {
+                if (_Cts != null)
+                {
+                    _Cts.Cancel();
+                    _Cts.Dispose();
+                }
+                _Cts = new CancellationTokenSource();
+                _token = _Cts.Token;
+            }
+            m_Progress = 0f;
+            _IgnoreFadeOut = _ignoreFadeOut;
+            float fadeInProgress = 0f;
+            float fadeOutProgress = 0f;
 
             try
             {
 
-                if (_VideoPlayer.isPlaying)
-                    return;
+                if (!_VideoPlayer.isPrepared)
+                {
+                    SetupURL(m_FileName, m_PathType, m_FolderName);
+                    _VideoPlayer.Prepare();
+                    await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
 
+                }
+                _VideoPlayer.frame = 0;
                 _VideoPlayer.Play();
 
-                //wait until video end
-                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying);
-                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying == false);
+                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
+
+                while (!_token.IsCancellationRequested && (_VideoPlayer.isPlaying || m_Loop))
+                {
+
+                    m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
+                    _Preview.texture = _VideoPlayer.texture;
+
+
+                    if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stoping)
+                    {
+                        fadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
+                        var valueProgress = Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 0f, 1f, fadeInProgress));
+
+                        //fade in
+                        _CanvasGroup.SetAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
+                        _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 1);
+
+                    }
+                    else if (!m_Loop && _VideoPlayer.time >= _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) || _Stoping)
+                    {
+                        fadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
+                        var valueProgress = Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 1f, 0f, fadeOutProgress));
+                        //fade out
+                        _CanvasGroup.SetAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
+                        _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
+
+                        if (fadeOutProgress >= 1f)
+                            break;
+                    }
+                    else
+                    {
+                        //playing
+                        _CanvasGroup.SetAlpha(1);
+                        _VideoPlayer.SetDirectAudioVolume(0, 1);
+                    }
+
+
+                    if (!_VideoPlayer.isPlaying && m_Loop)
+                    {
+
+                        // Debug.Log("Video Loop.");
+                        _VideoPlayer.frame = 0;
+                        _VideoPlayer.Play();
+
+                        //skip fade in next loop
+                        _ignoreFadeIn = true;
+                    }
+
+
+                    await UniTask.Yield(PlayerLoopTiming.Update, _token);
+                }
+
+
+
             }
             catch (System.OperationCanceledException)
             {
-                Debug.Log("Video Canceled.");
-                _VideoPlayer.Stop();
+                // Debug.Log("Video Canceled.");
+
             }
 
+
+            _Stoping = false;
+            _VideoPlayer.Stop();
+            _CanvasGroup.SetAlpha(0);
+            // Debug.Log("Video End.");
 
         }
 
@@ -176,40 +231,25 @@ namespace Modules.Utilities
             if (_VideoPlayer && !_VideoPlayer.isPaused)
                 _VideoPlayer.Pause();
         }
-
-        public void Stop()
+        public void UnPause()
         {
-            if (_VideoPlayer && _VideoPlayer.isPlaying && !_Stoping)
-            {
-                _Stoping = true;
-                SetVideoAlpha(0, _onCompleted: () =>
-                {
-                    _VideoPlayer.Stop();
-                    _Stoping = false;
-                });
-            }
+            if (_VideoPlayer && _VideoPlayer.isPaused)
+                _VideoPlayer.Play();
         }
 
-        private void SetVideoAlpha(float _alpha, bool _force = false, Action _onCompleted = null)
+        public void Stop(bool _ignoreFadeOut = false)
         {
-            _FadeDisposable?.Dispose();
-            if (m_FadeAnimation && !_force)
-                _FadeDisposable = _CanvasGroup.LerpAlphaWithoutInteractable(m_FadeTime, _alpha, _onComplete: _onCompleted).AddTo(this);
-            else
-            {
-                _CanvasGroup.SetAlpha(_alpha);
-                _onCompleted?.Invoke();
-            }
 
-            _FadeAudioDisposable?.Dispose();
-            if (m_FadeAudio && !_force)
-            {
-                _FadeAudioDisposable = LerpThread.FloatLerp(m_FadeTime, 1f - _alpha, _alpha).Subscribe(_ =>
-                {
-                    _VideoPlayer.SetDirectAudioVolume(0, _);
-                });
-            }
+            if (!_VideoPlayer || !_VideoPlayer.isPlaying)
+                return;
+
+            // Debug.Log("Stop Video");
+            _IgnoreFadeOut = _ignoreFadeOut;
+            _Stoping = true;
+
         }
+
+
         public void Seek(int _frame)
         {
             if (!_VideoPlayer.isPrepared)
