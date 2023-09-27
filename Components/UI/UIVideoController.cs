@@ -120,7 +120,7 @@ namespace Modules.Utilities
 
         //------------------------------------ Public Method ----------------------------------
 
-        public async UniTaskVoid PlayAsync(bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, CancellationToken _token = default)
+        public async UniTask PlayAsync(bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, CancellationToken _token = default)
         {
 
             if (_VideoPlayer.isPlaying)
