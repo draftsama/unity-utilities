@@ -14,15 +14,15 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
     [SerializeField][HideInInspector] private int _CurrentMaterialIndex = 0;
     [SerializeField][HideInInspector] private int _CurrentTexturePropertyIndex = 0;
-    [SerializeField] private TextureWrapMode m_TextureWrapMode;
 
     async void Start()
     {
 
         if (string.IsNullOrEmpty(m_FileName)) return;
 
-        var res = await ResourceManager.GetResourceAsync(m_FileName, ResourceManager.ResourceResponse.ResourceType.Texture);
-        ApplyImage(res.m_Texture);
+        var texture = await ResourceManager.GetTextureAsync(m_FileName);
+        
+        ApplyImage(texture);
 
     }
     private void OnDisable()
@@ -38,10 +38,16 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
     public override void ApplyImage(Texture2D _texture)
     {
-        _texture.wrapMode = m_TextureWrapMode;
-
-
         var renderers = GetComponentsInChildren<Renderer>();
+
+        if(_texture == null)return;
+
+        _texture.wrapMode = m_TextureWrapMode;
+        _texture.alphaIsTransparency = m_AlphaIsTransparency;
+        _texture.filterMode = m_FilterMode;
+        _texture.Apply();
+
+
 
         var materials = renderers.SelectMany(x => x.sharedMaterials).ToList();
 
@@ -75,9 +81,7 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
         var instance = target as ResourceTextureLoader;
         var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
         var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
-        var textureWrapMode = serializedObject.FindProperty("m_TextureWrapMode");
 
-        EditorGUILayout.PropertyField(textureWrapMode);
 
         //get all materials in this object
         var renderers = instance.GetComponentsInChildren<Renderer>();

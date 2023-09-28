@@ -17,7 +17,11 @@ public abstract class ResourceLoaderBase : MonoBehaviour
 
     [SerializeField] protected Texture2D _EditorSource;
 
-
+    [SerializeField] protected TextureImporterType m_TextureType = TextureImporterType.Default;
+    [SerializeField] protected bool m_AlphaIsTransparency = false;
+    [SerializeField] protected bool m_GenerateMipMaps = false;
+    [SerializeField] protected TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
+    [SerializeField] protected FilterMode m_FilterMode = FilterMode.Bilinear;
     public virtual void ApplyImage(Texture2D _texture)
     {
 
@@ -47,11 +51,28 @@ public class ResourceLoaderBaseEditor : Editor
 
     protected Texture2D _Texture;
 
+    protected SerializedProperty _TextureTypeProperty;
+    protected SerializedProperty _AlphaIsTransparency;
+
+    protected SerializedProperty _TextureWrapMode;
+
+    protected SerializedProperty _GenerateMipMaps;
+
+    protected SerializedProperty _FilterMode;
+
+
     private void OnEnable()
     {
         _ResourceFolder = Path.Combine(Environment.CurrentDirectory, "Resources");
         _CurrentNameInput = string.Empty;
         _InputNameID = GUIUtility.keyboardControl;
+
+
+        _TextureTypeProperty = serializedObject.FindProperty("m_TextureType");
+        _AlphaIsTransparency = serializedObject.FindProperty("m_AlphaIsTransparency");
+        _TextureWrapMode = serializedObject.FindProperty("m_TextureWrapMode");
+        _GenerateMipMaps = serializedObject.FindProperty("m_GenerateMipMaps");
+        _FilterMode = serializedObject.FindProperty("m_FilterMode");
     }
 
     public override void OnInspectorGUI()
@@ -91,9 +112,16 @@ public class ResourceLoaderBaseEditor : Editor
 
                 }
             }
-               GUI.color = Color.white;
+            GUI.color = Color.white;
             EditorGUILayout.EndVertical();
         }
+
+        EditorGUILayout.PropertyField(_TextureTypeProperty);
+        EditorGUILayout.PropertyField(_AlphaIsTransparency);
+        EditorGUILayout.PropertyField(_GenerateMipMaps);
+        EditorGUILayout.PropertyField(_TextureWrapMode);
+        EditorGUILayout.PropertyField(_FilterMode);
+
         GUI.color = Color.green;
         if (GUILayout.Button("Load"))
         {
@@ -154,6 +182,20 @@ public class ResourceLoaderBaseEditor : Editor
 
             File.Copy(path, filePath, true);
             AssetDatabase.Refresh();
+
+            //modify texture import setting
+            var importer = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
+            importer.textureType = (TextureImporterType)_TextureTypeProperty.intValue;
+            importer.mipmapEnabled = _GenerateMipMaps.boolValue;
+            importer.alphaSource = TextureImporterAlphaSource.FromInput;
+            importer.alphaIsTransparency = _AlphaIsTransparency.boolValue;
+            importer.wrapMode = (TextureWrapMode)_TextureWrapMode.intValue;
+            importer.filterMode = (FilterMode)_FilterMode.intValue;
+            importer.isReadable = true;
+            importer.SaveAndReimport();
+
+
+
             _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
         }
 

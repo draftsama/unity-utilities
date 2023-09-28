@@ -341,12 +341,12 @@ namespace Modules.Utilities
         // using UniTask
         public static async UniTask<Texture2D> GetTextureAsync(string _name){
 
-            var res = await GetResourceAsync(_name, ResourceResponse.ResourceType.Texture);
+            var res = await GetResourceAsync(_name);
             return res != null ? res.m_Texture : null;
         }
         public static async UniTask<Texture2D[]> GetTexturesAsync(string[] _names)
         {
-            var resArray = await GetResourcesAsync(_names, ResourceResponse.ResourceType.Texture);
+            var resArray = await GetResourcesAsync(_names);
             //return texture array from resource response array
             //if response is null then texture is null
             return resArray.Select(_ => _ != null?_.m_Texture:null ).ToArray();
@@ -355,13 +355,13 @@ namespace Modules.Utilities
 
         public static async UniTask<AudioClip> GetAudioClipAsync(string _name)
         {
-            var res = await GetResourceAsync(_name, ResourceResponse.ResourceType.AudioClip);
+            var res = await GetResourceAsync(_name);
             return res != null ? res.m_AudioClip : null;
         }
 
         public static async UniTask<AudioClip[]> GetAudioClipsAsync(string[] _names)
         {
-            var resArray = await GetResourcesAsync(_names, ResourceResponse.ResourceType.AudioClip);
+            var resArray = await GetResourcesAsync(_names);
             return resArray.Select(_ => _ != null ? _.m_AudioClip : null).ToArray();
         }
 
@@ -370,15 +370,21 @@ namespace Modules.Utilities
         
 
 
-        public static async UniTask<ResourceResponse> GetResourceAsync(string _name, ResourceResponse.ResourceType _type)
+        public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
             await UniTask.Yield();
             var instance = GetInstance();
             ResourceResponse response = null;
+
+            //get type from name
+            var extension = new FileInfo(_name).Extension;
+            var resourceType = GetResourceType(extension);
+
+
             //get from cache
             for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
             {
-                if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)
+                if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
                 {
                     response = instance.m_ResourceResponseList[i];
                     break;
@@ -395,53 +401,46 @@ namespace Modules.Utilities
                 if (!Directory.Exists(GetFolderResourcePath()))
                 {
                     //no folder resource
+                    // Debug.Log("No folder resource");
                     return null;
                 }
 
                 DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-
-                string searchPattern = GetSearchPattern(_type);
+                string searchPattern = GetSearchPattern(resourceType);
 
                 if (directoryInfo == null)
                 {
                     //no file
+                    // Debug.Log("No file");
                     return null;
                 }
 
 
 
-                var parts = Regex.Split(_name, @"\.");
-                if (parts.Length < 2)
-                {
-                    return null;
-
-                }
-                var extension = parts.Last();
-                var fileInfo = directoryInfo.GetFiles("*." + extension, SearchOption.AllDirectories)
+                var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories)
                 .Where(_file => _file.Name.Equals(_name))
                 .FirstOrDefault();
 
                 if (fileInfo != null)
-                {
                    return await LoadResourcesAsync(CreateResourceResponse(fileInfo.FullName));
-
-                }
                 else
-                {
                     return null;
-                }
+
 
             }
 
         }
 
-        public static async UniTask<ResourceResponse[]> GetResourcesAsync(string[] _fileNames,ResourceResponse.ResourceType _type)
+        public static async UniTask<ResourceResponse[]> GetResourcesAsync(string[] _fileNames)
         {
             var responselist = new ResourceResponse[_fileNames.Length];
             for (int i = 0; i < _fileNames.Length; i++)
             {
                 var fileName = _fileNames[i];
-                var res = await GetResourceAsync(fileName, _type);
+
+            
+
+                var res = await GetResourceAsync(fileName);
                 responselist[i] = res;
 
             }

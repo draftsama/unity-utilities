@@ -220,8 +220,8 @@ namespace Modules.Utilities
 
 
             _Stoping = false;
-            _VideoPlayer.Stop();
-            _CanvasGroup.SetAlpha(0);
+            if(_VideoPlayer != null)_VideoPlayer.Stop();
+            if(_CanvasGroup != null)_CanvasGroup.SetAlpha(0);
             // Debug.Log("Video End.");
 
         }

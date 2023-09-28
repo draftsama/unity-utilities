@@ -110,7 +110,9 @@ namespace Modules.Utilities
                 if (_ != null && _.m_Texture != null)
                 {
                     ApplyImage(_.m_Texture);
-                }else{
+                }
+                else
+                {
                     gameObject.SetActive(false);
                 }
             }).AddTo(this);
@@ -323,30 +325,45 @@ public class ResourceImageLoaderEditor : Editor
     {
         //delay load image
 
-        await Task.Delay(100); 
+        await Task.Delay(100);
 
 
         var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
         var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
 
 
-        
-        
-            var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
-            var filePath = Path.Combine(assetfolder, _filename);
 
-            var path = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                  .FirstOrDefault(file => Path.GetFileName(file) == _filename);
 
-            if (!string.IsNullOrEmpty(path))
-            {
-                if (!Directory.Exists(assetfolder))
-                    Directory.CreateDirectory(assetfolder);
+        var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
+        var filePath = Path.Combine(assetfolder, _filename);
 
-                File.Copy(path, filePath, true);
-                AssetDatabase.Refresh();
-                _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-            }
+        var path = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
+              .FirstOrDefault(file => Path.GetFileName(file) == _filename);
+
+        if (!string.IsNullOrEmpty(path))
+        {
+            if (!Directory.Exists(assetfolder))
+                Directory.CreateDirectory(assetfolder);
+
+            File.Copy(path, filePath, true);
+            AssetDatabase.Refresh();
+
+            //modify texture import settings
+            TextureImporter textureImporter = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
+            textureImporter.textureType = TextureImporterType.Sprite;
+            textureImporter.spriteImportMode = SpriteImportMode.Single;
+            textureImporter.mipmapEnabled = false;
+            textureImporter.filterMode = FilterMode.Point;
+            textureImporter.textureCompression = TextureImporterCompression.Uncompressed;
+            textureImporter.SaveAndReimport();
+
+
+
+            AssetDatabase.Refresh();
+            _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+
+          
+        }
 
         _Instance.ApplyImage(_Texture);
     }

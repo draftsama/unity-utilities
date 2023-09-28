@@ -8,6 +8,7 @@ using UnityEngine;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
+using UnityEngine.Events;
 
 
 namespace Modules.Utilities
@@ -18,56 +19,45 @@ namespace Modules.Utilities
 
         private static AudioSource _CurrentBGMAudio;
         public static bool ResourcesIsLoaded { get; private set; }
-        [SerializeField] public List<string> m_ResourceNames = new List<string>();
+        [SerializeField] public List<string> m_RequireAudios = new List<string>();
 
 
         [SerializeField] public List<AudioClip> m_Audiolist = new List<AudioClip>();
-        private List<AudioSource> m_AudioPlayerlist = new List<AudioSource>();
-        private static Action<Unit> OnLoadResourcesCompletedAction;
+        private List<AudioSource> m_AudioPlayerList = new List<AudioSource>();
+
+        [SerializeField] private UnityEvent _OnLoadRequireCompleted;
 
         private bool _IsPause = false;
 
         private void OnApplicationPause(bool pauseStatus)
         {
             _IsPause = pauseStatus;
+
+
         }
 
-        private void Awake()
+        private async void Awake()
         {
             _Instance = this;
             DontDestroyOnLoad(this);
+            await UniTask.Yield();
+            if (m_RequireAudios.Count > 0)
+            {
+                var audioClips = await ResourceManager.GetAudioClipsAsync(m_RequireAudios.ToArray());
 
-            if (m_ResourceNames.Count > 0)
-                ResourceManager.GetResources(m_ResourceNames.ToArray()).Subscribe(_res =>
-                {
-                    if (_res != null && _res.Count > 0)
-                    {
-                        AddAudioList(_res.Select(x => x.m_AudioClip).ToList());
-                        Debug.Log("Load Audio Completed");
-                        OnLoadResourcesCompletedAction?.Invoke(default);
-                        ResourcesIsLoaded = true;
-                    }
+                AddAudioList(audioClips.ToList());
+                Debug.Log("Load Audio Completed");
+                _OnLoadRequireCompleted?.Invoke();
 
-                }).AddTo(this);
+            }
 
-            // Observable.EveryUpdate().Subscribe(_ =>
-            // {
-            //     if (!_IsPause)
-            //     {
-            //         foreach (var player in m_AudioPlayerlist)
-            //         {
-
-            //             player.gameObject.SetActive(player.isPlaying);
-            //         }
-            //     }
-            // }).AddTo(this);
-
-
+            ResourcesIsLoaded = true;
         }
 
-        public static IObservable<Unit> OnLoadResourcesCompleted()
+
+        public IUniTaskAsyncEnumerable<AsyncUnit> OnLoadRequireCompleted(CancellationToken _token)
         {
-            return Observable.FromEvent<Unit>(_e => OnLoadResourcesCompletedAction += _e, _e => OnLoadResourcesCompletedAction -= _e);
+            return new UnityEventHandlerAsyncEnumerable(_OnLoadRequireCompleted, _token);
         }
 
         private static AudioManager GetInstance()
@@ -94,7 +84,7 @@ namespace Modules.Utilities
                 instance.m_Audiolist.Add(_audioClip);
         }
 
-       
+
         public static void PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true, CancellationToken _token = default)
         {
             var instance = GetInstance();
@@ -202,14 +192,14 @@ namespace Modules.Utilities
 
         private AudioSource GetAudioSource()
         {
-            AudioSource player = m_AudioPlayerlist.FirstOrDefault(_ => !_.gameObject.activeSelf);
+            AudioSource player = m_AudioPlayerList.FirstOrDefault(_ => !_.gameObject.activeSelf);
             if (player == null)
             {
-                var go = new GameObject($"AudioPlayer_{m_AudioPlayerlist.Count}", typeof(AudioSource));
+                var go = new GameObject($"AudioPlayer_{m_AudioPlayerList.Count}", typeof(AudioSource));
                 go.transform.SetParent(GetInstance().transform);
                 player = go.GetComponent<AudioSource>();
                 player.playOnAwake = false;
-                m_AudioPlayerlist.Add(player);
+                m_AudioPlayerList.Add(player);
             }
             else
                 player.gameObject.SetActive(true);
