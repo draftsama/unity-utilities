@@ -285,7 +285,7 @@ namespace Modules.Utilities
 
                     DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
 
-                    string searchPattern = GetSearchPattern(_type);
+                    // string searchPattern = GetSearchPattern(_type);
 
                     if (directoryInfo == null)
                     {
@@ -377,6 +377,7 @@ namespace Modules.Utilities
             ResourceResponse response = null;
 
             //get type from name
+            
             var extension = new FileInfo(_name).Extension;
             var resourceType = GetResourceType(extension);
 
@@ -406,7 +407,7 @@ namespace Modules.Utilities
                 }
 
                 DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-                string searchPattern = GetSearchPattern(resourceType);
+                // string searchPattern = GetSearchPattern(resourceType);
 
                 if (directoryInfo == null)
                 {
@@ -481,27 +482,28 @@ namespace Modules.Utilities
 
 
 
-            ResourceResponse response = new ResourceResponse();
-            response.m_Name = fileInfo.Name;
-            response.m_FilePath = fileInfo.FullName;
-            response.m_ResourceType = resourceType;
-            response.m_AudioType = audioType;
+            ResourceResponse response = new ResourceResponse
+            {
+                m_Name = fileInfo.Name,
+                m_FilePath = fileInfo.FullName,
+                m_ResourceType = resourceType,
+                m_AudioType = audioType
+            };
 
             return response;
         }
-        private static string GetSearchPattern(ResourceResponse.ResourceType _type)
+        public static string[] GetSearchPattern(ResourceResponse.ResourceType _type)
         {
-            string searchPattern = string.Empty;
             if (_type == ResourceResponse.ResourceType.Texture)
             {
-                searchPattern = ".png|.jpg|.jpeg";
+                return new string[] { ".png", ".jpg", ".jpeg" };
             }
             else if (_type == ResourceResponse.ResourceType.AudioClip)
             {
-                searchPattern = ".ogg|.wav|.mp3";
+                return new string[] { ".wav", ".mp3", ".ogg" };
 
             }
-            return searchPattern;
+            return null;
 
         }
         private static ResourceResponse.ResourceType GetResourceType(string _extension)
@@ -621,7 +623,7 @@ namespace Modules.Utilities
 
         }
 
-        private static string GetFolderResourcePath()
+        public static string GetFolderResourcePath()
         {
             return Path.Combine(Environment.CurrentDirectory, "Resources");
         }

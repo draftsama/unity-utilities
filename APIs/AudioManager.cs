@@ -9,7 +9,12 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Events;
+using System.IO;
 
+
+#if UNITY_EDITOR
+using UnityEditor;
+#endif
 
 namespace Modules.Utilities
 {
@@ -25,7 +30,7 @@ namespace Modules.Utilities
         [SerializeField] public List<AudioClip> m_Audiolist = new List<AudioClip>();
         private List<AudioSource> m_AudioPlayerList = new List<AudioSource>();
 
-        [SerializeField] private UnityEvent _OnLoadRequireCompleted;
+        [SerializeField] private UnityEvent m_OnLoadRequireCompleted;
 
         private bool _IsPause = false;
 
@@ -47,7 +52,7 @@ namespace Modules.Utilities
 
                 AddAudioList(audioClips.ToList());
                 Debug.Log("Load Audio Completed");
-                _OnLoadRequireCompleted?.Invoke();
+                m_OnLoadRequireCompleted?.Invoke();
 
             }
 
@@ -57,7 +62,7 @@ namespace Modules.Utilities
 
         public IUniTaskAsyncEnumerable<AsyncUnit> OnLoadRequireCompleted(CancellationToken _token)
         {
-            return new UnityEventHandlerAsyncEnumerable(_OnLoadRequireCompleted, _token);
+            return new UnityEventHandlerAsyncEnumerable(m_OnLoadRequireCompleted, _token);
         }
 
         private static AudioManager GetInstance()
@@ -209,4 +214,59 @@ namespace Modules.Utilities
             return player;
         }
     }
+
+#if UNITY_EDITOR
+    [CustomEditor(typeof(AudioManager))]
+    public class AudioManagerEditor : Editor
+    {
+
+        AudioManagerEditor _Instance;
+
+        SerializedProperty m_RequireAudios;
+        SerializedProperty m_Audiolist;
+        SerializedProperty m_OnLoadRequireCompleted;
+
+        private void OnEnable()
+        {
+            _Instance = target as AudioManagerEditor;
+
+            m_RequireAudios = serializedObject.FindProperty("m_RequireAudios");
+            m_Audiolist = serializedObject.FindProperty("m_Audiolist");
+            m_OnLoadRequireCompleted = serializedObject.FindProperty("m_OnLoadRequireCompleted");
+        }
+        public override void OnInspectorGUI()
+        {
+            serializedObject.Update();
+            EditorGUILayout.PropertyField(m_RequireAudios, true);
+
+            if(GUILayout.Button("Get All Audio Name From Resource"))
+            {
+                var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
+             
+                 string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
+
+                var files = dir.GetFiles("*.*", SearchOption.AllDirectories).Where(file => extensions.Contains(file.Extension)).ToArray();
+                var audioNames = files.Select(_ => _.Name).ToList();
+
+                m_RequireAudios.ClearArray();
+                m_RequireAudios.arraySize = audioNames.Count;
+
+                for (int i = 0; i < audioNames.Count; i++)
+                {
+                    m_RequireAudios.GetArrayElementAtIndex(i).stringValue = audioNames[i];
+                }
+          
+            }
+
+            EditorGUILayout.PropertyField(m_Audiolist, true);
+            EditorGUILayout.PropertyField(m_OnLoadRequireCompleted, true);
+
+
+            if(GUI.changed)
+                EditorUtility.SetDirty(target);
+
+            serializedObject.ApplyModifiedProperties();
+        }
+    }
+#endif
 }
