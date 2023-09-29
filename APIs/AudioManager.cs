@@ -48,6 +48,7 @@ namespace Modules.Utilities
             await UniTask.Yield();
             if (m_RequireAudios.Count > 0)
             {
+                ResourcesIsLoaded =false;
                 var audioClips = await ResourceManager.GetAudioClipsAsync(m_RequireAudios.ToArray());
 
                 AddAudioList(audioClips.ToList());
