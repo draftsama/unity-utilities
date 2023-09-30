@@ -48,7 +48,7 @@ namespace Modules.Utilities
             await UniTask.Yield();
             if (m_RequireAudios.Count > 0)
             {
-                ResourcesIsLoaded =false;
+                ResourcesIsLoaded = false;
                 var audioClips = await ResourceManager.GetAudioClipsAsync(m_RequireAudios.ToArray());
 
                 AddAudioList(audioClips.ToList());
@@ -90,15 +90,17 @@ namespace Modules.Utilities
                 instance.m_Audiolist.Add(_audioClip);
         }
 
-
-        public static void PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true, CancellationToken _token = default)
+        
+        public static async UniTaskVoid PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true, CancellationToken _token = default)
         {
             var instance = GetInstance();
             if (_token == default) _token = instance.GetCancellationTokenOnDestroy();
 
-            UniTask.Create(async () =>
+            try
             {
+
                 await UniTask.WaitUntil(() => ResourcesIsLoaded, cancellationToken: _token);
+
                 Debug.Log($"PlayBGM: {_name}");
 
 
@@ -106,12 +108,24 @@ namespace Modules.Utilities
 
                 if (clip == null)
                 {
-                    Debug.LogWarning($"AudioManager: {_name}: clip is null");
-                    return;
+                    var resAudio = await ResourceManager.GetAudioClipAsync(_name);
+
+                    if (resAudio == null)
+                    {
+                        Debug.LogError($"AudioManager: Can't find audio name {_name}");
+                        return;
+                    }
+                    else
+                    {
+                        clip = resAudio;
+                        AddAudio(clip);
+                    }
+
                 }
 
 
                 var audioPlayer = instance.GetAudioSource();
+
                 audioPlayer.gameObject.SetActive(true);
                 audioPlayer.loop = _loop;
                 audioPlayer.volume = _CurrentBGMAudio == null ? 0f : _volume;
@@ -130,8 +144,11 @@ namespace Modules.Utilities
                 if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
                 _CurrentBGMAudio = audioPlayer;
 
-            })
-            .AttachExternalCancellation(_token).Forget();
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
 
         }
 
@@ -156,18 +173,50 @@ namespace Modules.Utilities
                  }).AddTo(GetInstance());
         }
 
-        public static AudioSource PlayFX(string _name, float _volume = 1f)
+        public static async UniTask<AudioSource> PlayFX(string _name, float _volume = 1f, CancellationToken _token = default)
         {
             var instance = GetInstance();
-            var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
+            if (_token == default) _token = instance.GetCancellationTokenOnDestroy();
 
-            if (clip == null) return null;
+            try
+            {
 
-            var audioPlayer = instance.GetAudioSource();
-            audioPlayer.volume = _volume;
-            audioPlayer.clip = clip;
-            audioPlayer.Play();
-            return audioPlayer;
+                await UniTask.WaitUntil(() => ResourcesIsLoaded, cancellationToken: _token);
+
+                var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
+
+                if (clip == null)
+                {
+                    var resAudio = await ResourceManager.GetAudioClipAsync(_name);
+
+                    if (resAudio == null)
+                    {
+                        Debug.LogError($"AudioManager: Can't find audio name {_name}");
+                        return null;
+                    }
+                    else
+                    {
+                        clip = resAudio;
+                        AddAudio(clip);
+                    }
+
+                }
+
+                Debug.Log($"PlayFX: {_name}");
+
+                var audioPlayer = instance.GetAudioSource();
+                audioPlayer.volume = _volume;
+                audioPlayer.clip = clip;
+                audioPlayer.Play();
+                return audioPlayer;
+
+            }
+            catch (OperationCanceledException)
+            {
+                return null;
+            }
+
+
         }
 
 
@@ -240,11 +289,11 @@ namespace Modules.Utilities
             serializedObject.Update();
             EditorGUILayout.PropertyField(m_RequireAudios, true);
 
-            if(GUILayout.Button("Get All Audio Name From Resource"))
+            if (GUILayout.Button("Get All Audio Name From Resource"))
             {
                 var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
-             
-                 string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
+
+                string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
 
                 var files = dir.GetFiles("*.*", SearchOption.AllDirectories).Where(file => extensions.Contains(file.Extension)).ToArray();
                 var audioNames = files.Select(_ => _.Name).ToList();
@@ -256,14 +305,14 @@ namespace Modules.Utilities
                 {
                     m_RequireAudios.GetArrayElementAtIndex(i).stringValue = audioNames[i];
                 }
-          
+
             }
 
             EditorGUILayout.PropertyField(m_Audiolist, true);
             EditorGUILayout.PropertyField(m_OnLoadRequireCompleted, true);
 
 
-            if(GUI.changed)
+            if (GUI.changed)
                 EditorUtility.SetDirty(target);
 
             serializedObject.ApplyModifiedProperties();
