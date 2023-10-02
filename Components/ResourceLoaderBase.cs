@@ -17,7 +17,7 @@ public abstract class ResourceLoaderBase : MonoBehaviour
 
     [SerializeField] protected Texture2D _EditorSource;
 
-    [SerializeField] protected TextureImporterType m_TextureType = TextureImporterType.Default;
+    [SerializeField] protected int m_TextureTypeValue = 0;
     [SerializeField] protected bool m_AlphaIsTransparency = false;
     [SerializeField] protected bool m_GenerateMipMaps = false;
     [SerializeField] protected TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
@@ -51,7 +51,7 @@ public class ResourceLoaderBaseEditor : Editor
 
     protected Texture2D _Texture;
 
-    protected SerializedProperty _TextureTypeProperty;
+    protected SerializedProperty _TextureTypeValueProperty;
     protected SerializedProperty _AlphaIsTransparency;
 
     protected SerializedProperty _TextureWrapMode;
@@ -60,7 +60,7 @@ public class ResourceLoaderBaseEditor : Editor
 
     protected SerializedProperty _FilterMode;
 
-
+    TextureImporterType _TextureType;
     private void OnEnable()
     {
         _ResourceFolder = Path.Combine(Environment.CurrentDirectory, "Resources");
@@ -68,7 +68,7 @@ public class ResourceLoaderBaseEditor : Editor
         _InputNameID = GUIUtility.keyboardControl;
 
 
-        _TextureTypeProperty = serializedObject.FindProperty("m_TextureType");
+        _TextureTypeValueProperty = serializedObject.FindProperty("m_TextureTypeValue");
         _AlphaIsTransparency = serializedObject.FindProperty("m_AlphaIsTransparency");
         _TextureWrapMode = serializedObject.FindProperty("m_TextureWrapMode");
         _GenerateMipMaps = serializedObject.FindProperty("m_GenerateMipMaps");
@@ -116,7 +116,12 @@ public class ResourceLoaderBaseEditor : Editor
             EditorGUILayout.EndVertical();
         }
 
-        EditorGUILayout.PropertyField(_TextureTypeProperty);
+       
+
+        _TextureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
+        _TextureType = (TextureImporterType)EditorGUILayout.EnumPopup("Texture Type", _TextureType);
+        _TextureTypeValueProperty.intValue = (int)_TextureType;
+
         EditorGUILayout.PropertyField(_AlphaIsTransparency);
         EditorGUILayout.PropertyField(_GenerateMipMaps);
         EditorGUILayout.PropertyField(_TextureWrapMode);
@@ -185,7 +190,7 @@ public class ResourceLoaderBaseEditor : Editor
 
             //modify texture import setting
             var importer = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
-            importer.textureType = (TextureImporterType)_TextureTypeProperty.intValue;
+            importer.textureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
             importer.mipmapEnabled = _GenerateMipMaps.boolValue;
             importer.alphaSource = TextureImporterAlphaSource.FromInput;
             importer.alphaIsTransparency = _AlphaIsTransparency.boolValue;

@@ -99,23 +99,21 @@ namespace Modules.Utilities
             }
             UpdateLayout();
         }
-        private void Awake()
+        private async void Awake()
         {
             _RectTransform = GetComponent<RectTransform>();
             _AspectRatioFitter = GetComponent<AspectRatioFitter>();
 
-            ResourceManager.GetResource(m_FileName, ResourceManager.ResourceResponse.ResourceType.Texture).Subscribe(_ =>
+            var texture = await ResourceManager.GetResourceAsync(m_FileName);
+            if (texture != null && texture.m_Texture != null)
             {
-
-                if (_ != null && _.m_Texture != null)
-                {
-                    ApplyImage(_.m_Texture);
-                }
-                else
-                {
-                    gameObject.SetActive(false);
-                }
-            }).AddTo(this);
+                ApplyImage(texture.m_Texture);
+            }
+            else
+            {
+                gameObject.SetActive(false);
+            }
+           
 
 
         }

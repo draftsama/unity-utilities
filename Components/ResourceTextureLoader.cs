@@ -2,12 +2,11 @@ using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
 using Modules.Utilities;
-using Unity.Mathematics;
+using System.Linq;
 
 
 #if UNITY_EDITOR
 using UnityEditor;
-using System.Linq;
 #endif
 public class ResourceTextureLoader : ResourceLoaderBase
 {
@@ -43,7 +42,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
         if(_texture == null)return;
 
         _texture.wrapMode = m_TextureWrapMode;
-        _texture.alphaIsTransparency = m_AlphaIsTransparency;
+        // _texture.alphaIsTransparency = m_AlphaIsTransparency;
         _texture.filterMode = m_FilterMode;
         _texture.Apply();
 

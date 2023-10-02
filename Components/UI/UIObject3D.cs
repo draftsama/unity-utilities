@@ -31,7 +31,19 @@ namespace Modules.Utilities
 
         [SerializeField] private bool m_LookAt = false;
 
-        [SerializeField] private LayerMask m_CameraLayerMask = -1;
+        [SerializeField] private LayerMask m_LayerMask = -1;
+
+        //light
+
+        [SerializeField] private bool m_EnableLight = false;
+        [SerializeField] private Color m_LightColor = Color.white;
+        [SerializeField] private float m_LightIntensity = 1f;
+        [SerializeField] private Vector3 m_LightAngle = new Vector3(50, -30, 0);
+
+        [SerializeField] private Light m_Light;
+
+
+
 
 
 
@@ -65,10 +77,8 @@ namespace Modules.Utilities
             UpdateRenderTexture();
             UpdateCameraProperties();
 
-
-
         }
-       
+
 
 
         public void UpdateRenderTexture()
@@ -120,11 +130,36 @@ namespace Modules.Utilities
                 _Camera.transform.localRotation = Quaternion.identity;
                 _Camera.transform.localScale = Vector3.one;
             }
-            _Camera.cullingMask = m_CameraLayerMask;
+            _Camera.cullingMask = m_LayerMask;
             _Camera.clearFlags = CameraClearFlags.SolidColor;
             _Camera.backgroundColor = Color.clear;
 
+            if (m_EnableLight)
+                InitLight();
+            else
+                if(m_Light != null)m_Light.gameObject.SetActive(false);
         }
+
+        void InitLight()
+        {
+            if (m_Light == null)
+            {
+                m_Light = new GameObject("Light").AddComponent<Light>();
+                m_Light.transform.SetParent(transform);
+                m_Light.transform.localPosition = Vector3.zero;
+                m_Light.transform.localScale = Vector3.one;
+            }
+            m_Light.gameObject.SetActive(true);
+            m_Light.color = m_LightColor;
+            m_Light.intensity = m_LightIntensity;
+            m_Light.transform.localEulerAngles = m_LightAngle;
+            m_Light.cullingMask = m_LayerMask;
+            m_Light.type = LightType.Directional;
+
+            m_Light.transform.localRotation = Quaternion.Euler(m_LightAngle);
+
+        }
+      
 
         public void UpdateCameraProperties()
         {
@@ -166,13 +201,13 @@ namespace Modules.Utilities
     [CustomEditor(typeof(UIObject3D))]
     public class UIObject3DEditor : Editor
     {
-        SerializedProperty cameraLayerMaskProp;
+        SerializedProperty _LayerMaskProp;
         int lastLayerMask = 0;
         private void OnEnable()
         {
 
-            cameraLayerMaskProp = serializedObject.FindProperty("m_CameraLayerMask");
-            lastLayerMask = cameraLayerMaskProp.intValue;
+            _LayerMaskProp = serializedObject.FindProperty("m_LayerMask");
+            lastLayerMask = _LayerMaskProp.intValue;
         }
 
         public override void OnInspectorGUI()
@@ -191,6 +226,13 @@ namespace Modules.Utilities
             var lookAtProp = serializedObject.FindProperty("m_LookAt");
 
 
+            var enableLightProp = serializedObject.FindProperty("m_EnableLight");
+            var lightColorProp = serializedObject.FindProperty("m_LightColor");
+            var lightIntensityProp = serializedObject.FindProperty("m_LightIntensity");
+            var lightAngleProp = serializedObject.FindProperty("m_LightAngle");
+
+
+
 
 
 
@@ -206,21 +248,29 @@ namespace Modules.Utilities
             EditorGUILayout.PropertyField(heightProp);
             EditorGUILayout.PropertyField(lookAtProp);
 
-            EditorGUILayout.PropertyField(cameraLayerMaskProp);
+            EditorGUILayout.PropertyField(_LayerMaskProp);
+
+            EditorGUILayout.LabelField("Light Settings", EditorStyles.boldLabel);
+            EditorGUILayout.PropertyField(enableLightProp);
+            if (enableLightProp.boolValue)
+            {
+                EditorGUILayout.PropertyField(lightColorProp);
+                EditorGUILayout.PropertyField(lightIntensityProp);
+                EditorGUILayout.PropertyField(lightAngleProp);
+            }
+
 
             //when change layer mask then update camera properties
-            if (lastLayerMask != cameraLayerMaskProp.intValue)
+            if (lastLayerMask != _LayerMaskProp.intValue)
             {
-                // instance.UpdateCameraProperties();
-                // lastLayerMask = cameraLayerMaskProp.intValue;
-                // serializedObject.ApplyModifiedProperties();
+
                 GUI.changed = true;
             }
 
             //force update
             if (GUILayout.Button("Update"))
             {
-                 UpdateUI();
+                UpdateUI();
             }
 
 
@@ -235,7 +285,8 @@ namespace Modules.Utilities
             {
                 UpdateUI();
             }
-            void UpdateUI(){
+            void UpdateUI()
+            {
                 serializedObject.ApplyModifiedProperties();
 
                 instance.UpdateRenderTexture();

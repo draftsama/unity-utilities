@@ -101,7 +101,7 @@ namespace Modules.Utilities
 
                 await UniTask.WaitUntil(() => ResourcesIsLoaded, cancellationToken: _token);
 
-                Debug.Log($"PlayBGM: {_name}");
+                // Debug.Log($"PlayBGM: {_name}");
 
 
                 var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
@@ -202,7 +202,7 @@ namespace Modules.Utilities
 
                 }
 
-                Debug.Log($"PlayFX: {_name}");
+                // Debug.Log($"PlayFX: {_name}");
 
                 var audioPlayer = instance.GetAudioSource();
                 audioPlayer.volume = _volume;
