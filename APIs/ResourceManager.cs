@@ -21,6 +21,11 @@ namespace Modules.Utilities
         [SerializeField] private List<ResourceResponse> m_ResourceResponseList;
         private void Awake()
         {
+            if (_Instance != null)
+            {
+                Destroy(gameObject);
+                return;
+            }
             _Instance = this;
             m_ResourceResponseList = new List<ResourceResponse>();
 
