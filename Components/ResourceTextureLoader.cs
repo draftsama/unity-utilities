@@ -10,9 +10,14 @@ using UnityEditor;
 #endif
 public class ResourceTextureLoader : ResourceLoaderBase
 {
-
+    public enum ModelAspectRatio
+    {
+        None, WidthControlHeight, HeightControlWidth
+    }
+    
     [SerializeField][HideInInspector] private int _CurrentMaterialIndex = 0;
     [SerializeField][HideInInspector] private int _CurrentTexturePropertyIndex = 0;
+    [SerializeField] private ModelAspectRatio m_ModelAspectRatio = ModelAspectRatio.None;
 
     async void Start()
     {
@@ -20,7 +25,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
         if (string.IsNullOrEmpty(m_FileName)) return;
 
         var texture = await ResourceManager.GetTextureAsync(m_FileName);
-        
+
         ApplyImage(texture);
 
     }
@@ -39,13 +44,29 @@ public class ResourceTextureLoader : ResourceLoaderBase
     {
         var renderers = GetComponentsInChildren<Renderer>();
 
-        if(_texture == null)return;
+        if (_texture == null) return;
 
         _texture.wrapMode = m_TextureWrapMode;
         // _texture.alphaIsTransparency = m_AlphaIsTransparency;
         _texture.filterMode = m_FilterMode;
         _texture.Apply();
 
+        Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
+        if (m_ModelAspectRatio == ModelAspectRatio.WidthControlHeight)
+        {
+            var aspectRatio = (float)_texture.width / (float)_texture.height;
+            var size = transform.localScale;
+            size.y = size.x * aspectRatio;
+            transform.localScale = size;
+        }
+        else if (m_ModelAspectRatio == ModelAspectRatio.HeightControlWidth)
+        {
+            var aspectRatio = (float)_texture.width / (float)_texture.height;
+            Debug.Log($"aspectRatio : {aspectRatio}");
+            var size = transform.localScale;
+            size.x = size.y * aspectRatio;
+            transform.localScale = size;
+        }
 
 
         var materials = renderers.SelectMany(x => x.sharedMaterials).ToList();
@@ -80,7 +101,9 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
         var instance = target as ResourceTextureLoader;
         var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
         var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
+        var modelAspectRatio = serializedObject.FindProperty("m_ModelAspectRatio");
 
+        EditorGUILayout.PropertyField(modelAspectRatio);
 
         //get all materials in this object
         var renderers = instance.GetComponentsInChildren<Renderer>();
@@ -150,7 +173,8 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
 
         }
 
-        if(GUI.changed){
+        if (GUI.changed)
+        {
             EditorUtility.SetDirty(target);
         }
         serializedObject.ApplyModifiedProperties();
