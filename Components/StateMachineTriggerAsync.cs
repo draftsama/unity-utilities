@@ -46,7 +46,7 @@ namespace Modules.Utilities
         // OnStateEnter
         UnityEvent<OnStateInfo> onStateEnter;
         
-        public IUniTaskAsyncEnumerable<OnStateInfo> OnEnterStateAsyncEnumerable(CancellationToken _token)
+        public IUniTaskAsyncEnumerable<OnStateInfo> OnStateEnterAsyncEnumerable(CancellationToken _token)
         {
             if (onStateEnter == null) onStateEnter = new UnityEvent<OnStateInfo>();
             return new UnityEventHandlerAsyncEnumerable<OnStateInfo>(onStateEnter, _token);
@@ -58,7 +58,7 @@ namespace Modules.Utilities
 
        //OnStateExit
         UnityEvent<OnStateInfo> onStateExit;
-        public IUniTaskAsyncEnumerable<OnStateInfo> OnExitStateAsyncEnumerable(CancellationToken _token)
+        public IUniTaskAsyncEnumerable<OnStateInfo> OnStateExitAsyncEnumerable(CancellationToken _token)
         {   
             if (onStateExit == null) onStateExit = new UnityEvent<OnStateInfo>();
             return new UnityEventHandlerAsyncEnumerable<OnStateInfo>(onStateExit, _token);
@@ -70,7 +70,7 @@ namespace Modules.Utilities
 
         // OnStateMachineEnter
         UnityEvent<OnStateMachineInfo> onStateMachineEnter;
-        public IUniTaskAsyncEnumerable<OnStateMachineInfo> OnEnterStateMachineAsyncEnumerable(CancellationToken _token)
+        public IUniTaskAsyncEnumerable<OnStateMachineInfo> OnStateMachineEnterAsyncEnumerable(CancellationToken _token)
         {
             if (onStateMachineEnter == null) onStateMachineEnter = new UnityEvent<OnStateMachineInfo>();
             return new UnityEventHandlerAsyncEnumerable<OnStateMachineInfo>(onStateMachineEnter, _token);
@@ -82,7 +82,7 @@ namespace Modules.Utilities
 
         // OnStateMachineExit
         UnityEvent<OnStateMachineInfo> onStateMachineExit;
-        public IUniTaskAsyncEnumerable<OnStateMachineInfo> OnExitStateMachineAsyncEnumerable(CancellationToken _token)
+        public IUniTaskAsyncEnumerable<OnStateMachineInfo> OnStateMachineExitAsyncEnumerable(CancellationToken _token)
         {
             if (onStateMachineExit == null) onStateMachineExit = new UnityEvent<OnStateMachineInfo>();
             return new UnityEventHandlerAsyncEnumerable<OnStateMachineInfo>(onStateMachineExit, _token);
@@ -94,7 +94,7 @@ namespace Modules.Utilities
 
         // OnStateMove
         UnityEvent<OnStateInfo> onStateMove;
-        public IUniTaskAsyncEnumerable<OnStateInfo> OnMoveStateAsyncEnumerable(CancellationToken _token)
+        public IUniTaskAsyncEnumerable<OnStateInfo> OnStateMoveAsyncEnumerable(CancellationToken _token)
         {
             if (onStateMove == null) onStateMove = new UnityEvent<OnStateInfo>();
             return new UnityEventHandlerAsyncEnumerable<OnStateInfo>(onStateMove, _token);
@@ -106,7 +106,7 @@ namespace Modules.Utilities
 
         // OnStateIK
         UnityEvent<OnStateInfo> onStateIK;
-        public IUniTaskAsyncEnumerable<OnStateInfo> OnIKStateAsyncEnumerable(CancellationToken _token)
+        public IUniTaskAsyncEnumerable<OnStateInfo> OnStateIKAsyncEnumerable(CancellationToken _token)
         {
             if (onStateIK == null) onStateIK = new UnityEvent<OnStateInfo>();
             return new UnityEventHandlerAsyncEnumerable<OnStateInfo>(onStateIK, _token);
