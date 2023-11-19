@@ -14,7 +14,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
     {
         None, WidthControlHeight, HeightControlWidth
     }
-    
+
     [SerializeField][HideInInspector] private int _CurrentMaterialIndex = 0;
     [SerializeField][HideInInspector] private int _CurrentTexturePropertyIndex = 0;
     [SerializeField] private ModelAspectRatio m_ModelAspectRatio = ModelAspectRatio.None;
@@ -73,10 +73,15 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
         if (materials.Count > 0)
         {
+#if UNITY_2022_1_OR_NEWER
+
             var propName = materials[_CurrentMaterialIndex].GetPropertyNames(MaterialPropertyType.Texture)
                 .ElementAtOrDefault(_CurrentTexturePropertyIndex);
-
-            materials[_CurrentMaterialIndex].SetTexture(propName, _texture);
+#else
+            var propName = materials[_CurrentMaterialIndex].GetTexturePropertyNames()
+                .ElementAtOrDefault(_CurrentTexturePropertyIndex);
+#endif
+         materials[_CurrentMaterialIndex].SetTexture(propName, _texture);
         }
 
     }
@@ -137,15 +142,32 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
 
             }
 
-            var propName = materials[index].GetPropertyNames(MaterialPropertyType.Texture);
 
-            if (propName.Length > 0)
+#if UNITY_2022_1_OR_NEWER
+            var propNames = materials[index].GetPropertyNames(MaterialPropertyType.Texture);
+
+            if (propNames.Length > 0)
             {
-                texturePropertyIndex = Mathf.Clamp(texturePropertyIndex, 0, materials[index].GetPropertyNames(MaterialPropertyType.Texture).Length - 1);
+                texturePropertyIndex = Mathf.Clamp(texturePropertyIndex, 0, propNames.Length - 1);
 
-                texturePropertyIndex = EditorGUILayout.Popup("Texture Property", texturePropertyIndex, propName.ToArray());
+                texturePropertyIndex = EditorGUILayout.Popup("Texture Property", texturePropertyIndex, propNames.ToArray());
                 currentTexturePropertyIndex.intValue = texturePropertyIndex;
             }
+
+#else
+            var propNames = materials[index].GetTexturePropertyNames().ToList();
+            if (propNames.Count > 0)
+            {
+                texturePropertyIndex = Mathf.Clamp(texturePropertyIndex, 0, propNames.Count - 1);
+
+                texturePropertyIndex = EditorGUILayout.Popup("Texture Property", texturePropertyIndex, propNames.ToArray());
+                currentTexturePropertyIndex.intValue = texturePropertyIndex;
+            }
+           
+#endif
+
+
+
 
 
             currentMaterialIndex.intValue = index;
@@ -157,7 +179,6 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
             }
             if (GUILayout.Button("Clear All Texture"))
             {
-                var propNames = materials[index].GetPropertyNames(MaterialPropertyType.Texture);
                 foreach (var p in propNames)
                 {
                     materials[index].SetTexture(p, null);

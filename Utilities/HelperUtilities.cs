@@ -8,7 +8,7 @@ namespace Modules.Utilities
     {
 
 
-        public static bool IsBoxCollider2DInCameraView(Vector3 _position, BoxCollider2D _boxCollider, Camera _camera)
+        public static bool BoxCollider2DInCameraView(Vector3 _position, BoxCollider2D _boxCollider, Camera _camera)
         {
             //work with Orthographic camera only
             if (_camera == null)
@@ -31,7 +31,7 @@ namespace Modules.Utilities
             return _position.x <= right && _position.x >= -right && _position.y <= top && _position.y >= -top;
         }
 
-        public static bool IsPositionInCameraView(Vector3 _position, Camera _camera, out Vector2 _screenPosition)
+        public static bool BoxCollider2DInScreenPointView(Vector3 _position, BoxCollider2D _boxCollider, Camera _camera, out Vector2 _screenPosition)
         {
             _screenPosition = Vector2.zero;
             if (_camera == null)
@@ -50,53 +50,56 @@ namespace Modules.Utilities
 
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
         }
-        public static Vector2 CalculateViewportSize(Vector3 target, Camera camera = null)
+    
+
+
+        /// <summary>
+        /// Check if position is in camera view
+        /// </summary>
+
+        public static bool PositionInCameraView(Vector3 _position, Camera _camera)
         {
-            // If camera is not provided, try getting the main camera
-            if (camera == null && !Camera.main.TryGetComponent(out camera))
+            //work with Orthographic camera only
+            if (_camera == null)
+                _camera = Camera.main;
+
+            if (_camera == null)
             {
-                Debug.LogWarning("No Camera");
-                return Vector2.zero;
+                Debug.LogWarning($"Camera is null");
+                return false;
             }
+            var halfHeight = _camera.orthographicSize;
+            var screenWidth = (halfHeight * 2f) * _camera.aspect;
+            var halfWidth = screenWidth / 2f;
 
-            // Calculate the distance once
-            float distance = Vector3.Distance(camera.transform.position, target);
-
-            // Calculate viewport points
-            Vector3 bottomLeft = camera.ViewportToWorldPoint(new Vector3(0, 0, distance));
-            Vector3 topRight = camera.ViewportToWorldPoint(new Vector3(1, 1, distance));
-
-            // Calculate and return size
-            return (Vector2)(topRight - bottomLeft);
-
+            return _position.x <= halfWidth && _position.x >= -halfWidth && _position.y <= halfHeight && _position.y >= -halfHeight;
         }
-        public static Bounds CalculateBoxColliderFromMeshs(Transform _target, bool _isIncludeChildren = false )
+
+        
+        /// <summary>
+        /// Check if position is in camera view and return screen position
+        /// </summary>
+        public static bool PositionInScreenPointView(Vector3 _position, Camera _camera, out Vector2 _screenPosition)
         {
-            if (_target == null)
+            _screenPosition = Vector2.zero;
+            if (_camera == null)
+                _camera = Camera.main;
+
+            if (_camera == null)
             {
-                Debug.LogWarning($"Target is null");
-                return new Bounds();
+                Debug.LogWarning($"No Camera");
+                return false;
             }
 
-            var renderers = _isIncludeChildren ? _target.GetComponentsInChildren<Renderer>() : new Renderer[1] { _target.GetComponent<Renderer>() };
+            var point = Camera.main.WorldToViewportPoint(_position);
 
-            if (renderers == null || renderers.Length == 0)
-            {
-                Debug.LogWarning($"No Renderer");
-                return new Bounds();
-            }
+            _screenPosition.x = point.x * Screen.width;
+            _screenPosition.y = point.y * Screen.width;
 
-            var bounds = new Bounds();
-
-            foreach (var renderer in renderers)
-            {
-                bounds.Encapsulate(renderer.bounds);
-            }
-
-            return bounds;
-
-           
+            return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
         }
+
+    
 
         public static float VectorToDegree(Vector2 _vector)
         {

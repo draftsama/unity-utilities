@@ -106,8 +106,16 @@ namespace UniRx
         public static IObservable<UnityWebRequest> PostRequest(string _url, string _postData,
             IDictionary<string, string> _headers, IProgress<float> _progress = null)
         {
+            #if UNITY_2022_1_OR_NEWER
+
+
             return ObservableUnity.FromCoroutine<UnityWebRequest>((_observer, _cancellation) =>
                 FetchRequest(UnityWebRequest.PostWwwForm(_url, _postData), new System.Text.UTF8Encoding().GetBytes(_postData), _headers, _observer, _progress, _cancellation));
+       
+            #else
+            return ObservableUnity.FromCoroutine<UnityWebRequest>((_observer, _cancellation) =>
+                FetchRequest(UnityWebRequest.Post(_url, _postData), new System.Text.UTF8Encoding().GetBytes(_postData), _headers, _observer, _progress, _cancellation));
+            #endif
         }
 
         public static IObservable<UnityWebRequest> DeleteRequest(string _url,
