@@ -158,8 +158,10 @@ namespace Modules.Utilities
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
 
-                while (!_token.IsCancellationRequested && (_VideoPlayer.isPlaying || m_Loop))
+                while ( !_token.IsCancellationRequested )
                 {
+                    if (_VideoPlayer == null || ( !_VideoPlayer.isPlaying && !m_Loop))
+                        break;
 
                     m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
                     _Preview.texture = _VideoPlayer.texture;
@@ -206,7 +208,7 @@ namespace Modules.Utilities
                     }
 
 
-                    await UniTask.Yield(PlayerLoopTiming.Update, _token);
+                    await UniTask.Yield(PlayerLoopTiming.Update);
                 }
 
 

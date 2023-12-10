@@ -79,6 +79,14 @@ namespace Modules.Utilities
 
         }
 
+        public void SetTarget(Transform target,string layerName)
+        {
+            m_Target = target;
+            m_LayerMask = LayerMask.GetMask(layerName);
+           
+        }
+       
+
 
 
         public void UpdateRenderTexture()
