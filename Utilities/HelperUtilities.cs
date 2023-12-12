@@ -132,5 +132,33 @@ namespace Modules.Utilities
             else return index;
         }
 
+        public static Bounds CalculateBoxColliderFromMeshs(Transform _target, bool _isIncludeChildren = false )
+        {
+            if (_target == null)
+            {
+                Debug.LogWarning($"Target is null");
+                return new Bounds();
+            }
+
+            var renderers = _isIncludeChildren ? _target.GetComponentsInChildren<Renderer>() : new Renderer[1] { _target.GetComponent<Renderer>() };
+
+            if (renderers == null || renderers.Length == 0)
+            {
+                Debug.LogWarning($"No Renderer");
+                return new Bounds();
+            }
+
+            var bounds = new Bounds();
+
+            foreach (var renderer in renderers)
+            {
+                bounds.Encapsulate(renderer.bounds);
+            }
+
+            return bounds;
+
+           
+        }
+
     }
 }
