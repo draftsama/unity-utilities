@@ -51,7 +51,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
         _texture.filterMode = m_FilterMode;
         _texture.Apply();
 
-        Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
+        // Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
         if (m_ModelAspectRatio == ModelAspectRatio.WidthControlHeight)
         {
             var aspectRatio = (float)_texture.width / (float)_texture.height;
@@ -62,7 +62,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
         else if (m_ModelAspectRatio == ModelAspectRatio.HeightControlWidth)
         {
             var aspectRatio = (float)_texture.width / (float)_texture.height;
-            Debug.Log($"aspectRatio : {aspectRatio}");
+            // Debug.Log($"aspectRatio : {aspectRatio}");
             var size = transform.localScale;
             size.x = size.y * aspectRatio;
             transform.localScale = size;
