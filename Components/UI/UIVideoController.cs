@@ -226,6 +226,9 @@ namespace Modules.Utilities
             if(_CanvasGroup != null)_CanvasGroup.SetAlpha(0);
             // Debug.Log("Video End.");
 
+            _OnEndEventHandler.Invoke();
+            _OnEnd?.Invoke(Unit.Default);
+
         }
 
         public void Pause()
