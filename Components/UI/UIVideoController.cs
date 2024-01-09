@@ -126,7 +126,6 @@ namespace Modules.Utilities
             if (_VideoPlayer.isPlaying)
                 return;
 
-            // Debug.Log("Play Video");
 
             if (_token == default)
             {
@@ -149,6 +148,9 @@ namespace Modules.Utilities
                 if (!_VideoPlayer.isPrepared)
                 {
                     SetupURL(m_FileName, m_PathType, m_FolderName);
+
+                    Debug.Log("Play Video : " + _VideoPlayer.url);
+
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
 
@@ -158,9 +160,9 @@ namespace Modules.Utilities
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
 
-                while ( !_token.IsCancellationRequested )
+                while (!_token.IsCancellationRequested)
                 {
-                    if (_VideoPlayer == null || ( !_VideoPlayer.isPlaying && !m_Loop))
+                    if (_VideoPlayer == null)
                         break;
 
                     m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
@@ -179,6 +181,7 @@ namespace Modules.Utilities
                     }
                     else if (!m_Loop && _VideoPlayer.time >= _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) || _Stoping)
                     {
+
                         fadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
                         var valueProgress = Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 1f, 0f, fadeOutProgress));
                         //fade out
@@ -186,7 +189,12 @@ namespace Modules.Utilities
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
 
                         if (fadeOutProgress >= 1f)
+                        {
+                            Debug.Log("Video End :" + _VideoPlayer.url);
+                            _OnEndEventHandler.Invoke();
+                            _OnEnd?.Invoke(Unit.Default);
                             break;
+                        }
                     }
                     else
                     {
@@ -219,15 +227,28 @@ namespace Modules.Utilities
                 // Debug.Log("Video Canceled.");
 
             }
+            catch (Exception e)
+            {
+                Debug.Log(e);
+            }
+            finally
+            {
+                _Stoping = false;
+                if (_VideoPlayer != null) _VideoPlayer.Stop();
+                if (_CanvasGroup != null) _CanvasGroup.SetAlpha(0);
+
+              
+
+            }
 
 
-            _Stoping = false;
-            if(_VideoPlayer != null)_VideoPlayer.Stop();
-            if(_CanvasGroup != null)_CanvasGroup.SetAlpha(0);
-            // Debug.Log("Video End.");
+            // _Stoping = false;
+            // if(_VideoPlayer != null)_VideoPlayer.Stop();
+            // if(_CanvasGroup != null)_CanvasGroup.SetAlpha(0);
+            // // Debug.Log("Video End.");
 
-            _OnEndEventHandler.Invoke();
-            _OnEnd?.Invoke(Unit.Default);
+            // _OnEndEventHandler.Invoke();
+            // _OnEnd?.Invoke(Unit.Default);
 
         }
 
