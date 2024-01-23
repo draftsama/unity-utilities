@@ -124,11 +124,11 @@ namespace Modules.Utilities
 
         }
 
-        public static int RandomIndexWithoutCurrent(int _currentIndex, int _max)
+        public static int RandomIndexWithoutCurrent(int _currentIndex, int _max,int _limitRepeat =  20)
         {
             var index = UnityEngine.Random.Range(0, _max);
 
-            if (index == _currentIndex) return RandomIndexWithoutCurrent(_currentIndex, _max);
+            if (index == _currentIndex && _limitRepeat > 0) return RandomIndexWithoutCurrent(_currentIndex, _max,_limitRepeat - 1);
             else return index;
         }
 
