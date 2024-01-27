@@ -2,6 +2,8 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
+using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks.Linq;
 
 [ExecuteInEditMode]
 public class PlaneScreenViewport : MonoBehaviour
@@ -16,7 +18,15 @@ public class PlaneScreenViewport : MonoBehaviour
     private Transform _Tr;
     void Start()
     {
-        UpdatePlaneScreen();
+
+        if(m_UpdateAlways){
+            UniTaskAsyncEnumerable.EveryUpdate().Subscribe(_ =>
+            {
+                UpdatePlaneScreen();
+            }, cancellationToken: this.GetCancellationTokenOnDestroy());
+        }else{
+            UpdatePlaneScreen();
+        }
     }
 
     public void UpdatePlaneScreen()
@@ -54,10 +64,7 @@ public class PlaneScreenViewport : MonoBehaviour
     }
 
 
-    private void Update()
-    {
-        if (m_UpdateAlways) UpdatePlaneScreen();
-    }
+    
 
 
 

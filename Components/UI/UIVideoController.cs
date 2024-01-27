@@ -269,7 +269,7 @@ namespace Modules.Utilities
             if (!_VideoPlayer || !_VideoPlayer.isPlaying)
                 return;
 
-            // Debug.Log("Stop Video");
+            //  Debug.Log($"Stop Video :{m_FileName} ");
             _IgnoreFadeOut = _ignoreFadeOut;
             _Stoping = true;
 

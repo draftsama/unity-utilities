@@ -90,11 +90,12 @@ namespace Modules.Utilities
                 instance.m_Audiolist.Add(_audioClip);
         }
 
-        
-        public static async UniTaskVoid PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true, CancellationToken _token = default)
+
+        public static async UniTask PlayBGM(string _name, float _transitionTime = 0f, float _volume = 1f, bool _loop = true, CancellationToken _token = default)
         {
             var instance = GetInstance();
             if (_token == default) _token = instance.GetCancellationTokenOnDestroy();
+            AudioSource audioPlayer = null;
 
             try
             {
@@ -124,7 +125,7 @@ namespace Modules.Utilities
                 }
 
 
-                var audioPlayer = instance.GetAudioSource();
+                audioPlayer = instance.GetAudioSource();
 
                 audioPlayer.gameObject.SetActive(true);
                 audioPlayer.loop = _loop;
@@ -144,11 +145,16 @@ namespace Modules.Utilities
                 if (_CurrentBGMAudio != null) _CurrentBGMAudio.Stop();
                 _CurrentBGMAudio = audioPlayer;
 
+                await UniTask.WaitUntil(() => audioPlayer.isPlaying == false, cancellationToken: _token);
+
             }
             catch (OperationCanceledException)
             {
-                return;
             }
+
+            if (audioPlayer != null)
+                audioPlayer.gameObject.SetActive(false);
+
 
         }
 
@@ -173,10 +179,11 @@ namespace Modules.Utilities
                  }).AddTo(GetInstance());
         }
 
-        public static async UniTask<AudioSource> PlayFX(string _name, float _volume = 1f, CancellationToken _token = default)
+        public static async UniTask PlayFX(string _name, float _volume = 1f, CancellationToken _token = default)
         {
             var instance = GetInstance();
             if (_token == default) _token = instance.GetCancellationTokenOnDestroy();
+            AudioSource audioPlayer = null;
 
             try
             {
@@ -192,7 +199,7 @@ namespace Modules.Utilities
                     if (resAudio == null)
                     {
                         Debug.LogError($"AudioManager: Can't find audio name {_name}");
-                        return null;
+                        return;
                     }
                     else
                     {
@@ -203,18 +210,22 @@ namespace Modules.Utilities
                 }
 
                 // Debug.Log($"PlayFX: {_name}");
-
-                var audioPlayer = instance.GetAudioSource();
+                audioPlayer = instance.GetAudioSource();
                 audioPlayer.volume = _volume;
                 audioPlayer.clip = clip;
                 audioPlayer.Play();
-                return audioPlayer;
+
+                await UniTask.WaitUntil(() => audioPlayer.isPlaying == false, cancellationToken: _token);
+
 
             }
             catch (OperationCanceledException)
             {
-                return null;
+
             }
+
+            if (audioPlayer != null)
+                audioPlayer.gameObject.SetActive(false);
 
 
         }
