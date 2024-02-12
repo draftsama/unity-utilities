@@ -43,12 +43,22 @@ namespace Modules.Utilities
                 return false;
             }
 
-            var point = Camera.main.WorldToViewportPoint(_position);
+            var point = _camera.WorldToViewportPoint(_position);
+
+            var minX = _position.x - _boxCollider.size.x / 2f;
+            var maxX = _position.x + _boxCollider.size.x / 2f;
+            var minY = _position.y - _boxCollider.size.y / 2f;
+            var maxY = _position.y + _boxCollider.size.y / 2f;
+
+            var min = _camera.WorldToScreenPoint(new Vector3(minX, minY, 0));
+            var max = _camera.WorldToScreenPoint(new Vector3(maxX, maxY, 0));
 
             _screenPosition.x = point.x * Screen.width;
             _screenPosition.y = point.y * Screen.width;
 
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
+
+
         }
     
 
@@ -57,7 +67,7 @@ namespace Modules.Utilities
         /// Check if position is in camera view
         /// </summary>
 
-        public static bool PositionInCameraView(Vector3 _position, Camera _camera)
+        public static bool IsPositionInCameraView(Vector3 _position, Camera _camera)
         {
             //work with Orthographic camera only
             if (_camera == null)
@@ -159,6 +169,8 @@ namespace Modules.Utilities
 
            
         }
+
+        
 
     }
 }

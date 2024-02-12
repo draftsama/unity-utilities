@@ -8,6 +8,11 @@ using System.Diagnostics;
 
 public class MenuEditor
 {
+    [MenuItem("Utilities/Open Project Floder")]
+    public static void OpenProjectFolder()
+    {
+        OpenFolder(Environment.CurrentDirectory);
+    }
     [MenuItem("Utilities/Open Resources Floder")]
     public static void OpenResourcesFloder()
     {
@@ -17,10 +22,20 @@ public class MenuEditor
         {
             Directory.CreateDirectory(folderPath);
         }
+        OpenFolder(folderPath);
+    }
+
+
+
+    public static void OpenFolder(string path)
+    {
+
 #if UNITY_EDITOR_WIN
-        Process.Start("explorer.exe", folderPath);
+        Process.Start("explorer.exe", path);
 #elif UNITY_EDITOR_OSX
-        Process.Start("open", folderPath);
+        Process.Start("open", path);
 #endif
     }
+
+
 }

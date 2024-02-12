@@ -2,7 +2,6 @@ using System.Collections;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
 using UniRx;
-using Unity.VisualScripting;
 using UnityEngine;
 namespace Modules.Utilities
 {
@@ -49,7 +48,18 @@ namespace Modules.Utilities
                     return false;
             }
 
-            await System.IO.File.WriteAllBytesAsync(path, bytes);
+
+            #if UNITY_2020
+                //write another thread
+                // System.IO.File.WriteAllBytes(path, bytes);
+
+                await UniTask.Run(() =>
+                {
+                    System.IO.File.WriteAllBytes(path, bytes);
+                });
+            #else
+                await System.IO.File.WriteAllBytesAsync(path, bytes);
+            #endif
 
             bytes = null;
 
