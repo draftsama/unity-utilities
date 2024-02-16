@@ -13,8 +13,10 @@ namespace Modules.Utilities
     public class ValueConfigAsset : ScriptableObject
     {
 
-        [SerializeField]public ValueCollection m_ValueCollection;
+        [SerializeField] public ValueCollection m_ValueCollection;
         [SerializeField] public bool m_NeedUpdate;
+
+
     }
 
 
@@ -26,8 +28,11 @@ namespace Modules.Utilities
 
         SerializedProperty _NeedUpdateProperty;
         SerializedProperty _ValueCollectionProperty;
+        ValueConfigAsset _Instance;
         private void OnEnable()
         {
+
+            _Instance = target as ValueConfigAsset;
 
             _NeedUpdateProperty = serializedObject.FindProperty("m_NeedUpdate");
             _ValueCollectionProperty = serializedObject.FindProperty("m_ValueCollection");
@@ -38,23 +43,24 @@ namespace Modules.Utilities
 
             serializedObject.Update();
 
-            
+
             var items = _ValueCollectionProperty.FindPropertyRelative("m_Items");
-            var max =  items.arraySize;
+            var max = items.arraySize;
             List<string> keyList = new List<string>();
             for (int i = 0; i < max; i++)
             {
                 var value = items.GetArrayElementAtIndex(i);
                 var key = value.FindPropertyRelative("key");
-                if(keyList.Contains(key.stringValue)){
-                        EditorGUILayout.HelpBox($"Index:{i} key:{key.stringValue} - This key is duplicate", MessageType.Error);
+                if (keyList.Contains(key.stringValue))
+                {
+                    EditorGUILayout.HelpBox($"Index:{i} key:{key.stringValue} - This key is duplicate", MessageType.Error);
                 }
 
-                 keyList.Add(key.stringValue);
+                keyList.Add(key.stringValue);
 
             }
 
-            
+
 
             if (GUI.changed)
             {
