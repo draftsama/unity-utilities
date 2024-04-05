@@ -40,7 +40,7 @@ namespace Modules.Utilities
             {
                 _Instance = FindObjectOfType<ResourceManager>();
                 if (_Instance != null) return _Instance;
-                
+
                 GameObject go = new GameObject("ResourceManager", typeof(ResourceManager));
                 _Instance = go.GetComponent<ResourceManager>();
             }
@@ -344,7 +344,8 @@ namespace Modules.Utilities
         }
 
         // using UniTask
-        public static async UniTask<Texture2D> GetTextureAsync(string _name){
+        public static async UniTask<Texture2D> GetTextureAsync(string _name)
+        {
 
             var res = await GetResourceAsync(_name);
             return res != null ? res.m_Texture : null;
@@ -354,8 +355,8 @@ namespace Modules.Utilities
             var resArray = await GetResourcesAsync(_names);
             //return texture array from resource response array
             //if response is null then texture is null
-            return resArray.Select(_ => _ != null?_.m_Texture:null ).ToArray();
-           
+            return resArray.Select(_ => _ != null ? _.m_Texture : null).ToArray();
+
         }
 
         public static async UniTask<AudioClip> GetAudioClipAsync(string _name)
@@ -371,18 +372,27 @@ namespace Modules.Utilities
         }
 
 
-
-        
-
-
+        public static List<string> m_LoadingResources = new List<string>();
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
+
+            if (m_LoadingResources.Contains(_name))
+            {
+                await UniTask.WaitUntil(() => !m_LoadingResources.Contains(_name));
+            }
+            else
+            {
+                m_LoadingResources.Add(_name);
+
+            }
+
+
             await UniTask.Yield();
             var instance = GetInstance();
             ResourceResponse response = null;
 
             //get type from name
-            
+
             var extension = new FileInfo(_name).Extension;
             var resourceType = GetResourceType(extension);
 
@@ -428,7 +438,12 @@ namespace Modules.Utilities
                 .FirstOrDefault();
 
                 if (fileInfo != null)
-                   return await LoadResourcesAsync(CreateResourceResponse(fileInfo.FullName));
+                {
+
+                    var resource = await LoadResourcesAsync(CreateResourceResponse(fileInfo.FullName));
+                    m_LoadingResources.Remove(_name);
+                    return resource;
+                }
                 else
                     return null;
 
@@ -444,7 +459,7 @@ namespace Modules.Utilities
             {
                 var fileName = _fileNames[i];
 
-            
+
 
                 var res = await GetResourceAsync(fileName);
                 responselist[i] = res;
