@@ -372,23 +372,14 @@ namespace Modules.Utilities
         }
 
 
-        public static List<string> m_LoadingResources = new List<string>();
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
-
-            if (m_LoadingResources.Contains(_name))
-            {
-                await UniTask.WaitUntil(() => !m_LoadingResources.Contains(_name));
-            }
-            else
-            {
-                m_LoadingResources.Add(_name);
-
-            }
-
-
             await UniTask.Yield();
+
             var instance = GetInstance();
+           
+
+
             ResourceResponse response = null;
 
             //get type from name
@@ -403,16 +394,22 @@ namespace Modules.Utilities
                 if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
                 {
                     response = instance.m_ResourceResponseList[i];
+
                     break;
                 }
             }
 
+
             if (response != null)
             {
+                await UniTask.WaitUntil(() => response.m_Texture != null || response.m_AudioClip != null);
+
                 return response;
             }
             else
             {
+
+
 
                 if (!Directory.Exists(GetFolderResourcePath()))
                 {
@@ -439,10 +436,13 @@ namespace Modules.Utilities
 
                 if (fileInfo != null)
                 {
-
-                    var resource = await LoadResourcesAsync(CreateResourceResponse(fileInfo.FullName));
-                    m_LoadingResources.Remove(_name);
-                    return resource;
+                    //init loading
+                    response = CreateResourceResponse(fileInfo.FullName);
+                    instance.m_ResourceResponseList.Add(response);
+                    
+                    //load and assign texture or audio to response
+                    await LoadResourcesAsync(response);
+                    return response;
                 }
                 else
                     return null;
@@ -458,8 +458,6 @@ namespace Modules.Utilities
             for (int i = 0; i < _fileNames.Length; i++)
             {
                 var fileName = _fileNames[i];
-
-
 
                 var res = await GetResourceAsync(fileName);
                 responselist[i] = res;
@@ -597,20 +595,12 @@ namespace Modules.Utilities
                 var reqTexture = await UnityWebRequestTexture.GetTexture(filePath).SendWebRequest();
                 var texture = DownloadHandlerTexture.GetContent(reqTexture);
                 texture.wrapMode = TextureWrapMode.Clamp;
+                texture.name = _dataInfo.m_Name;
                 texture.Apply();
                 _dataInfo.m_Texture = texture;
 
+                
 
-                if (_Instance.m_ResourceResponseList.Contains(_dataInfo))
-                {
-                    var index = _Instance.m_ResourceResponseList.IndexOf(_dataInfo);
-                    _Instance.m_ResourceResponseList[index] = _dataInfo;
-                }
-                else
-                {
-                    _Instance.m_ResourceResponseList.Add(_dataInfo);
-
-                }
 
                 return _dataInfo;
 
@@ -624,15 +614,7 @@ namespace Modules.Utilities
                 var audio = DownloadHandlerAudioClip.GetContent(req);
                 audio.name = _dataInfo.m_Name;
                 _dataInfo.m_AudioClip = audio;
-                if (_Instance.m_ResourceResponseList.Contains(_dataInfo))
-                {
-                    var index = _Instance.m_ResourceResponseList.IndexOf(_dataInfo);
-                    _Instance.m_ResourceResponseList[index] = _dataInfo;
-                }
-                else
-                {
-                    _Instance.m_ResourceResponseList.Add(_dataInfo);
-                }
+              
                 return _dataInfo;
 
             }
