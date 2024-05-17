@@ -1,8 +1,10 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using UniRx;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
+using UnityEngine.Events;
 using UnityEngine.EventSystems;
 
 namespace Modules.Utilities
@@ -24,7 +26,7 @@ namespace Modules.Utilities
         private Vector2 _BeginDragPos;
         private Vector2 _StartPos;
 
-        private Action<Vector2> _JoystickDirection;
+        private UnityEvent<Vector2> _JoystickDirectionEvent = new UnityEvent<Vector2>();
 
         void Start()
         {
@@ -59,14 +61,14 @@ namespace Modules.Utilities
             localPoint = Vector2.ClampMagnitude(localPoint, m_Radius);
             m_HandleRectTransform.anchoredPosition = localPoint;
             var dir = (m_HandleRectTransform.anchoredPosition - _BeginDragPos).normalized;
-            _JoystickDirection?.Invoke(dir);
+            _JoystickDirectionEvent?.Invoke(dir);
         }
 
         public void OnPointerUp(PointerEventData eventData)
         {
             if (_PointerId != eventData.pointerId) return;
 
-            _JoystickDirection?.Invoke(Vector2.zero);
+            _JoystickDirectionEvent?.Invoke(Vector2.zero);
             if (m_ResetPosition)
             {
                 m_HandleRectTransform.anchoredPosition = Vector2.zero;
@@ -79,11 +81,12 @@ namespace Modules.Utilities
 
             if (m_CanvasGroup != null) m_CanvasGroup.alpha = m_IdleAlpha;
         }
+        
 
-        public IObservable<Vector2> OnJoystickDirection()
+
+         public IUniTaskAsyncEnumerable<Vector2> OnJoystickDirection(CancellationToken _token)
         {
-            return Observable.FromEvent<Vector2>(_event => _JoystickDirection += _event,
-                _event => _JoystickDirection -= _event);
+            return new UnityEventHandlerAsyncEnumerable<Vector2>(_JoystickDirectionEvent, _token);
         }
     }
 }

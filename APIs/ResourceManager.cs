@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
-using UniRx;
 using UnityEngine;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
@@ -38,7 +37,13 @@ namespace Modules.Utilities
         {
             if (_Instance == null)
             {
-                _Instance = FindObjectOfType<ResourceManager>();
+#if UNITY_2022_3_OR_NEWER
+                _Instance = FindFirstObjectByType<ResourceManager>();
+#else
+                _Instance =  FindObjectOfType<ResourceManager>();
+#endif
+
+
                 if (_Instance != null) return _Instance;
 
                 GameObject go = new GameObject("ResourceManager", typeof(ResourceManager));
@@ -55,119 +60,42 @@ namespace Modules.Utilities
 
 
         //-------- Public Methods --------//
-        public static IObservable<List<ResourceResponse>> LoadAllResource()
+        public static async UniTask<List<ResourceResponse>> LoadAllResource()
         {
-            return Observable.Create<List<ResourceResponse>>(_observer =>
+            var instance = GetInstance();
+            if (!Directory.Exists(GetFolderResourcePath()))
+            throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
+
+            List<ResourceResponse> resourceResponseList = new List<ResourceResponse>();
+            var files = Directory.GetFiles(GetFolderResourcePath(), "*.*", SearchOption.AllDirectories)
+            .Where(file => new string[] { ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".oog" }
+                .Contains(Path.GetExtension(file)))
+                .ToList();
+
+            for (int i = 0; i < files.Count; i++)
             {
-                var instance = GetInstance();
-                if (!Directory.Exists(GetFolderResourcePath()))
-                    throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
+            var response = CreateResourceResponse(files[i]);
+            if (response != null) resourceResponseList.Add(response);
+            }
 
-                List<ResourceResponse> resourceResponseList = new List<ResourceResponse>();
-                var files = Directory.GetFiles(GetFolderResourcePath(), "*.*", SearchOption.AllDirectories)
-                .Where(file => new string[] { ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".oog" }
-                        .Contains(Path.GetExtension(file)))
-                        .ToList();
+            int downloaded = 0;
 
-                for (int i = 0; i < files.Count; i++)
-                {
+            if (resourceResponseList.Count > 0)
+            {
+            await UniTask.WhenAll(resourceResponseList.Select(_ => LoadResourcesAsync(_)));
 
-                    var response = CreateResourceResponse(files[i]);
+            foreach (var response in resourceResponseList)
+            {
+                instance.m_ResourceResponseList.Add(response);
+                downloaded++;
+            }
+            }
 
-                    if (response != null) resourceResponseList.Add(response);
-
-
-                }
-
-                IDisposable disposable = null;
-                int downloaded = 0;
-
-                if (resourceResponseList.Count > 0)
-                {
-
-                    disposable = resourceResponseList
-                        .Select(_ => LoadResources(_))
-                        .ToList()
-                        .Concat()
-                        .Subscribe(_ =>
-                        {
-                            instance.m_ResourceResponseList.Add(_);
-                            downloaded++;
-                            if (downloaded >= resourceResponseList.Count)
-                            {
-                                _observer.OnNext(instance.m_ResourceResponseList);
-                                _observer.OnCompleted();
-                            }
-                        }, _observer.OnError);
-                }
-                else
-                {
-                    //no file
-                    _observer.OnNext(instance.m_ResourceResponseList);
-                    _observer.OnCompleted();
-                }
-
-                return Disposable.Create(() => { disposable?.Dispose(); });
-            });
+            return instance.m_ResourceResponseList;
         }
 
 
-        public static IObservable<List<ResourceResponse>> LoadResourceByPaths(string[] _paths)
-        {
-            return Observable.Create<List<ResourceResponse>>(_observer =>
-            {
-                var instance = GetInstance();
-
-                IDisposable disposable = null;
-                List<ResourceResponse> responselist = new List<ResourceResponse>();
-
-                for (int i = 0; i < _paths.Length; i++)
-                {
-                    var path = _paths[i];
-                    if (!File.Exists(path)) continue;
-
-                    var exists = instance.m_ResourceResponseList.Where(_ => _.m_FilePath == path).FirstOrDefault();
-                    if (exists == null)
-                    {
-                        FileInfo fileInfo = new FileInfo(path);
-
-                        if (fileInfo != null)
-                        {
-                            responselist.Add(CreateResourceResponse(fileInfo.FullName));
-                        }
-                    }
-                }
-
-                int downloaded = 0;
-
-                if (responselist.Count > 0)
-                {
-
-                    disposable = responselist
-                        .Select(_ => LoadResources(_))
-                        .ToList()
-                        .Concat()
-                        .Subscribe(_ =>
-                        {
-                            instance.m_ResourceResponseList.Add(_);
-                            downloaded++;
-                            if (downloaded >= responselist.Count)
-                            {
-                                _observer.OnNext(responselist);
-                                _observer.OnCompleted();
-                            }
-                        }, _observer.OnError);
-                }
-                else
-                {
-                    //no file
-                    _observer.OnNext(null);
-                    _observer.OnCompleted();
-                }
-
-                return Disposable.Create(() => { disposable?.Dispose(); });
-            });
-        }
+        
         public static void ClearAllResource()
         {
             var instance = GetInstance();
@@ -183,165 +111,49 @@ namespace Modules.Utilities
         }
 
 
-        public static IObservable<List<ResourceResponse>> GetResources(string[] _name)
+        public static async UniTask<List<ResourceResponse>> GetResources(string[] _name)
         {
-            return Observable.Create<List<ResourceResponse>>(_observer =>
+            var instance = GetInstance();
+            List<ResourceResponse> responselist = new List<ResourceResponse>();
+            Queue<ResourceResponse> loaderList = new Queue<ResourceResponse>();
+
+            DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
+
+            for (int i = 0; i < _name.Length; i++)
             {
-                var instance = GetInstance();
-                IDisposable disposable = null;
-                List<ResourceResponse> responselist = new List<ResourceResponse>();
-                List<ResourceResponse> loaderList = new List<ResourceResponse>();
-
-
-                DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-
-
-                for (int i = 0; i < _name.Length; i++)
+                var fileName = _name[i];
+                var resource = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == fileName);
+                if (resource != null)
                 {
-                    var fileName = _name[i];
-                    var resource = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == fileName);
-                    if (resource != null)
-                    {
-                        responselist.Add(resource);
-                    }
-                    else
-                    {
-                        if (directoryInfo == null || !Directory.Exists(GetFolderResourcePath()))
-                            continue;
-
-
-                        var extension = new FileInfo(fileName).Extension;
-                        var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
-                        //Debug.Log($"Loaded file '{fileInfo.FullName}'");
-                        if (fileInfo != null)
-                            loaderList.Add(CreateResourceResponse(fileInfo.FullName));
-                    }
-                }
-                var downloaded = 0;
-                if (loaderList.Count > 0)
-                {
-                    disposable = loaderList
-                                           .Select(_ => LoadResources(_))
-                                           .ToList()
-                                           .Concat()
-                                           .Subscribe(_ =>
-                                           {
-                                               instance.m_ResourceResponseList.Add(_);
-                                               downloaded++;
-                                               if (downloaded >= loaderList.Count)
-                                               {
-
-                                                   responselist.AddRange(loaderList);
-                                                   _observer.OnNext(responselist);
-                                                   _observer.OnCompleted();
-                                               }
-                                           }, _observer.OnError);
-
-
+                    //add existing resource
+                    responselist.Add(resource);
                 }
                 else
                 {
-                    _observer.OnNext(responselist);
-                    _observer.OnCompleted();
-                }
+                    if (directoryInfo == null || !Directory.Exists(GetFolderResourcePath()))
+                        continue;
 
-
-                return Disposable.Create(() => { disposable?.Dispose(); });
-
-            });
-        }
-
-
-        public static IObservable<ResourceResponse> GetResource(string _name, ResourceResponse.ResourceType _type)
-        {
-            return Observable.Create<ResourceResponse>(_observer =>
-            {
-                var instance = GetInstance();
-                ResourceResponse response = null;
-                IDisposable disposable = null;
-
-                for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
-                {
-
-
-                    if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == _type)
-                    {
-                        response = instance.m_ResourceResponseList[i];
-                        break;
-                    }
-                }
-
-                if (response != null)
-                {
-
-                    _observer.OnNext(response);
-                    _observer.OnCompleted();
-                }
-                else
-                {
-                    if (!Directory.Exists(GetFolderResourcePath()))
-                    {
-                        //no folder resource
-                        _observer.OnNext(null);
-                        _observer.OnCompleted();
-                        return Disposable.Create(() => { disposable?.Dispose(); });
-
-                    }
-
-                    DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-
-                    // string searchPattern = GetSearchPattern(_type);
-
-                    if (directoryInfo == null)
-                    {
-                        //no file
-                        _observer.OnNext(null);
-                        _observer.OnCompleted();
-                        return Disposable.Create(() => { disposable?.Dispose(); });
-
-                    }
-
-
-
-                    var parts = Regex.Split(_name, @"\.");
-                    if (parts.Length < 2)
-                    {
-                        _observer.OnNext(null);
-                        _observer.OnCompleted();
-                        return Disposable.Create(() => { disposable?.Dispose(); });
-                    }
-                    var extension = parts.Last();
-                    var fileInfo = directoryInfo.GetFiles("*." + extension, SearchOption.AllDirectories)
-                    .Where(_file => _file.Name.Equals(_name))
-                    .FirstOrDefault();
-
+                    var extension = new FileInfo(fileName).Extension;
+                    var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
                     if (fileInfo != null)
-                    {
-
-                        disposable = LoadResources(CreateResourceResponse(fileInfo.FullName)).Subscribe(_ =>
-                         {
-                             instance.m_ResourceResponseList.Add(_);
-                             _observer.OnNext(_);
-                             _observer.OnCompleted();
-                         }, _observer.OnError);
-                    }
-                    else
-                    {
-                        _observer.OnNext(null);
-                        _observer.OnCompleted();
-                        return Disposable.Create(() => { disposable?.Dispose(); });
-                    }
-
-
-
+                        loaderList.Enqueue(CreateResourceResponse(fileInfo.FullName));
                 }
+            }
 
-                return Disposable.Create(() => { disposable?.Dispose(); });
-            });
+            while (loaderList.Count > 0)
+            {
+                //load resource
+                var response = loaderList.Dequeue();
+                await LoadResourcesAsync(response);
+                instance.m_ResourceResponseList.Add(response);
+                responselist.Add(response);
+            }
 
-
-
+            return responselist;
         }
+
+
+      
 
         // using UniTask
         public static async UniTask<Texture2D> GetTextureAsync(string _name)
@@ -377,7 +189,7 @@ namespace Modules.Utilities
             await UniTask.Yield();
 
             var instance = GetInstance();
-           
+
 
 
             ResourceResponse response = null;
@@ -439,7 +251,7 @@ namespace Modules.Utilities
                     //init loading
                     response = CreateResourceResponse(fileInfo.FullName);
                     instance.m_ResourceResponseList.Add(response);
-                    
+
                     //load and assign texture or audio to response
                     await LoadResourcesAsync(response);
                     return response;
@@ -540,49 +352,7 @@ namespace Modules.Utilities
 
 
         }
-        private static IObservable<ResourceResponse> LoadResources(ResourceResponse _dataInfo)
-        {
-            return Observable.Create<ResourceResponse>(_observer =>
-            {
-
-                IDisposable disposable = null;
-                var filePath = $"file://{_dataInfo.m_FilePath}";
-                if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.Texture)
-                {
-                    disposable = ObservableWebRequest
-                    .GetTexture(filePath)
-                    .Subscribe(_texture =>
-                       {
-                           _texture.wrapMode = TextureWrapMode.Clamp;
-                           _texture.Apply();
-                           _dataInfo.m_Texture = _texture;
-                           _observer.OnNext(_dataInfo);
-                           _observer.OnCompleted();
-                       }, _observer.OnError);
-
-
-                }
-                else if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.AudioClip)
-                {
-                    disposable = ObservableWebRequest
-                    .GetAudioClip(filePath, _dataInfo.m_AudioType)
-                    .Subscribe(_audio =>
-                    {
-                        _dataInfo.m_AudioClip = _audio;
-                        _dataInfo.m_AudioClip.name = _dataInfo.m_Name;
-                        _observer.OnNext(_dataInfo);
-                        _observer.OnCompleted();
-                    }, _observer.OnError);
-                }
-
-
-                return Disposable.Create(() =>
-                {
-                    disposable?.Dispose();
-                });
-
-            });
-        }
+       
 
 
         private static async UniTask<ResourceResponse> LoadResourcesAsync(ResourceResponse _dataInfo)
@@ -599,7 +369,7 @@ namespace Modules.Utilities
                 texture.Apply();
                 _dataInfo.m_Texture = texture;
 
-                
+
 
 
                 return _dataInfo;
@@ -614,7 +384,7 @@ namespace Modules.Utilities
                 var audio = DownloadHandlerAudioClip.GetContent(req);
                 audio.name = _dataInfo.m_Name;
                 _dataInfo.m_AudioClip = audio;
-              
+
                 return _dataInfo;
 
             }

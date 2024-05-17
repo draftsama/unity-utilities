@@ -1,7 +1,6 @@
 using System;
 using System.Threading;
 using UnityEngine;
-using UniRx;
 using Cysharp.Threading.Tasks;
 
 
@@ -16,60 +15,8 @@ namespace Modules.Utilities
         private const int _DEFAULT_SOURCE_CURRENT_ALPHA = -1;
 
 
-        //--------------------------------------------------------------------------------------------------------------
-        public static IDisposable LerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _ignoreTimeScale = false, Easing.Ease _ease = _DEFAULT_EASE_TYPE, Action _onComplete = null)
-        {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _ignoreTimeScale, _DEFAULT_EASE_TYPE,
-                true, _onComplete);
-        }
 
-        //--------------------------------------------------------------------------------------------------------------
-        public static IDisposable LerpAlphaWithoutInteractable(this CanvasGroup _source, int _milliseconds, float _target,
-            bool _ignoreTimeScale = false, Easing.Ease _ease = _DEFAULT_EASE_TYPE, Action _onComplete = null)
-        {
-            return _source.EasingLerpAlpha(_milliseconds, _target, _DEFAULT_SOURCE_CURRENT_ALPHA, _ignoreTimeScale, _ease,
-                false, _onComplete);
-        }
-
-
-        //--------------------------------------------------------------------------------------------------------------
-
-        static IDisposable EasingLerpAlpha(this CanvasGroup _source, int _milliseconds, float _target,
-           float _start, bool _ignoreTimeScale = false, Easing.Ease _ease = _DEFAULT_EASE_TYPE, bool _adjustInteractAble = true,
-            Action _onComplete = null)
-        {
-            var progress = 0f;
-            var current = Math.Abs(_start - _DEFAULT_SOURCE_CURRENT_ALPHA) < GlobalConstant.FLOAT_MINIMUM_TOLERANCE
-                ? _source.alpha
-                : _start;
-            var different = _target - current;
-
-            IDisposable disposable = null;
-            disposable = Observable.EveryUpdate()
-                .Subscribe(_ =>
-                {
-                    var deltaTime = _ignoreTimeScale ? Time.unscaledDeltaTime : Time.deltaTime;
-                    progress += deltaTime / (_milliseconds * GlobalConstant.MILLISECONDS_TO_SECONDS);
-                    if (progress < 1)
-                    {
-                        _source.SetAlpha(
-                            Mathf.Clamp01(current + EasingFormula.EasingFloat(_ease, 0f, 1f, progress) * different),
-                            _adjustInteractAble);
-                    }
-                    else
-                    {
-                        _source.SetAlpha(Mathf.Clamp01(_target), _adjustInteractAble);
-                        _onComplete?.Invoke();
-                        disposable?.Dispose();
-                    }
-                })
-                .AddTo(_source);
-
-            return disposable;
-        }
-
-
+      
         //---------------------------------------------------------------------------------------------------------------
         public static UniTask LerpAlphaAsync(this CanvasGroup _source, int _milliseconds,
             float _target,

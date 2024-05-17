@@ -3,13 +3,13 @@ using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
 using Modules.Utilities;
-using UniRx;
 using UnityEngine;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Events;
 using System.IO;
+
 
 
 #if UNITY_EDITOR
@@ -161,22 +161,30 @@ namespace Modules.Utilities
 
 
 
-        static IDisposable SetBGMVolumeDisposable;
+
+
         public static void SetBGMVolume(float _volumeTarget, float _transitionTime = 0f)
         {
             if (_CurrentBGMAudio == null) return;
-            SetBGMVolumeDisposable?.Dispose();
+
             var start = _CurrentBGMAudio.volume;
 
             _transitionTime = Mathf.Clamp(_transitionTime, 0, float.PositiveInfinity);
-            SetBGMVolumeDisposable = LerpThread.FloatLerp(Mathf.RoundToInt(_transitionTime * GlobalConstant.SECONDS_TO_MILLISECONDS), start, _volumeTarget)
-                 .Subscribe(_value =>
-                 {
-                     _CurrentBGMAudio.volume = _value;
-                 }, () =>
-                 {
-                     _CurrentBGMAudio.volume = _volumeTarget;
-                 }).AddTo(GetInstance());
+
+            var miliseconds = Mathf.RoundToInt(_transitionTime * GlobalConstant.SECONDS_TO_MILLISECONDS);
+            LerpThread.FloatLerpAsyncEnumerable(miliseconds, start, _volumeTarget).ForEachAsync(_value =>
+            {
+                _CurrentBGMAudio.volume = _value;
+            }).Forget();
+
+
+                //  .Subscribe(_value =>
+                //  {
+                //      _CurrentBGMAudio.volume = _value;
+                //  }, () =>
+                //  {
+                //      _CurrentBGMAudio.volume = _volumeTarget;
+                //  }).AddTo(GetInstance());
         }
 
         public static async UniTask PlayFX(string _name, float _volume = 1f, CancellationToken _token = default)
@@ -240,19 +248,22 @@ namespace Modules.Utilities
         }
         public static void StopBGM(float _fade = 0)
         {
+            if (_CurrentBGMAudio == null) return;
             var instance = GetInstance();
-
+            
             _fade = Mathf.Clamp(_fade, 0, float.PositiveInfinity);
-            LerpThread.FloatLerp(Mathf.RoundToInt(_fade * GlobalConstant.SECONDS_TO_MILLISECONDS), 0, 1)
-                .Subscribe(_value =>
+            var miliseconds = Mathf.RoundToInt(_fade * GlobalConstant.SECONDS_TO_MILLISECONDS);
+            var start = _CurrentBGMAudio.volume;
+            LerpThread.FloatLerpAsyncEnumerable(miliseconds, start, 0)
+                .ForEachAsync(_value =>
                 {
-                    if (_CurrentBGMAudio != null) _CurrentBGMAudio.volume = 1 - _value;
-                }, () =>
+                    _CurrentBGMAudio.volume = _value;
+                }).ContinueWith(() =>
                 {
                     _CurrentBGMAudio.clip = null;
                     _CurrentBGMAudio?.Stop();
                     _CurrentBGMAudio = null;
-                }).AddTo(instance);
+                }).Forget();
         }
 
 

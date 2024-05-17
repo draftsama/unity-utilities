@@ -7,7 +7,6 @@ using System.Collections.Generic;
 using System.IO;
 using Modules.Utilities;
 using UnityEngine;
-using UniRx;
 using UnityEngine.UI;
 using System.Threading.Tasks;
 #if UNITY_EDITOR

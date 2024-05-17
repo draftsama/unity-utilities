@@ -2,7 +2,6 @@
 using System;
 using System.Collections;
 using System.Collections.Generic;
-using UniRx;
 using UnityEngine;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
@@ -40,22 +39,7 @@ namespace Modules.Utilities
             SetProgress(m_StartProgress);
         }
 
-        public IObservable<Unit> LerpProgress(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad)
-        {
-            return Observable.Create<Unit>(_oberver =>
-            {
-
-                IDisposable disposable = LerpThread
-                    .FloatLerp(_millisecond, Progress, _progress, _ease)
-                    .Subscribe(SetProgress, _oberver.OnError, () =>
-                   {
-                       _oberver.OnNext(default);
-                       _oberver.OnCompleted();
-                   });
-
-                return Disposable.Create(() => { disposable?.Dispose(); });
-            });
-        }
+       
 
         public IUniTaskAsyncEnumerable<AsyncUnit> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad)
         {

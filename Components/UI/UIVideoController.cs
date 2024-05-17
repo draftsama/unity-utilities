@@ -2,7 +2,6 @@ using System.Threading;
 using System;
 using System.IO;
 using Cysharp.Threading.Tasks;
-using UniRx;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -33,7 +32,6 @@ namespace Modules.Utilities
         private RawImage _Preview;
         private VideoPlayer _VideoPlayer;
         private CanvasGroup _CanvasGroup;
-        private Action<Unit> _OnEnd;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
 
         private bool _Stoping = false;
@@ -192,7 +190,6 @@ namespace Modules.Utilities
                         {
                             Debug.Log("Video End :" + _VideoPlayer.url);
                             _OnEndEventHandler.Invoke();
-                            _OnEnd?.Invoke(Unit.Default);
                             break;
                         }
                     }
@@ -303,11 +300,6 @@ namespace Modules.Utilities
             _VideoPlayer.time = _progress * _VideoPlayer.length;
         }
 
-        public IObservable<Unit> OnEndAsObservable()
-        {
-            return Observable.FromEvent<Unit>(_event => _OnEnd += _event,
-                _event => _OnEnd -= _event);
-        }
 
         public IUniTaskAsyncEnumerable<AsyncUnit> OnEndAsyncEnumerable(CancellationToken _token)
         {

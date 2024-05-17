@@ -1,6 +1,5 @@
 ﻿using System;
 using System.Threading;
-using UniRx;
 using UnityEngine;
 using Cysharp.Threading.Tasks;
 
@@ -15,17 +14,27 @@ namespace Modules.Utilities
             emission.enabled = _enable;
         }
 
-        public static IDisposable LerpAlpha(this ParticleSystem _particle, float _targetAlpha, float _second,
-            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false, Action _onCompleted = null)
+        public static async UniTask SetEmissionAsync(this ParticleSystem _particle, bool _enable)
         {
+            var emission = _particle.emission;
+            emission.enabled = _enable;
+            await UniTask.CompletedTask;
+        }
+
+        public static async UniTask LerpAlphaAsync(this ParticleSystem _particle, float _targetAlpha, float _second,
+            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false,
+            CancellationToken _token = default)
+        {
+            var token = _token;
+            if (token == default) token = _particle.GetCancellationTokenOnDestroy();
+
             var progress = 0f;
             var mainParticle = _particle.main;
             var main = mainParticle;
             var startColor = mainParticle.startColor.color;
             var startAlpha = startColor.a;
 
-            IDisposable disposable = null;
-            disposable = Observable.EveryUpdate().Subscribe(_ =>
+            while (!token.IsCancellationRequested)
             {
                 var deltaTime = _ignoreTimeScale ? Time.unscaledDeltaTime : Time.deltaTime;
 
@@ -40,73 +49,14 @@ namespace Modules.Utilities
                 }
                 else
                 {
-                    disposable?.Dispose();
                     var currentColor = startColor;
                     currentColor.a = _targetAlpha;
                     main.startColor = currentColor;
-                    _onCompleted?.Invoke();
+                    break;
                 }
-            });
 
-            return disposable;
-        }
-
-        public static UniTask LerpAlphaAsync(this ParticleSystem _particle, float _targetAlpha, float _second,
-            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false,
-            CancellationToken _token = default)
-        {
-            var token = _token;
-            if (token == default) token = _particle.GetCancellationTokenOnDestroy();
-
-            var uts = new UniTaskCompletionSource();
-            UniTask.Void(async () =>
-            {
-                try
-                {
-                    var progress = 0f;
-                    var mainParticle = _particle.main;
-                    var main = mainParticle;
-                    var startColor = mainParticle.startColor.color;
-                    var startAlpha = startColor.a;
-
-
-                    while (!token.IsCancellationRequested)
-                    {
-                        var deltaTime = _ignoreTimeScale ? Time.unscaledDeltaTime : Time.deltaTime;
-
-                        progress += deltaTime / _second;
-
-                        if (progress < 1)
-                        {
-                            var currentAlpha = EasingFormula.EasingFloat(_ease, startAlpha, _targetAlpha, progress);
-                            var currentColor = startColor;
-                            currentColor.a = currentAlpha;
-                            main.startColor = currentColor;
-                        }
-                        else
-                        {
-                            var currentColor = startColor;
-                            currentColor.a = _targetAlpha;
-                            main.startColor = currentColor;
-                            uts.TrySetResult();
-                            break;
-                        }
-
-                        await UniTask.Yield();
-                    }
-                }
-                catch (OperationCanceledException) when (_token.IsCancellationRequested)
-                {
-                    uts.TrySetCanceled();
-                }
-                catch (System.Exception e)
-                {
-                    uts.TrySetException(e);
-                }
-            });
-
-
-            return uts.Task;
+                await UniTask.Yield();
+            }
         }
     }
 }

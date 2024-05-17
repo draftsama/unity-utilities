@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using Cysharp.Threading.Tasks;
-using UniRx;
 using UnityEngine;
 namespace Modules.Utilities
 {

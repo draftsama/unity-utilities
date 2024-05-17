@@ -1,7 +1,6 @@
 # Unity Utilities
 
 ## Requirement 
-- [Unirx](https://github.com/neuecc/UniRx)
 - [UniTask](https://github.com/Cysharp/UniTask) 
 
 
@@ -15,6 +14,26 @@ Example
 git submodule add git@github.com:draftsama/unity-utilities.git Assets/Modules/unity-utilities
 ```
 
+### UniTask Guide
+
+#### Create Unity Event Handler Method
+```csharp
+
+UnityEvent _OnCompletedEvent = new UnityEvent();
+public IUniTaskAsyncEnumerable<AsyncUnit> OnCompleted(CancellationToken _token)
+        {
+            return new UnityEventHandlerAsyncEnumerable(_OnCompletedEvent, _token);
+        }
+
+//--------------------------------------------
+UnityEvent<Vector2> _OnChangedEvent = new UnityEvent<Vector2>();
+public IUniTaskAsyncEnumerable<Vector2> OnCompleted(CancellationToken _token)
+        {
+            return new UnityEventHandlerAsyncEnumerable<Vector2>(_OnChangedEvent, _token);
+        }
+
+
+```
 
 
 ## APIs

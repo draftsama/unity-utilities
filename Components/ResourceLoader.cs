@@ -2,10 +2,10 @@ using System;
 using System.IO;
 using System.Collections;
 using System.Collections.Generic;
-using UniRx;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
+using Cysharp.Threading.Tasks;
 
 namespace Modules.Utilities
 {
@@ -13,8 +13,6 @@ namespace Modules.Utilities
     {
 
         public string m_FileName;
-        public ResourceManager.ResourceResponse.ResourceType m_Type;
-
         public UnityEventTexture2D m_OnLoadTextureCompleted;
         public UnityEventAudio m_OnLoadAudioCompleted;
 
@@ -25,15 +23,15 @@ namespace Modules.Utilities
         }
         void Start()
         {
-            ResourceManager.GetResource(m_FileName, m_Type).Subscribe(_ =>
-            {
+          
 
+            ResourceManager.GetResourceAsync(m_FileName).ContinueWith(_ =>
+            {
                 if (_ != null)
                 {
                     ApplyResource(_);
                 }
-
-            }).AddTo(this);
+            }).Forget();
         }
 
         void ApplyResource(ResourceManager.ResourceResponse res)
