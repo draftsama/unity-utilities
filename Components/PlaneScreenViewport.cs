@@ -15,18 +15,28 @@ public class PlaneScreenViewport : MonoBehaviour
 
     [SerializeField] private bool m_UpdateAlways = true;
 
+    //TODO: config camera settings at this component
+
     private Transform _Tr;
     void Start()
     {
 
-        if(m_UpdateAlways){
-            UniTaskAsyncEnumerable.EveryUpdate().Subscribe(_ =>
-            {
-                UpdatePlaneScreen();
-            }, cancellationToken: this.GetCancellationTokenOnDestroy());
-        }else{
+        if (m_UpdateAlways)
+        {
+            if(Application.isPlaying)
+                UniTaskAsyncEnumerable.EveryUpdate().Subscribe(_ =>
+                {
+                    UpdatePlaneScreen();
+                }, cancellationToken: this.GetCancellationTokenOnDestroy());
+            
+        }
+        else
+        {
             UpdatePlaneScreen();
         }
+    }
+    private void OnValidate() {
+        UpdatePlaneScreen();
     }
 
     public void UpdatePlaneScreen()
@@ -36,18 +46,27 @@ public class PlaneScreenViewport : MonoBehaviour
 
         _Tr = transform;
 
+        var isPerspectiveMode = m_Camera.orthographic == false;
+        var size = 0f;
+        if (isPerspectiveMode)
+        {//Calculate the size of the screen plane based on the camera's field of view and the distance to the screen plane
+            size = 2.0f * m_Distance * Mathf.Tan(m_Camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+        }
+        else
+        {
+            size = m_Camera.orthographicSize * 2.0f;
+        }
 
-        //Calculate the size of the screen plane based on the camera's field of view and the distance to the screen plane
-        var size = 2.0f * m_Distance * Mathf.Tan(m_Camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
-
+    
 
         var width = size * m_Camera.aspect;
         var height = size;
 
+        // Debug.Log($"width:{width} height:{height}");
+
         if (m_AdditionalScalePer < 0) m_AdditionalScalePer = 0;
         width += (width * m_AdditionalScalePer) / 100f;
         height += (height * m_AdditionalScalePer) / 100f;
-
 
 
         // Set the scale of the screen plane to match the calculated size and aspect ratio
@@ -64,7 +83,7 @@ public class PlaneScreenViewport : MonoBehaviour
     }
 
 
-    
+
 
 
 
