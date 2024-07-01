@@ -170,6 +170,20 @@ namespace Modules.Utilities
            
         }
 
+
+        public static Vector2 GetScreenSizeInWorldSpace(Camera _camera,float distance){
+
+             var isPerspectiveMode = _camera.orthographic == false;
+            var height = _camera.orthographicSize * 2.0f;
+
+            if(isPerspectiveMode)
+             height =  2.0f * distance * Mathf.Tan(_camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+
+             var width =  height * _camera.aspect;
+
+            return new Vector2(width, height);
+
+        }
         
 
     }
