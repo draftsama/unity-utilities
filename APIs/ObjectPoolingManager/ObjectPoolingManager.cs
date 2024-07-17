@@ -14,7 +14,7 @@ public class ObjectPoolingManager : MonoBehaviour
         {
             if (instance == null)
             {
-                instance = FindObjectOfType<ObjectPoolingManager>();
+                instance = FindFirstObjectByType<ObjectPoolingManager>();
                 if(instance != null)return instance;
 
                 var go = new GameObject("ObjectPoolingManager");

@@ -31,7 +31,7 @@ namespace Modules.Utilities
             {
                 if (_Instance == null)
                 {
-                    _Instance = FindObjectOfType<ResolutionInitializer>();
+                    _Instance = FindFirstObjectByType<ResolutionInitializer>();
                     if (_Instance == null)
                     {
                         var go = new GameObject("ResolutionInitializer");

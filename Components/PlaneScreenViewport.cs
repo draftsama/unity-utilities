@@ -5,10 +5,15 @@ using UnityEngine;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 
+#if UNITY_EDITOR
+using UnityEditor;
+
+#endif
 [ExecuteInEditMode]
+
 public class PlaneScreenViewport : MonoBehaviour
 {
-    [SerializeField] private Camera m_Camera;
+    [SerializeField] public Camera m_Camera;
 
     [SerializeField] private float m_Distance = 1.0f;
     [SerializeField] private float m_AdditionalScalePer = 0f;
@@ -18,24 +23,29 @@ public class PlaneScreenViewport : MonoBehaviour
     //TODO: config camera settings at this component
 
     private Transform _Tr;
+
+
+
+
     void Start()
     {
-
         if (m_UpdateAlways)
         {
-            if(Application.isPlaying)
+            if (Application.isPlaying)
                 UniTaskAsyncEnumerable.EveryUpdate().Subscribe(_ =>
                 {
                     UpdatePlaneScreen();
                 }, cancellationToken: this.GetCancellationTokenOnDestroy());
-            
+
         }
         else
         {
             UpdatePlaneScreen();
         }
     }
-    private void OnValidate() {
+
+    private void OnValidate()
+    {
         UpdatePlaneScreen();
     }
 
@@ -57,7 +67,7 @@ public class PlaneScreenViewport : MonoBehaviour
             size = m_Camera.orthographicSize * 2.0f;
         }
 
-    
+
 
         var width = size * m_Camera.aspect;
         var height = size;
@@ -83,9 +93,37 @@ public class PlaneScreenViewport : MonoBehaviour
     }
 
 
-
-
-
-
 }
+
+#if UNITY_EDITOR
+
+[CustomEditor(typeof(PlaneScreenViewport))]
+public class PlaneScreenViewportEditor : Editor
+{
+    public override void OnInspectorGUI()
+    {
+        base.OnInspectorGUI();
+
+        var script = (PlaneScreenViewport)target;
+
+        //if camera is null show warning
+        if (script.m_Camera == null)
+        {
+            EditorGUILayout.HelpBox("Camera is null", MessageType.Warning);
+           
+        }
+        else if (GUILayout.Button("Update"))
+        {
+            script.UpdatePlaneScreen();
+        }
+
+
+
+
+
+
+    }
+}
+
+#endif
 

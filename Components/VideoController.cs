@@ -1,20 +1,19 @@
-using System.Threading;
 using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
-using UnityEngine.UI;
 using UnityEngine.Video;
-
-
 
 namespace Modules.Utilities
 {
-    [RequireComponent((typeof(CanvasGroup)))]
-    [RequireComponent(typeof(RawImage))]
     [RequireComponent(typeof(VideoPlayer))]
-    public class UIVideoController : MonoBehaviour
+    [RequireComponent(typeof(MeshRenderer))]
+    [RequireComponent(typeof(MeshFilter))]
+    public class VideoController : MonoBehaviour
     {
         [SerializeField] public string m_FileName;
         [SerializeField] public string m_FolderName = "Resources";
@@ -29,14 +28,16 @@ namespace Modules.Utilities
         [SerializeField] public int m_FadeTime = 500;
         [SerializeField] public float m_Progress = 0f;
 
-        private RawImage _Preview;
+        private MeshFilter _MeshFilter;
+        private MeshRenderer _MeshRenderer;
+        private Material _Material;
+
         private VideoPlayer _VideoPlayer;
-        private CanvasGroup _CanvasGroup;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
 
         private bool _Stoping = false;
         private bool _IgnoreFadeOut = false;
-       
+
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
@@ -44,21 +45,38 @@ namespace Modules.Utilities
 
         private CancellationTokenSource _Cts = new CancellationTokenSource();
 
+
+
         private void Awake()
         {
-            _Preview = GetComponent<RawImage>();
-            _VideoPlayer = GetComponent<VideoPlayer>();
-            _CanvasGroup = GetComponent<CanvasGroup>();
-            _VideoPlayer.isLooping = false;
-            _VideoPlayer.playOnAwake = false;
-            _CanvasGroup.SetAlpha(0);
+
+            Init();
+            _Material.SetFloat("_Alpha", 0);
 
             if (m_PrepareOnAwake)
             {
                 SetupURL(m_FileName, m_PathType, m_FolderName);
                 _VideoPlayer.Prepare();
             }
+
         }
+        private void OnDisable()
+        {
+
+            if (_Cts != null)
+            {
+                _Cts.Cancel();
+                _Cts.Dispose();
+                _Cts = null;
+            }
+        }
+
+        void Start()
+        {
+
+            if (m_PlayOnAwake) PlayAsync().Forget();
+        }
+
 
         public void SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
         {
@@ -92,23 +110,49 @@ namespace Modules.Utilities
             _VideoPlayer.renderMode = VideoRenderMode.APIOnly;
         }
 
-
-
-        private void OnDisable()
+        private void OnValidate()
         {
 
-            if (_Cts != null)
-            {
-                _Cts.Cancel();
-                _Cts.Dispose();
-                _Cts = null;
-            }
+            Init();
         }
 
-        void Start()
+        void Init()
         {
+            if (_MeshFilter == null) _MeshFilter = GetComponent<MeshFilter>();
+            if (_MeshRenderer == null) _MeshRenderer = GetComponent<MeshRenderer>();
 
-            if (m_PlayOnAwake) PlayAsync().Forget();
+            if (_MeshFilter.sharedMesh == null)
+                _MeshFilter.sharedMesh = new Mesh()
+                {
+                    vertices = new Vector3[]
+                    {
+            new Vector3(-0.5f, -0.5f, 0.0f),
+            new Vector3(0.5f, -0.5f, 0.0f),
+            new Vector3(0.5f, 0.5f, 0.0f),
+            new Vector3(-0.5f, 0.5f, 0.0f)
+                    },
+                    triangles = new int[] { 2, 1, 0, 3, 2, 0 },
+                    uv = new Vector2[]
+                    {
+            new Vector2(0, 0),
+            new Vector2(1, 0),
+            new Vector2(1, 1),
+            new Vector2(0, 1)
+                    }
+                };
+
+            if (_Material == null)
+            {
+                _Material = new Material(Shader.Find("Shader Graphs/TransparentTextureWithColor"));
+
+            }
+            _MeshRenderer.material = _Material;
+
+            if (_VideoPlayer == null) _VideoPlayer = GetComponent<VideoPlayer>();
+
+            _VideoPlayer.isLooping = false;
+            _VideoPlayer.playOnAwake = false;
+            _VideoPlayer.renderMode = VideoRenderMode.MaterialOverride;
         }
 
         //------------------------------------ Public Method ----------------------------------
@@ -152,14 +196,13 @@ namespace Modules.Utilities
                 _VideoPlayer.Play();
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
-
+                _Material.SetTexture("_BaseMap", _VideoPlayer.texture);
                 while (!_token.IsCancellationRequested)
                 {
                     if (_VideoPlayer == null)
                         break;
 
                     m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
-                    _Preview.texture = _VideoPlayer.texture;
 
 
                     if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stoping)
@@ -168,7 +211,7 @@ namespace Modules.Utilities
                         var valueProgress = Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 0f, 1f, fadeInProgress));
 
                         //fade in
-                        _CanvasGroup.SetAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
+                        _Material.SetFloat("_Alpha", m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 1);
 
                     }
@@ -178,7 +221,7 @@ namespace Modules.Utilities
                         fadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
                         var valueProgress = Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 1f, 0f, fadeOutProgress));
                         //fade out
-                        _CanvasGroup.SetAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
+                        _Material.SetFloat("_Alpha", m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
 
                         if (fadeOutProgress >= 1f)
@@ -191,7 +234,7 @@ namespace Modules.Utilities
                     else
                     {
                         //playing
-                        _CanvasGroup.SetAlpha(1);
+                        _Material.SetFloat("_Alpha", 1);
                         _VideoPlayer.SetDirectAudioVolume(0, 1);
                     }
 
@@ -227,9 +270,9 @@ namespace Modules.Utilities
             {
                 _Stoping = false;
                 if (_VideoPlayer != null) _VideoPlayer.Stop();
-                if (_CanvasGroup != null) _CanvasGroup.SetAlpha(0);
+                if (_Material) _Material.SetFloat("_Alpha", 0);
 
-              
+
 
             }
 
@@ -304,3 +347,4 @@ namespace Modules.Utilities
 
     }
 }
+

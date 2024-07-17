@@ -78,9 +78,10 @@ namespace Modules.Utilities
                 Debug.LogWarning($"Camera is null");
                 return false;
             }
-            var halfHeight = _camera.orthographicSize;
-            var screenWidth = (halfHeight * 2f) * _camera.aspect;
-            var halfWidth = screenWidth / 2f;
+            var z = _position.z - _camera.transform.position.z;
+            var screenSize = GetScreenSizeInWorldSpace(_camera, z);
+            var halfHeight = screenSize.y / 2f;
+            var halfWidth = screenSize.x / 2f;
 
             return _position.x <= halfWidth && _position.x >= -halfWidth && _position.y <= halfHeight && _position.y >= -halfHeight;
         }
