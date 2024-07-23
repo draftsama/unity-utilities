@@ -36,7 +36,7 @@ namespace Modules.Utilities
 
         private bool _Stoping = false;
         private bool _IgnoreFadeOut = false;
-       
+
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
@@ -44,8 +44,11 @@ namespace Modules.Utilities
 
         private CancellationTokenSource _Cts = new CancellationTokenSource();
 
+
         private void Awake()
         {
+
+
             _Preview = GetComponent<RawImage>();
             _VideoPlayer = GetComponent<VideoPlayer>();
             _CanvasGroup = GetComponent<CanvasGroup>();
@@ -113,23 +116,27 @@ namespace Modules.Utilities
 
         //------------------------------------ Public Method ----------------------------------
 
-        public async UniTask PlayAsync(bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, CancellationToken _token = default)
+
+        public async UniTask PlayAsync(int _frame = 0, bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, bool _forcePlay = false, CancellationToken _token = default)
         {
 
-            if (_VideoPlayer.isPlaying)
+            if (_VideoPlayer.isPlaying && !_forcePlay)
                 return;
+
+            _Cts?.Cancel();
+            _Cts?.Dispose();
+            _Cts = new CancellationTokenSource();
+
+            _VideoPlayer.Stop();
+            await UniTask.Yield();
 
 
             if (_token == default)
-            {
-                if (_Cts != null)
-                {
-                    _Cts.Cancel();
-                    _Cts.Dispose();
-                }
-                _Cts = new CancellationTokenSource();
                 _token = _Cts.Token;
-            }
+            else
+                _Cts.AddTo(_token);
+
+
             m_Progress = 0f;
             _IgnoreFadeOut = _ignoreFadeOut;
             float fadeInProgress = 0f;
@@ -137,18 +144,22 @@ namespace Modules.Utilities
 
             try
             {
+                _token.ThrowIfCancellationRequested();
+
 
                 if (!_VideoPlayer.isPrepared)
                 {
                     SetupURL(m_FileName, m_PathType, m_FolderName);
 
-                    Debug.Log("Play Video : " + _VideoPlayer.url);
 
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
 
                 }
+                Debug.Log("Play Video : " + _VideoPlayer.url);
+
                 _VideoPlayer.frame = 0;
+
                 _VideoPlayer.Play();
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
@@ -200,7 +211,7 @@ namespace Modules.Utilities
                     {
 
                         // Debug.Log("Video Loop.");
-                        _VideoPlayer.frame = 0;
+                        _VideoPlayer.frame = _frame;
                         _VideoPlayer.Play();
 
                         //skip fade in next loop
@@ -229,18 +240,12 @@ namespace Modules.Utilities
                 if (_VideoPlayer != null) _VideoPlayer.Stop();
                 if (_CanvasGroup != null) _CanvasGroup.SetAlpha(0);
 
-              
+
 
             }
 
 
-            // _Stoping = false;
-            // if(_VideoPlayer != null)_VideoPlayer.Stop();
-            // if(_CanvasGroup != null)_CanvasGroup.SetAlpha(0);
-            // // Debug.Log("Video End.");
 
-            // _OnEndEventHandler.Invoke();
-            // _OnEnd?.Invoke(Unit.Default);
 
         }
 
@@ -281,6 +286,7 @@ namespace Modules.Utilities
             _VideoPlayer.frame = _frame;
         }
 
+      
         public void Seek(float _progress)
         {
 

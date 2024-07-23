@@ -157,23 +157,26 @@ namespace Modules.Utilities
 
         //------------------------------------ Public Method ----------------------------------
 
-        public async UniTask PlayAsync(bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, CancellationToken _token = default)
+        public async UniTask PlayAsync(int _frame = 0, bool _ignoreFadeIn = false, bool _ignoreFadeOut = false, bool _forcePlay = false, CancellationToken _token = default)
         {
 
-            if (_VideoPlayer.isPlaying)
+            if (_VideoPlayer.isPlaying && !_forcePlay)
                 return;
 
 
+            _Cts?.Cancel();
+            _Cts = new CancellationTokenSource();
+            _VideoPlayer.Stop();
+
+            //after cancel token be must wait for next frame
+            await UniTask.Yield();
+
             if (_token == default)
-            {
-                if (_Cts != null)
-                {
-                    _Cts.Cancel();
-                    _Cts.Dispose();
-                }
-                _Cts = new CancellationTokenSource();
-                _token = _Cts.Token;
-            }
+               _token  = _Cts.Token;
+            else
+             _Cts.AddTo(_token);
+
+
             m_Progress = 0f;
             _IgnoreFadeOut = _ignoreFadeOut;
             float fadeInProgress = 0f;
@@ -181,19 +184,21 @@ namespace Modules.Utilities
 
             try
             {
+                _token.ThrowIfCancellationRequested();
 
                 if (!_VideoPlayer.isPrepared)
                 {
                     SetupURL(m_FileName, m_PathType, m_FolderName);
 
-                    Debug.Log("Play Video : " + _VideoPlayer.url);
 
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
 
                 }
-                _VideoPlayer.frame = 0;
+                Debug.Log("Play Video : " + _VideoPlayer.url);
+                _VideoPlayer.frame = _frame;
                 _VideoPlayer.Play();
+
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
                 _Material.SetTexture("_BaseMap", _VideoPlayer.texture);
@@ -259,7 +264,7 @@ namespace Modules.Utilities
             }
             catch (System.OperationCanceledException)
             {
-                // Debug.Log("Video Canceled.");
+                Debug.Log("Video Canceled.");
 
             }
             catch (Exception e)
@@ -287,6 +292,7 @@ namespace Modules.Utilities
 
         }
 
+
         public void Pause()
         {
             if (_VideoPlayer && !_VideoPlayer.isPaused)
@@ -310,7 +316,7 @@ namespace Modules.Utilities
 
         }
 
-
+       
         public void Seek(int _frame)
         {
             if (!_VideoPlayer.isPrepared)
