@@ -14,7 +14,7 @@ namespace Modules.Utilities
         
         public static async Task<string> UploadFile(string _url, string _key, string _filePath,
             CancellationToken _token,Dictionary<string,string> _fromData, IProgress<UploadProgress> _progress = null,
-            string _method = "PUT")
+            string _method = "POST")
         {
             using (var fs = File.OpenRead(_filePath))
             {
@@ -33,7 +33,7 @@ namespace Modules.Utilities
                             }
                             
                             using (
-                                var message = _method.Equals("PUT")
+                                var message = _method.Equals("POST")
                                     ? await client.PutAsync(_url, content, _token)
                                     : await client.PostAsync(_url, content, _token))
                             {
