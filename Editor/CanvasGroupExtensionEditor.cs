@@ -7,36 +7,42 @@ namespace EditorExtension.Editor
     [CanEditMultipleObjects]
     public class CanvasGroupExtensionEditor : UnityEditor.Editor
     {
-        private CanvasGroup _CanvasGroup;
 
-        private bool _IsShow = true;
 
         private void OnEnable()
         {
-            _CanvasGroup = target as CanvasGroup;
-            if (_CanvasGroup != null) _IsShow = _CanvasGroup.alpha > 0.9999f || _CanvasGroup.interactable;
         }
 
         public override void OnInspectorGUI()
         {
-            DrawDefaultInspector();
             serializedObject.Update();
+
+
+            var alpha = serializedObject.FindProperty("m_Alpha");
+
+            EditorGUILayout.Slider(alpha, 0, 1);
+
+            var interactable = serializedObject.FindProperty("m_Interactable");
+            EditorGUILayout.PropertyField(interactable);
+
+            var blocksRaycasts = serializedObject.FindProperty("m_BlocksRaycasts");
+            EditorGUILayout.PropertyField(blocksRaycasts);
+
+
             GUI.color = Color.green;
-            if (!_IsShow && GUILayout.Button("Show"))
+            if (alpha.floatValue == 0f && GUILayout.Button("Show"))
             {
-                _IsShow = true;
-                _CanvasGroup.alpha = 1;
-                _CanvasGroup.blocksRaycasts = true;
-                _CanvasGroup.interactable = true;
+                alpha.floatValue = 1f;   
+                blocksRaycasts.boolValue = true;
+                interactable.boolValue = true;
             }
 
             GUI.color = Color.white;
-            if (_IsShow && GUILayout.Button("Hide"))
+            if (alpha.floatValue >0f && GUILayout.Button("Hide"))
             {
-                _IsShow = false;
-                _CanvasGroup.alpha = 0;
-                _CanvasGroup.blocksRaycasts = false;
-                _CanvasGroup.interactable = false;
+                alpha.floatValue = 0f;
+                blocksRaycasts.boolValue = false;
+               interactable.boolValue = false;
             }
             if(GUI.changed){
                 EditorUtility.SetDirty(target);

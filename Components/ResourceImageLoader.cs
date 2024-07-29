@@ -22,10 +22,7 @@ namespace Modules.Utilities
         {
             Image, Sprite
         }
-        public enum AutoSizeMode
-        {
-            None, NativeSize, WidthControlHeight, HeightControlWidth
-        }
+     
 
         [SerializeField] public string m_FileName;
 
@@ -39,7 +36,7 @@ namespace Modules.Utilities
         [SerializeField] private Image.Type m_ImageType;
 
         [SerializeField] private Vector4 m_Border;
-        [SerializeField] public AutoSizeMode m_AutoSizeMode;
+        [SerializeField] public ContentSizeMode m_AutoSizeMode;
 
 
 
@@ -128,15 +125,15 @@ namespace Modules.Utilities
             switch (m_AutoSizeMode)
             {
 
-                case AutoSizeMode.NativeSize:
+                case ContentSizeMode.NativeSize:
                     _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _Source.width);
                     _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _Source.height);
                     break;
-                case AutoSizeMode.WidthControlHeight:
+                case ContentSizeMode.WidthControlHeight:
                     _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
 
                     break;
-                case AutoSizeMode.HeightControlWidth:
+                case ContentSizeMode.HeightControlWidth:
                     _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
                     break;
 

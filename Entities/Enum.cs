@@ -8,4 +8,9 @@ namespace Modules.Utilities
         Absolute
     }
 
+     public enum ContentSizeMode
+        {
+            None, NativeSize, WidthControlHeight, HeightControlWidth
+        }
+
 }

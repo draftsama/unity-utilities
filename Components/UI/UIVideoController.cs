@@ -23,6 +23,9 @@ namespace Modules.Utilities
         [SerializeField] public bool m_PlayOnAwake = true;
         [SerializeField] public bool m_PrepareOnAwake = true;
         [SerializeField] public bool m_Loop = false;
+
+        [SerializeField] public ContentSizeMode m_ContentSizeMode = ContentSizeMode.None;
+
         [SerializeField] public bool m_FadeVideo = false;
         [SerializeField] public bool m_FadeAudio = false;
 
@@ -33,14 +36,14 @@ namespace Modules.Utilities
         private VideoPlayer _VideoPlayer;
         private CanvasGroup _CanvasGroup;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
-
+        private RectTransform _RectTransform;
         private bool _Stoping = false;
         private bool _IgnoreFadeOut = false;
 
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
-
+        private AspectRatioFitter _AspectRatioFitter;
 
         private CancellationTokenSource _Cts = new CancellationTokenSource();
 
@@ -48,13 +51,43 @@ namespace Modules.Utilities
         private void Awake()
         {
 
-
+            _RectTransform = GetComponent<RectTransform>();
             _Preview = GetComponent<RawImage>();
             _VideoPlayer = GetComponent<VideoPlayer>();
             _CanvasGroup = GetComponent<CanvasGroup>();
             _VideoPlayer.isLooping = false;
             _VideoPlayer.playOnAwake = false;
             _CanvasGroup.SetAlpha(0);
+
+            _VideoPlayer.prepareCompleted += (source) =>
+            {
+                switch (m_ContentSizeMode)
+                {
+
+                    case ContentSizeMode.NativeSize:
+                        _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, source.width);
+                        _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, source.height);
+                        break;
+                    case ContentSizeMode.WidthControlHeight:
+                        _AspectRatioFitter = GetComponent<AspectRatioFitter>();
+                        if (_AspectRatioFitter == null) _AspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
+
+                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+
+                        break;
+                    case ContentSizeMode.HeightControlWidth:
+                        _AspectRatioFitter = GetComponent<AspectRatioFitter>();
+                        if (_AspectRatioFitter == null) _AspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
+
+                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+                        break;
+
+
+                }
+
+            };
+
+
 
             if (m_PrepareOnAwake)
             {
@@ -286,7 +319,7 @@ namespace Modules.Utilities
             _VideoPlayer.frame = _frame;
         }
 
-      
+
         public void Seek(float _progress)
         {
 
