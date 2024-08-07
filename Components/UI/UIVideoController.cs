@@ -47,7 +47,6 @@ namespace Modules.Utilities
 
         private CancellationTokenSource _Cts = new CancellationTokenSource();
 
-
         private void Awake()
         {
 
@@ -61,6 +60,7 @@ namespace Modules.Utilities
 
             _VideoPlayer.prepareCompleted += (source) =>
             {
+                
                 switch (m_ContentSizeMode)
                 {
 
@@ -73,6 +73,7 @@ namespace Modules.Utilities
                         if (_AspectRatioFitter == null) _AspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
 
                         _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+                        _AspectRatioFitter.aspectRatio = (float)source.width / (float)source.height;
 
                         break;
                     case ContentSizeMode.HeightControlWidth:
@@ -80,6 +81,7 @@ namespace Modules.Utilities
                         if (_AspectRatioFitter == null) _AspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
 
                         _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+                        _AspectRatioFitter.aspectRatio = (float)source.width / (float)source.height;
                         break;
 
 

@@ -60,7 +60,7 @@ namespace Modules.Utilities
 
 
         }
-    
+
 
 
         /// <summary>
@@ -86,7 +86,7 @@ namespace Modules.Utilities
             return _position.x <= halfWidth && _position.x >= -halfWidth && _position.y <= halfHeight && _position.y >= -halfHeight;
         }
 
-        
+
         /// <summary>
         /// Check if position is in camera view and return screen position
         /// </summary>
@@ -110,7 +110,7 @@ namespace Modules.Utilities
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
         }
 
-    
+
 
         public static float VectorToDegree(Vector2 _vector)
         {
@@ -135,15 +135,15 @@ namespace Modules.Utilities
 
         }
 
-        public static int RandomIndexWithoutCurrent(int _currentIndex, int _max,int _limitRepeat =  20)
+        public static int RandomIndexWithoutCurrent(int _currentIndex, int _max, int _limitRepeat = 20)
         {
             var index = UnityEngine.Random.Range(0, _max);
 
-            if (index == _currentIndex && _limitRepeat > 0) return RandomIndexWithoutCurrent(_currentIndex, _max,_limitRepeat - 1);
+            if (index == _currentIndex && _limitRepeat > 0) return RandomIndexWithoutCurrent(_currentIndex, _max, _limitRepeat - 1);
             else return index;
         }
 
-        public static Bounds CalculateBoxColliderFromMeshs(Transform _target, bool _isIncludeChildren = false )
+        public static Bounds CalculateBoxColliderFromMeshs(Transform _target, bool _isIncludeChildren = false)
         {
             if (_target == null)
             {
@@ -168,24 +168,46 @@ namespace Modules.Utilities
 
             return bounds;
 
-           
+
         }
 
 
-        public static Vector2 GetScreenSizeInWorldSpace(Camera _camera,float distance){
+        public static Vector2 GetScreenSizeInWorldSpace(Camera _camera, float distance)
+        {
 
-             var isPerspectiveMode = _camera.orthographic == false;
+            var isPerspectiveMode = _camera.orthographic == false;
             var height = _camera.orthographicSize * 2.0f;
 
-            if(isPerspectiveMode)
-             height =  2.0f * distance * Mathf.Tan(_camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            if (isPerspectiveMode)
+                height = 2.0f * distance * Mathf.Tan(_camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
 
-             var width =  height * _camera.aspect;
+            var width = height * _camera.aspect;
 
             return new Vector2(width, height);
 
         }
-        
+
+        public static bool IsUIElementInView(RectTransform _rectTransform)
+        {
+            var rect = RectTransformToRect(_rectTransform);
+            return IsRectInView(rect);
+        } 
+         public static bool IsRectInView(Rect _rect)
+        {
+            return _rect.Overlaps(new Rect(0, 0, Screen.width, Screen.height));
+        }
+
+        public static  Rect RectTransformToRect(RectTransform _rectTransform)
+        {
+
+            var width = _rectTransform.rect.width;
+            var height = _rectTransform.rect.height;
+
+            var x = _rectTransform.position.x - (width * _rectTransform.pivot.x);
+            var y = _rectTransform.position.y - (height * _rectTransform.pivot.y);
+            return new Rect(x, y, width, height);
+        }
+
 
     }
 }
