@@ -64,7 +64,7 @@ namespace Modules.Utilities
         {
             var instance = GetInstance();
             if (!Directory.Exists(GetFolderResourcePath()))
-            throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
+                throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
 
             List<ResourceResponse> resourceResponseList = new List<ResourceResponse>();
             var files = Directory.GetFiles(GetFolderResourcePath(), "*.*", SearchOption.AllDirectories)
@@ -74,28 +74,28 @@ namespace Modules.Utilities
 
             for (int i = 0; i < files.Count; i++)
             {
-            var response = CreateResourceResponse(files[i]);
-            if (response != null) resourceResponseList.Add(response);
+                var response = CreateResourceResponse(files[i]);
+                if (response != null) resourceResponseList.Add(response);
             }
 
             int downloaded = 0;
 
             if (resourceResponseList.Count > 0)
             {
-            await UniTask.WhenAll(resourceResponseList.Select(_ => LoadResourcesAsync(_)));
+                await UniTask.WhenAll(resourceResponseList.Select(_ => LoadResourcesAsync(_)));
 
-            foreach (var response in resourceResponseList)
-            {
-                instance.m_ResourceResponseList.Add(response);
-                downloaded++;
-            }
+                foreach (var response in resourceResponseList)
+                {
+                    instance.m_ResourceResponseList.Add(response);
+                    downloaded++;
+                }
             }
 
             return instance.m_ResourceResponseList;
         }
 
 
-        
+
         public static void ClearAllResource()
         {
             var instance = GetInstance();
@@ -153,7 +153,7 @@ namespace Modules.Utilities
         }
 
 
-      
+
 
         // using UniTask
         public static async UniTask<Texture2D> GetTextureAsync(string _name)
@@ -162,6 +162,7 @@ namespace Modules.Utilities
             var res = await GetResourceAsync(_name);
             return res != null ? res.m_Texture : null;
         }
+
         public static async UniTask<Texture2D[]> GetTexturesAsync(string[] _names)
         {
             var resArray = await GetResourcesAsync(_names);
@@ -205,64 +206,102 @@ namespace Modules.Utilities
             {
                 if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
                 {
-                    response = instance.m_ResourceResponseList[i];
+                    await UniTask.WaitUntil(() => instance.m_ResourceResponseList[i].m_IsLoaded);
 
-                    break;
+                    return instance.m_ResourceResponseList[i];
+
                 }
             }
+
+
+
+
+
+
+            if (!Directory.Exists(GetFolderResourcePath()))
+            {
+                //no folder resource
+                // Debug.Log("No folder resource");
+                return null;
+            }
+
+            DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
+            // string searchPattern = GetSearchPattern(resourceType);
+
+            if (directoryInfo == null)
+            {
+                //no file
+                // Debug.Log("No file");
+                return null;
+            }
+
+
+
+            var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories)
+            .Where(_file => _file.Name.Equals(_name))
+            .FirstOrDefault();
+
+            if (fileInfo != null)
+            {
+                //init loading
+                response = CreateResourceResponse(fileInfo.FullName);
+                instance.m_ResourceResponseList.Add(response);
+
+                //load and assign texture or audio to response
+                await LoadResourcesAsync(response);
+                return response;
+            }
+            else
+                return null;
+
+
+
+
+        }
+        public static async UniTask<ResourceResponse> GetResourceFromPathAsync(string _path, string _resourceName = "")
+        {
+
+            if (!File.Exists(_path))
+            {
+                return null;
+            }
+
+            if (string.IsNullOrEmpty(_resourceName))
+            {
+                _resourceName = Path.GetFileName(_path);
+            }
+
+            //get from cache
+            var instance = GetInstance();
+            for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
+            {
+                //match by name or path
+                if (instance.m_ResourceResponseList[i].m_Name.Equals(_resourceName) || instance.m_ResourceResponseList[i].m_FilePath.Equals(_path))
+                {
+
+                    await UniTask.WaitUntil(() => instance.m_ResourceResponseList[i].m_IsLoaded);
+                    return instance.m_ResourceResponseList[i];
+                }
+            }
+
+
+
+
+
+            var response = CreateResourceResponse(_path);
 
 
             if (response != null)
             {
-                await UniTask.WaitUntil(() => response.m_Texture != null || response.m_AudioClip != null);
-
+                await LoadResourcesAsync(response);
                 return response;
             }
-            else
-            {
 
+            return null;
 
-
-                if (!Directory.Exists(GetFolderResourcePath()))
-                {
-                    //no folder resource
-                    // Debug.Log("No folder resource");
-                    return null;
-                }
-
-                DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-                // string searchPattern = GetSearchPattern(resourceType);
-
-                if (directoryInfo == null)
-                {
-                    //no file
-                    // Debug.Log("No file");
-                    return null;
-                }
-
-
-
-                var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories)
-                .Where(_file => _file.Name.Equals(_name))
-                .FirstOrDefault();
-
-                if (fileInfo != null)
-                {
-                    //init loading
-                    response = CreateResourceResponse(fileInfo.FullName);
-                    instance.m_ResourceResponseList.Add(response);
-
-                    //load and assign texture or audio to response
-                    await LoadResourcesAsync(response);
-                    return response;
-                }
-                else
-                    return null;
-
-
-            }
 
         }
+
 
         public static async UniTask<ResourceResponse[]> GetResourcesAsync(string[] _fileNames)
         {
@@ -352,7 +391,7 @@ namespace Modules.Utilities
 
 
         }
-       
+
 
 
         private static async UniTask<ResourceResponse> LoadResourcesAsync(ResourceResponse _dataInfo)
@@ -413,6 +452,8 @@ namespace Modules.Utilities
             public AudioType m_AudioType = AudioType.UNKNOWN;
             public Texture2D m_Texture;
             public ResourceType m_ResourceType = ResourceType.None;
+
+            public bool m_IsLoaded => m_Texture != null || m_AudioClip != null;
         }
 
     }
