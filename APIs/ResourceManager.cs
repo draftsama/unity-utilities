@@ -110,6 +110,19 @@ namespace Modules.Utilities
 
         }
 
+        public static void RemoveResource(string _name)
+        {
+            var instance = GetInstance();
+            var response = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == _name);
+            if (response != null)
+            {
+                if (response.m_Texture != null) DestroyImmediate(response.m_Texture, true);
+                if (response.m_AudioClip != null) DestroyImmediate(response.m_AudioClip, true);
+                instance.m_ResourceResponseList.Remove(response);
+            }
+        }
+
+
 
         public static async UniTask<List<ResourceResponse>> GetResources(string[] _name)
         {
