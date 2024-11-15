@@ -60,7 +60,7 @@ namespace Modules.Utilities
 
             _VideoPlayer.prepareCompleted += (source) =>
             {
-                
+
                 switch (m_ContentSizeMode)
                 {
 
@@ -137,7 +137,9 @@ namespace Modules.Utilities
 
             if (_Cts != null)
             {
-                _Cts.Cancel();
+                if (!_Cts.Token.IsCancellationRequested)
+                    _Cts.Cancel();
+
                 _Cts.Dispose();
                 _Cts = null;
             }

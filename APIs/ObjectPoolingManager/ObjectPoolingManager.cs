@@ -53,19 +53,18 @@ public class ObjectPoolingManager : MonoBehaviour
             var obj = poolObj.gameObject;
             var trans = poolObj.transform;
 
-            if (!obj.activeInHierarchy && poolObj.m_Group.Equals(_group))
+            if (!poolObj.IsAlive && poolObj.m_Group.Equals(_group) )
             {
 
                 if (_parent != null) trans.SetParent(_parent, true);
                 trans.position = _position;
                 trans.rotation = _rotation;
 
-                obj.SetActive(true);
+                poolObj.Wake();
                 result = obj;
                 break;
             }
         }
-
         if (result == null)
         {
             result = GameObject.Instantiate(_prefab, _position, _rotation, _parent);
