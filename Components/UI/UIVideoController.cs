@@ -45,7 +45,6 @@ namespace Modules.Utilities
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
         private AspectRatioFitter _AspectRatioFitter;
 
-        private CancellationTokenSource _Cts = new CancellationTokenSource();
 
         private void Awake()
         {
@@ -132,18 +131,7 @@ namespace Modules.Utilities
 
 
 
-        private void OnDisable()
-        {
-
-            if (_Cts != null)
-            {
-                if (!_Cts.Token.IsCancellationRequested)
-                    _Cts.Cancel();
-
-                _Cts.Dispose();
-                _Cts = null;
-            }
-        }
+       
 
         void Start()
         {
@@ -160,18 +148,22 @@ namespace Modules.Utilities
             if (_VideoPlayer.isPlaying && !_forcePlay)
                 return;
 
-            _Cts?.Cancel();
-            _Cts?.Dispose();
-            _Cts = new CancellationTokenSource();
+
+
 
             _VideoPlayer.Stop();
             await UniTask.Yield();
 
 
-            if (_token == default)
-                _token = _Cts.Token;
-            else
-                _Cts.AddTo(_token);
+            //in case token is default using this.DestroyToken() to cancel the task
+
+            if( _token == default)
+            {
+                _token = this.GetCancellationTokenOnDestroy();
+            }
+
+            _Stoping = false;
+           
 
 
             m_Progress = 0f;
@@ -277,7 +269,7 @@ namespace Modules.Utilities
                 if (_VideoPlayer != null) _VideoPlayer.Stop();
                 if (_CanvasGroup != null) _CanvasGroup.SetAlpha(0);
 
-
+            
 
             }
 
@@ -306,6 +298,7 @@ namespace Modules.Utilities
             //  Debug.Log($"Stop Video :{m_FileName} ");
             _IgnoreFadeOut = _ignoreFadeOut;
             _Stoping = true;
+
 
         }
 
