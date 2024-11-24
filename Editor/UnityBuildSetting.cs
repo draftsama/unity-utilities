@@ -133,7 +133,21 @@ namespace Modules.Utilities
 #endif
                 Application.logMessageReceived -= OnBuildError;
                 if (_UnityBuildSettingInfo.m_EnableSendMessage)
-                    SendMessage($"[Build Fail!] \nName: {Application.productName} \nVersion: {Application.version}");
+                {
+                    while (condition.Contains("\n"))
+                    {
+                        condition = condition.Replace("\n", " ");
+                    }
+                    while (stacktrace.Contains("\n"))
+                    {
+                        stacktrace = stacktrace.Replace("\n", " ");
+                    }
+
+                    //write error message
+                    SendMessage(
+                        $"[Build Fail!] \nName: {Application.productName} \nVersion: {Application.version} \nError: {condition} \nStackTrace: {stacktrace}");
+
+                }
             }
         }
 
