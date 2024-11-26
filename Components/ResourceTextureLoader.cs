@@ -51,10 +51,10 @@ public class ResourceTextureLoader : ResourceLoaderBase
         _texture.filterMode = m_FilterMode;
         _texture.Apply();
 
-        // Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
+         Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
         if (m_ModelAspectRatio == ModelAspectRatio.WidthControlHeight)
         {
-            var aspectRatio = (float)_texture.width / (float)_texture.height;
+            var aspectRatio = (float)_texture.height / (float)_texture.width;
             var size = transform.localScale;
             size.y = size.x * aspectRatio;
             transform.localScale = size;
@@ -107,7 +107,9 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
         var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
         var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
         var modelAspectRatio = serializedObject.FindProperty("m_ModelAspectRatio");
+        //helper message
 
+        EditorGUILayout.HelpBox("the Material can not share with other object", MessageType.Info);
         EditorGUILayout.PropertyField(modelAspectRatio);
 
         //get all materials in this object

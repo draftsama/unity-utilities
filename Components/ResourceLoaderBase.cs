@@ -59,7 +59,7 @@ public class ResourceLoaderBaseEditor : Editor
     protected SerializedProperty _GenerateMipMaps;
 
     protected SerializedProperty _FilterMode;
-
+    protected SerializedProperty _FileNameProperty;
     TextureImporterType _TextureType;
     private void OnEnable()
     {
@@ -73,6 +73,18 @@ public class ResourceLoaderBaseEditor : Editor
         _TextureWrapMode = serializedObject.FindProperty("m_TextureWrapMode");
         _GenerateMipMaps = serializedObject.FindProperty("m_GenerateMipMaps");
         _FilterMode = serializedObject.FindProperty("m_FilterMode");
+
+       _FileNameProperty= serializedObject.FindProperty("m_FileName");
+
+        var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
+        var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
+
+
+        if (File.Exists(fileAssetPath))
+        {
+            _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+        }
+
     }
 
     public override void OnInspectorGUI()
@@ -81,9 +93,24 @@ public class ResourceLoaderBaseEditor : Editor
         serializedObject.Update();
 
 
-        var _FileNameProperty = serializedObject.FindProperty("m_FileName");
 
         EditorGUI.BeginChangeCheck();
+
+        //display Texture2D
+       
+        if (_Texture != null)
+        {
+            GUILayout.Label("Preview", GUILayout.ExpandWidth(true));
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            var aspectRatio = (float)_Texture.height / (float)_Texture.width;
+            GUILayout.Box(_Texture, GUILayout.Width(240), GUILayout.Height(aspectRatio * 240f));
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(10);
+        }
+
 
         EditorGUILayout.PropertyField(_FileNameProperty);
 
