@@ -22,7 +22,7 @@ public abstract class ResourceLoaderBase : MonoBehaviour
     [SerializeField] protected bool m_GenerateMipMaps = false;
     [SerializeField] protected TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
     [SerializeField] protected FilterMode m_FilterMode = FilterMode.Bilinear;
-    public virtual void ApplyImage(Texture2D _texture)
+    public virtual void ApplyTexture(Texture2D _texture)
     {
 
     }
@@ -233,7 +233,7 @@ public class ResourceLoaderBaseEditor : Editor
 
         var instance = target as ResourceLoaderBase;
         instance.SetEditorSource(_Texture);
-        instance.ApplyImage(_Texture);
+        instance.ApplyTexture(_Texture);
     }
 
 }

@@ -143,7 +143,11 @@ namespace Modules.Utilities
 
             if (_Material == null)
             {
-                _Material = new Material(Shader.Find("Shader Graphs/TransparentTextureWithColor"));
+                //check this project using URP or not
+                if (Shader.Find("Shader Graphs/TransparentTextureWithColor") == null)
+                    _Material = new Material(Shader.Find("Unlit/TransparentTextureWithColor"));
+                else
+                    _Material = new Material(Shader.Find("Shader Graphs/TransparentTextureWithColor"));
 
             }
             _MeshRenderer.material = _Material;
@@ -201,7 +205,12 @@ namespace Modules.Utilities
 
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
+
+             
+
                 _Material.SetTexture("_BaseMap", _VideoPlayer.texture);
+
+                
                 while (!_token.IsCancellationRequested)
                 {
                     if (_VideoPlayer == null)

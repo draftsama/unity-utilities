@@ -26,7 +26,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
         var texture = await ResourceManager.GetTextureAsync(m_FileName);
 
-        ApplyImage(texture);
+        ApplyTexture(texture);
 
     }
     private void OnDisable()
@@ -35,19 +35,18 @@ public class ResourceTextureLoader : ResourceLoaderBase
 
         if (_EditorSource != null)
         {
-            ApplyImage(_EditorSource);
+            ApplyTexture(_EditorSource);
         }
 #endif
     }
 
-    public override void ApplyImage(Texture2D _texture)
+    public override void ApplyTexture(Texture2D _texture)
     {
         var renderers = GetComponentsInChildren<Renderer>();
 
         if (_texture == null) return;
 
         _texture.wrapMode = m_TextureWrapMode;
-        // _texture.alphaIsTransparency = m_AlphaIsTransparency;
         _texture.filterMode = m_FilterMode;
         _texture.Apply();
 
@@ -177,7 +176,7 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
             GUI.backgroundColor = Color.gray;
             if (GUILayout.Button("Clear Texture"))
             {
-                instance.ApplyImage(null);
+                instance.ApplyTexture(null);
             }
             if (GUILayout.Button("Clear All Texture"))
             {

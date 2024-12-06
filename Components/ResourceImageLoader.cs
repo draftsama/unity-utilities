@@ -244,39 +244,7 @@ public class ResourceImageLoaderEditor : Editor
 
         EditorGUILayout.BeginHorizontal();
         GUI.color = Color.green;
-        // if (GUILayout.Button("Browse"))
-        // {
-        //     if (!Directory.Exists(_ResourceFolder)) Directory.CreateDirectory(_ResourceFolder);
-        //     string path = EditorUtility.OpenFilePanelWithFilters("Select Image", _ResourceFolder, new string[] { "Image Files", "png,jpg,jpeg" });
-        //     if (!string.IsNullOrEmpty(path))
-        //     {
-        //         _FileNameProperty.stringValue = Path.GetFileName(path);
-
-        //         var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
-        //         var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
-        //         if (!Directory.Exists(assetfolder)) Directory.CreateDirectory(assetfolder);
-        //         var filePath = Path.Combine(assetfolder, _FileNameProperty.stringValue);
-        //         var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
-
-        //         if (File.Exists(filePath))
-        //         {
-        //             if (!EditorUtility.DisplayDialog("File already exists", $"Resource Name : {_FileNameProperty.stringValue}", "Replace", "Cancel"))
-        //             {
-        //                 return;
-        //             }
-        //         }
-
-
-        //         File.Copy(path, filePath, true);
-        //         AssetDatabase.Refresh();
-        //         _Texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-        //         _Instance.ApplyImage(_Texture);
-
-
-
-
-        //     }
-        // }
+        
 
         if (GUILayout.Button("Load"))
         {
