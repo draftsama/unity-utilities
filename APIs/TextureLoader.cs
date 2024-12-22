@@ -87,5 +87,17 @@ public class TextureLoader : MonoBehaviour
         DestroyImmediate(loader.gameObject);
     }
 
+    public static void RemoveAllLoaders()
+    {
+        foreach (var loader in m_Loaders)
+        {
+            if(loader.m_Texture != null)
+                DestroyImmediate(loader.m_Texture);
+            DestroyImmediate(loader.gameObject);
+        }
+
+        m_Loaders.Clear();
+    }
+
 
 }
