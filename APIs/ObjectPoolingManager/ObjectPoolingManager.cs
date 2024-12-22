@@ -71,10 +71,9 @@ public class ObjectPoolingManager : MonoBehaviour
             var poolingObject = result.AddComponent<PoolingObject>();
             poolingObject.Init(_group);
             Instance.m_PoolingObjectList.Add(poolingObject);
+            poolingObject.Wake();
         }
-
-        var poolEvent = result.GetComponent<IPoolingObjectEvent>();
-        poolEvent?.OnStartObject();
+       
 
         return result;
     }
@@ -112,7 +111,7 @@ public class ObjectPoolingManager : MonoBehaviour
     public static bool Kill(GameObject _object, bool _terminate = false)
     {
         PoolingObject poolObj = _object.GetComponent<PoolingObject>();
-
+        if (poolObj == null) return false;
         return Kill(poolObj, _terminate);
     }
 
@@ -120,17 +119,10 @@ public class ObjectPoolingManager : MonoBehaviour
     {
         if (_poolObj == null) return false;
         if (!Instance.m_PoolingObjectList.Contains(_poolObj)) return false;
-        var obj = _poolObj.gameObject;
-        var poolEvent = obj.GetComponent<IPoolingObjectEvent>();
-        poolEvent?.OnEndObject();
-        obj.SetActive(false);
 
-        if (_terminate)
-        {
-            Instance.m_PoolingObjectList.Remove(_poolObj);
-            GameObject.DestroyImmediate(obj, true);
-        }
+        _poolObj.Kill(_terminate);
 
+    
         return true;
     }
     public static bool KillGroup(string _group, bool _terminate = false)
