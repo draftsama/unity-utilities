@@ -41,7 +41,7 @@ public class PoolingObject : MonoBehaviour
     {
         IsAlive = false;
         gameObject.SetActive(false);
-
+        transform.SetParent(null);
         var poolEvents = GetComponents<IPoolingObjectEvent>();
         foreach (var poolEvent in poolEvents)
         {

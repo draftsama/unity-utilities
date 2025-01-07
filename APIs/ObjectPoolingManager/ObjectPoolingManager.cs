@@ -15,7 +15,7 @@ public class ObjectPoolingManager : MonoBehaviour
             if (instance == null)
             {
                 instance = FindFirstObjectByType<ObjectPoolingManager>();
-                if(instance != null)return instance;
+                if (instance != null) return instance;
 
                 var go = new GameObject("ObjectPoolingManager");
                 instance = go.AddComponent<ObjectPoolingManager>();
@@ -33,6 +33,23 @@ public class ObjectPoolingManager : MonoBehaviour
 
     public List<PoolingObject> m_PoolingObjectList = new List<PoolingObject>();
 
+    public static void AddObject(string _group, GameObject _obj)
+    {
+
+
+        //check exits
+        var poolObj = _obj.GetComponent<PoolingObject>();
+        if (poolObj == null)
+        {
+            poolObj = _obj.AddComponent<PoolingObject>();
+            poolObj.Init(_group);
+            Instance.m_PoolingObjectList.Add(poolObj);
+        }else{
+           
+           Debug.Log($"Object already added to pool : {_obj.name}");
+        }
+
+    }
     public static GameObject CreateObject(string _group, GameObject _prefab, Transform _parent = null)
     {
         return CreateObject(_group, _prefab, _prefab.transform.position, _prefab.transform.rotation, _parent);
@@ -53,7 +70,7 @@ public class ObjectPoolingManager : MonoBehaviour
             var obj = poolObj.gameObject;
             var trans = poolObj.transform;
 
-            if (!poolObj.IsAlive && poolObj.m_Group.Equals(_group) )
+            if (!poolObj.IsAlive && poolObj.m_Group.Equals(_group))
             {
 
                 if (_parent != null) trans.SetParent(_parent, true);
@@ -71,9 +88,50 @@ public class ObjectPoolingManager : MonoBehaviour
             var poolingObject = result.AddComponent<PoolingObject>();
             poolingObject.Init(_group);
             Instance.m_PoolingObjectList.Add(poolingObject);
-            poolingObject.Wake();
         }
-       
+
+
+        return result;
+    }
+
+    public static T CreateObject<T>(string _group, T _prefab, Transform _parent = null) where T : Component
+    {
+        return CreateObject(_group, _prefab, _prefab.transform.position, _prefab.transform.rotation, _parent);
+    }
+    public static T CreateObject<T>(string _group, T _prefab, Vector3 _position, Quaternion _rotation, Transform _parent = null) where T : Component
+    {
+        T result = null;
+        for (int i = 0; i < Instance.m_PoolingObjectList.Count; i++)
+        {
+            var poolObj = Instance.m_PoolingObjectList[i];
+            if (poolObj == null)
+            {
+                //clean missing object
+                Instance.m_PoolingObjectList.RemoveAt(i);
+                continue;
+            }
+            var obj = poolObj.gameObject;
+            var trans = poolObj.transform;
+
+            if (!poolObj.IsAlive && poolObj.m_Group.Equals(_group))
+            {
+                if (_parent != null) trans.SetParent(_parent, true);
+                trans.position = _position;
+                trans.rotation = _rotation;
+
+                poolObj.Wake();
+                result = obj.GetComponent<T>();
+                break;
+            }
+        }
+        if (result == null)
+        {
+            var newObj = GameObject.Instantiate(_prefab.gameObject, _position, _rotation, _parent);
+            var poolingObject = newObj.AddComponent<PoolingObject>();
+            poolingObject.Init(_group);
+            Instance.m_PoolingObjectList.Add(poolingObject);
+            result = newObj.GetComponent<T>();
+        }
 
         return result;
     }
@@ -122,7 +180,7 @@ public class ObjectPoolingManager : MonoBehaviour
 
         _poolObj.Kill(_terminate);
 
-    
+
         return true;
     }
     public static bool KillGroup(string _group, bool _terminate = false)
