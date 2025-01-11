@@ -185,7 +185,7 @@ namespace Modules.Utilities
             _IgnoreFadeOut = _ignoreFadeOut;
             float fadeInProgress = 0f;
             float fadeOutProgress = 0f;
-
+            _MeshRenderer.enabled = true;
             try
             {
                 _token.ThrowIfCancellationRequested();
