@@ -43,8 +43,17 @@ namespace Modules.Utilities
 
         private async void Awake()
         {
+
+            if (_Instance != null && _Instance != this)
+            {
+                Destroy(gameObject);
+                return;
+            }
+
             _Instance = this;
+
             DontDestroyOnLoad(this);
+
             await UniTask.Yield();
             if (m_RequireAudios.Count > 0)
             {

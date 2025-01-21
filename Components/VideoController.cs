@@ -30,7 +30,7 @@ namespace Modules.Utilities
 
         private MeshFilter _MeshFilter;
         private MeshRenderer _MeshRenderer;
-        private Material _Material;
+        [SerializeField]private Material _Material;
 
         private VideoPlayer _VideoPlayer;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
