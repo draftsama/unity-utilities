@@ -1,35 +1,37 @@
 
 using System;
 using System.Reflection;
-using CustomAttributes;
 using UnityEditor;
 using UnityEngine;
 
-
-
-[CustomEditor(typeof(MonoBehaviour), true)]
-public class ButtonEditor : Editor
+namespace Modules.Utilities
 {
-    public override void OnInspectorGUI()
+
+    [CustomEditor(typeof(MonoBehaviour), true)]
+    public class ButtonEditor : Editor
     {
-        base.OnInspectorGUI();
-
-        // Get the target object (the script instance)
-        MonoBehaviour monoBehaviour = (MonoBehaviour)target;
-        MethodInfo[] methods = monoBehaviour.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-
-        foreach (var method in methods)
+        public override void OnInspectorGUI()
         {
-            // Check if the method has the [Button] attribute
-            if (method.GetCustomAttribute<ButtonAttribute>() != null)
+            base.OnInspectorGUI();
+
+            // Get the target object (the script instance)
+            MonoBehaviour monoBehaviour = (MonoBehaviour)target;
+            MethodInfo[] methods = monoBehaviour.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+
+            foreach (var method in methods)
             {
-                if (GUILayout.Button(method.Name))
+                // Check if the method has the [Button] attribute
+                if (method.GetCustomAttribute<ButtonAttribute>() != null)
                 {
-                    // Call the method
-                    method.Invoke(monoBehaviour, null);
+                    if (GUILayout.Button(method.Name))
+                    {
+                        // Call the method
+                        method.Invoke(monoBehaviour, null);
+                    }
                 }
             }
         }
     }
+
 }
 

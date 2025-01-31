@@ -1,7 +1,7 @@
 using System;
 using UnityEngine;
 
-namespace CustomAttributes
+namespace Modules.Utilities
 {
 
 
