@@ -177,7 +177,8 @@ public class ObjectPoolingManager : MonoBehaviour
     {
         if (_poolObj == null) return false;
         if (!Instance.m_PoolingObjectList.Contains(_poolObj)) return false;
-
+       
+         if(_terminate)Instance.m_PoolingObjectList.Remove(_poolObj);
         _poolObj.Kill(_terminate);
 
 
