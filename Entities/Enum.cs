@@ -8,9 +8,18 @@ namespace Modules.Utilities
         Absolute
     }
 
-     public enum ContentSizeMode
-        {
-            None, NativeSize, WidthControlHeight, HeightControlWidth
-        }
+    public enum ContentSizeMode
+    {
+        None, NativeSize, WidthControlHeight, HeightControlWidth
+    }
+
+
+    public enum ResourceStoreType
+    {
+        ExternalResources,
+
+        Addressable
+
+    }
 
 }

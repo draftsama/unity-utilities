@@ -2,13 +2,13 @@ using System;
 using System.Threading.Tasks;
 using System.Collections.Generic;
 using System.Linq;
-using Modules.Utilities;
 using UnityEngine;
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Events;
 using System.IO;
+
 
 
 
@@ -24,6 +24,7 @@ namespace Modules.Utilities
 
         private static AudioSource _CurrentBGMAudio;
         public static bool ResourcesIsLoaded { get; private set; }
+
         [SerializeField] public List<string> m_RequireAudios = new List<string>();
 
 
@@ -52,6 +53,8 @@ namespace Modules.Utilities
 
             _Instance = this;
 
+
+         
             DontDestroyOnLoad(this);
 
             await UniTask.Yield();
@@ -187,13 +190,13 @@ namespace Modules.Utilities
             }).Forget();
 
 
-                //  .Subscribe(_value =>
-                //  {
-                //      _CurrentBGMAudio.volume = _value;
-                //  }, () =>
-                //  {
-                //      _CurrentBGMAudio.volume = _volumeTarget;
-                //  }).AddTo(GetInstance());
+            //  .Subscribe(_value =>
+            //  {
+            //      _CurrentBGMAudio.volume = _value;
+            //  }, () =>
+            //  {
+            //      _CurrentBGMAudio.volume = _volumeTarget;
+            //  }).AddTo(GetInstance());
         }
 
         public static async UniTask PlayFX(string _name, float _volume = 1f, CancellationToken _token = default)
@@ -259,7 +262,7 @@ namespace Modules.Utilities
         {
             if (_CurrentBGMAudio == null) return;
             var instance = GetInstance();
-            
+
             _fade = Mathf.Clamp(_fade, 0, float.PositiveInfinity);
             var miliseconds = Mathf.RoundToInt(_fade * GlobalConstant.SECONDS_TO_MILLISECONDS);
             var start = _CurrentBGMAudio.volume;
@@ -307,9 +310,13 @@ namespace Modules.Utilities
         SerializedProperty m_Audiolist;
         SerializedProperty m_OnLoadRequireCompleted;
 
+
         private void OnEnable()
         {
+
+
             _Instance = target as AudioManagerEditor;
+
 
             m_RequireAudios = serializedObject.FindProperty("m_RequireAudios");
             m_Audiolist = serializedObject.FindProperty("m_Audiolist");
@@ -318,26 +325,68 @@ namespace Modules.Utilities
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
-            EditorGUILayout.PropertyField(m_RequireAudios, true);
 
-            if (GUILayout.Button("Get All Audio Name From Resource"))
+           
+
+                ResourceSettingAssets[] resourceSettingAssets = Resources.LoadAll<ResourceSettingAssets>("");
+            if (resourceSettingAssets.Length == 0)
             {
-                var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
+                EditorGUILayout.HelpBox("ResourceSettingAssets is null", MessageType.Error);
 
-                string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
-
-                var files = dir.GetFiles("*.*", SearchOption.AllDirectories).Where(file => extensions.Contains(file.Extension)).ToArray();
-                var audioNames = files.Select(_ => _.Name).ToList();
-
-                m_RequireAudios.ClearArray();
-                m_RequireAudios.arraySize = audioNames.Count;
-
-                for (int i = 0; i < audioNames.Count; i++)
+                if (GUILayout.Button("Create ResourceSettingAssets"))
                 {
-                    m_RequireAudios.GetArrayElementAtIndex(i).stringValue = audioNames[i];
+                    // Ensure the "Resources" folder exists
+                    string resourcesFolderPath = "Assets/Resources";
+                    if (!AssetDatabase.IsValidFolder(resourcesFolderPath))
+                    {
+                        AssetDatabase.CreateFolder("Assets", "Resources");
+                    }
+
+
+
+                    // Create the asset in the "Resources" folder
+                    ResourceSettingAssets asset = ScriptableObject.CreateInstance<ResourceSettingAssets>();
+                    string assetPath = AssetDatabase.GenerateUniqueAssetPath(resourcesFolderPath + "/NewResourceSetting.asset");
+
+                    AssetDatabase.CreateAsset(asset, assetPath);
+                    AssetDatabase.SaveAssets();
+
+                    
+
+
                 }
 
-            }
+            }else
+                {
+                  
+
+                        EditorGUILayout.PropertyField(m_RequireAudios, true);
+
+                        if (GUILayout.Button("Get All Audio Name From Resource"))
+                        {
+                            var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
+
+                            string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
+
+                            var files = dir.GetFiles("*.*", SearchOption.AllDirectories).Where(file => extensions.Contains(file.Extension)).ToArray();
+                            var audioNames = files.Select(_ => _.Name).ToList();
+
+                            m_RequireAudios.ClearArray();
+                            m_RequireAudios.arraySize = audioNames.Count;
+
+                            for (int i = 0; i < audioNames.Count; i++)
+                            {
+                                m_RequireAudios.GetArrayElementAtIndex(i).stringValue = audioNames[i];
+                            }
+
+                        }
+
+                    
+
+
+
+                }
+
 
             EditorGUILayout.PropertyField(m_Audiolist, true);
             EditorGUILayout.PropertyField(m_OnLoadRequireCompleted, true);

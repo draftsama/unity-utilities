@@ -7,6 +7,7 @@ using UnityEngine;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Networking;
+using UnityEngine.AddressableAssets;
 
 
 namespace Modules.Utilities
@@ -16,6 +17,8 @@ namespace Modules.Utilities
     {
 
         private static ResourceManager _Instance;
+
+        [SerializeField] private ResourceSettingAssets m_ResourceSettingAssets;
 
         [SerializeField] private List<ResourceResponse> m_ResourceResponseList;
         private void Awake()
@@ -28,11 +31,23 @@ namespace Modules.Utilities
             _Instance = this;
             m_ResourceResponseList = new List<ResourceResponse>();
 
+            if (m_ResourceSettingAssets == null)
+            {
+                ResourceSettingAssets[] resourceSettingAssets = Resources.LoadAll<ResourceSettingAssets>("");
+
+                if (resourceSettingAssets.Length > 0)
+                {
+                    m_ResourceSettingAssets = resourceSettingAssets[0];
+                }
+                else
+                {
+                    Debug.LogError("Not found ResourceSettingAssets in Resources Folder");
+                }
+            }
+
             DontDestroyOnLoad(gameObject);
         }
-        void Start()
-        {
-        }
+
         private static ResourceManager GetInstance()
         {
             if (_Instance == null)
@@ -63,6 +78,11 @@ namespace Modules.Utilities
         public static async UniTask<List<ResourceResponse>> LoadAllResource()
         {
             var instance = GetInstance();
+
+            await UniTask.Yield();
+
+
+
             if (!Directory.Exists(GetFolderResourcePath()))
                 throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
 
@@ -82,7 +102,7 @@ namespace Modules.Utilities
 
             if (resourceResponseList.Count > 0)
             {
-                await UniTask.WhenAll(resourceResponseList.Select(_ => LoadResourcesAsync(_)));
+                await UniTask.WhenAll(resourceResponseList.Select(_ => LoadExternalResourcesAsync(_)));
 
                 foreach (var response in resourceResponseList)
                 {
@@ -124,46 +144,46 @@ namespace Modules.Utilities
 
 
 
-        public static async UniTask<List<ResourceResponse>> GetResources(string[] _name)
-        {
-            var instance = GetInstance();
-            List<ResourceResponse> responselist = new List<ResourceResponse>();
-            Queue<ResourceResponse> loaderList = new Queue<ResourceResponse>();
+        // public static async UniTask<List<ResourceResponse>> GetResources(string[] _name)
+        // {
+        //     var instance = GetInstance();
+        //     List<ResourceResponse> responselist = new List<ResourceResponse>();
+        //     Queue<ResourceResponse> loaderList = new Queue<ResourceResponse>();
 
-            DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
+        //     DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
 
-            for (int i = 0; i < _name.Length; i++)
-            {
-                var fileName = _name[i];
-                var resource = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == fileName);
-                if (resource != null)
-                {
-                    //add existing resource
-                    responselist.Add(resource);
-                }
-                else
-                {
-                    if (directoryInfo == null || !Directory.Exists(GetFolderResourcePath()))
-                        continue;
+        //     for (int i = 0; i < _name.Length; i++)
+        //     {
+        //         var fileName = _name[i];
+        //         var resource = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == fileName);
+        //         if (resource != null)
+        //         {
+        //             //add existing resource
+        //             responselist.Add(resource);
+        //         }
+        //         else
+        //         {
+        //             if (directoryInfo == null || !Directory.Exists(GetFolderResourcePath()))
+        //                 continue;
 
-                    var extension = new FileInfo(fileName).Extension;
-                    var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
-                    if (fileInfo != null)
-                        loaderList.Enqueue(CreateResourceResponse(fileInfo.FullName));
-                }
-            }
+        //             var extension = new FileInfo(fileName).Extension;
+        //             var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
+        //             if (fileInfo != null)
+        //                 loaderList.Enqueue(CreateResourceResponse(fileInfo.FullName));
+        //         }
+        //     }
 
-            while (loaderList.Count > 0)
-            {
-                //load resource
-                var response = loaderList.Dequeue();
-                await LoadResourcesAsync(response);
-                instance.m_ResourceResponseList.Add(response);
-                responselist.Add(response);
-            }
+        //     while (loaderList.Count > 0)
+        //     {
+        //         //load resource
+        //         var response = loaderList.Dequeue();
+        //         await LoadResourcesAsync(response);
+        //         instance.m_ResourceResponseList.Add(response);
+        //         responselist.Add(response);
+        //     }
 
-            return responselist;
-        }
+        //     return responselist;
+        // }
 
 
 
@@ -200,15 +220,14 @@ namespace Modules.Utilities
 
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
-            await UniTask.Yield();
 
             var instance = GetInstance();
-
+            await UniTask.Yield();
 
 
             ResourceResponse response = null;
 
-            //get type from name
+
 
             var extension = new FileInfo(_name).Extension;
             var resourceType = GetResourceType(extension);
@@ -227,45 +246,97 @@ namespace Modules.Utilities
             }
 
 
-
-
-
-
-            if (!Directory.Exists(GetFolderResourcePath()))
+            try
             {
-                //no folder resource
-                // Debug.Log("No folder resource");
-                return null;
+
+                if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.ExternalResources)
+                {
+
+                    if (!Directory.Exists(GetFolderResourcePath()))
+                    {
+                        //no folder resource
+                        // Debug.Log("No folder resource");
+                        return null;
+                    }
+
+                    DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
+                    // string searchPattern = GetSearchPattern(resourceType);
+
+                    if (directoryInfo == null)
+                    {
+                        //no file
+                        // Debug.Log("No file");
+                        return null;
+                    }
+
+
+
+                    var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories)
+                    .Where(_file => _file.Name.Equals(_name))
+                    .FirstOrDefault();
+
+                    if (fileInfo != null)
+                    {
+                        //init loading
+                        response = CreateResourceResponse(fileInfo.FullName);
+                        instance.m_ResourceResponseList.Add(response);
+
+                        //load and assign texture or audio to response
+                        await LoadExternalResourcesAsync(response);
+                        return response;
+                    }
+
+
+                }
+                else if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.Addressable)
+                {
+                    switch (resourceType)
+                    {
+                        case ResourceResponse.ResourceType.Texture:
+                            var texture = await Addressables.LoadAssetAsync<Texture2D>(_name).Task;
+                            if (texture != null)
+                            {
+                                response = new ResourceResponse
+                                {
+                                    m_Name = _name,
+                                    m_Texture = texture,
+                                    m_ResourceType = ResourceResponse.ResourceType.Texture
+                                };
+                                instance.m_ResourceResponseList.Add(response);
+                                return response;
+                            }
+                            break;
+
+                        case ResourceResponse.ResourceType.AudioClip:
+                            var audio = await Addressables.LoadAssetAsync<AudioClip>(_name).Task;
+                            if (audio != null)
+                            {
+                                response = new ResourceResponse
+                                {
+                                    m_Name = _name,
+                                    m_AudioClip = audio,
+                                    m_ResourceType = ResourceResponse.ResourceType.AudioClip
+                                };
+                                instance.m_ResourceResponseList.Add(response);
+                                return response;
+                            }
+                        break;
+                    }
+
+
+
+                }
+
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e.Message);
             }
 
-            DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-            // string searchPattern = GetSearchPattern(resourceType);
-
-            if (directoryInfo == null)
-            {
-                //no file
-                // Debug.Log("No file");
-                return null;
-            }
 
 
 
-            var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories)
-            .Where(_file => _file.Name.Equals(_name))
-            .FirstOrDefault();
-
-            if (fileInfo != null)
-            {
-                //init loading
-                response = CreateResourceResponse(fileInfo.FullName);
-                instance.m_ResourceResponseList.Add(response);
-
-                //load and assign texture or audio to response
-                await LoadResourcesAsync(response);
-                return response;
-            }
-            else
-                return null;
+            return null;
 
 
 
@@ -306,7 +377,7 @@ namespace Modules.Utilities
 
             if (response != null)
             {
-                await LoadResourcesAsync(response);
+                await LoadExternalResourcesAsync(response);
                 return response;
             }
 
@@ -407,7 +478,7 @@ namespace Modules.Utilities
 
 
 
-        private static async UniTask<ResourceResponse> LoadResourcesAsync(ResourceResponse _dataInfo)
+        private static async UniTask<ResourceResponse> LoadExternalResourcesAsync(ResourceResponse _dataInfo)
         {
 
             var filePath = $"file://{_dataInfo.m_FilePath}";

@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace Modules.Utilities
 {
-    [CreateAssetMenu(fileName = "BuildSettingInfo", menuName = "[Utility] Create BuildSettingInfo.asset", order = 0)]
+    [CreateAssetMenu(fileName = "BuildSettingInfo", menuName = "[Draft Utility]/Create BuildSettingInfo", order = 0)]
     public class UnityBuildSettingInfo : ScriptableObject
     {
         public bool m_EnableSoundNotify;
