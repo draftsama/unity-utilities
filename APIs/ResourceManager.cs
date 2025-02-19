@@ -7,8 +7,11 @@ using UnityEngine;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Networking;
-using UnityEngine.AddressableAssets;
 
+
+#if ADDRESSABLES_PACKAGE_INSTALLED
+using UnityEngine.AddressableAssets;
+#endif
 
 namespace Modules.Utilities
 {
@@ -288,6 +291,7 @@ namespace Modules.Utilities
 
 
                 }
+                #if ADDRESSABLES_PACKAGE_INSTALLED
                 else if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.Addressable)
                 {
                     switch (resourceType)
@@ -320,12 +324,14 @@ namespace Modules.Utilities
                                 instance.m_ResourceResponseList.Add(response);
                                 return response;
                             }
-                        break;
+                            break;
                     }
 
 
 
                 }
+                #endif
+
 
             }
             catch (Exception e)

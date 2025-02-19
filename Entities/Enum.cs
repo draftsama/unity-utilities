@@ -18,7 +18,9 @@ namespace Modules.Utilities
     {
         ExternalResources,
 
-        Addressable
+#if ADDRESSABLES_PACKAGE_INSTALLED
+        Addressable 
+#endif
 
     }
 
