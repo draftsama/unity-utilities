@@ -147,46 +147,6 @@ namespace Modules.Utilities
 
 
 
-        // public static async UniTask<List<ResourceResponse>> GetResources(string[] _name)
-        // {
-        //     var instance = GetInstance();
-        //     List<ResourceResponse> responselist = new List<ResourceResponse>();
-        //     Queue<ResourceResponse> loaderList = new Queue<ResourceResponse>();
-
-        //     DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-
-        //     for (int i = 0; i < _name.Length; i++)
-        //     {
-        //         var fileName = _name[i];
-        //         var resource = instance.m_ResourceResponseList.FirstOrDefault(x => x.m_Name == fileName);
-        //         if (resource != null)
-        //         {
-        //             //add existing resource
-        //             responselist.Add(resource);
-        //         }
-        //         else
-        //         {
-        //             if (directoryInfo == null || !Directory.Exists(GetFolderResourcePath()))
-        //                 continue;
-
-        //             var extension = new FileInfo(fileName).Extension;
-        //             var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories).FirstOrDefault(x => x.Name == fileName);
-        //             if (fileInfo != null)
-        //                 loaderList.Enqueue(CreateResourceResponse(fileInfo.FullName));
-        //         }
-        //     }
-
-        //     while (loaderList.Count > 0)
-        //     {
-        //         //load resource
-        //         var response = loaderList.Dequeue();
-        //         await LoadResourcesAsync(response);
-        //         instance.m_ResourceResponseList.Add(response);
-        //         responselist.Add(response);
-        //     }
-
-        //     return responselist;
-        // }
 
 
 
@@ -220,6 +180,19 @@ namespace Modules.Utilities
             return resArray.Select(_ => _ != null ? _.m_AudioClip : null).ToArray();
         }
 
+        public static async UniTask<Texture2D> GetTextureByPathAsync(string _path, string _overrideName )
+        {
+            var res = await GetResourceByPathAsync(_path, _overrideName);
+            return res != null ? res.m_Texture : null;
+        }
+
+        public static async UniTask<AudioClip> GetAudioClipByPathAsync(string _path, string _overrideName )
+        {
+            var res = await GetResourceByPathAsync(_path, _overrideName);
+            return res != null ? res.m_AudioClip : null;
+        }
+
+
 
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
@@ -229,8 +202,6 @@ namespace Modules.Utilities
 
 
             ResourceResponse response = null;
-
-
 
             var extension = new FileInfo(_name).Extension;
             var resourceType = GetResourceType(extension);
@@ -291,7 +262,7 @@ namespace Modules.Utilities
 
 
                 }
-                #if ADDRESSABLES_PACKAGE_INSTALLED
+#if ADDRESSABLES_PACKAGE_INSTALLED
                 else if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.Addressable)
                 {
                     switch (resourceType)
@@ -330,7 +301,7 @@ namespace Modules.Utilities
 
 
                 }
-                #endif
+#endif
 
 
             }
@@ -348,43 +319,66 @@ namespace Modules.Utilities
 
 
         }
-        public static async UniTask<ResourceResponse> GetResourceFromPathAsync(string _path, string _resourceName = "")
+        public static async UniTask<ResourceResponse> GetResourceByPathAsync(string _path, string _overrideName )
         {
 
             if (!File.Exists(_path))
             {
+                Debug.LogError($"Not found file : {_path}");
                 return null;
             }
 
-            if (string.IsNullOrEmpty(_resourceName))
+
+            if (string.IsNullOrEmpty(_overrideName))
             {
-                _resourceName = Path.GetFileName(_path);
+
+                Debug.Log($"Override Name is empty");
+                return null;
             }
 
-            //get from cache
+            var fileName = Path.GetFileName(_path);
+            var extension = Path.GetExtension(_path);
+            var resourceType = GetResourceType(extension);
+            //_overrideName = "test.jpg";
+
+            var overrideExtension = Path.GetExtension(_overrideName);
+            if (overrideExtension != extension)
+            {
+                Debug.LogError($"Override Name Extension is not match with file extension : {_overrideName}");
+                return null;
+            }
+
             var instance = GetInstance();
+            await UniTask.Yield();
+            ResourceResponse response = null;
+
+
+            //get from cache
             for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
             {
-                //match by name or path
-                if (instance.m_ResourceResponseList[i].m_Name.Equals(_resourceName) || instance.m_ResourceResponseList[i].m_FilePath.Equals(_path))
+                if (instance.m_ResourceResponseList[i].m_FilePath.Equals(_path) && instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
                 {
-
                     await UniTask.WaitUntil(() => instance.m_ResourceResponseList[i].m_IsLoaded);
+
                     return instance.m_ResourceResponseList[i];
+
                 }
             }
 
-
-
-
-
-            var response = CreateResourceResponse(_path);
-
-
-            if (response != null)
+            try
             {
+                //init loading
+                response = CreateResourceResponse(_path, _overrideName);
+                instance.m_ResourceResponseList.Add(response);
+
+                //load and assign texture or audio to response
                 await LoadExternalResourcesAsync(response);
                 return response;
+
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e.Message);
             }
 
             return null;
@@ -408,10 +402,25 @@ namespace Modules.Utilities
 
         }
 
+        public static async UniTask<ResourceResponse[]> GetResourcesByPathAsync(string[] _paths, string[] _overrideNames = null)
+        {
+            var responselist = new ResourceResponse[_paths.Length];
+            for (int i = 0; i < _paths.Length; i++)
+            {
+                var path = _paths[i];
+                var overrideName = _overrideNames != null ? _overrideNames[i] : "";
+                var res = await GetResourceByPathAsync(path, overrideName);
+                responselist[i] = res;
+
+            }
+            return responselist;
+
+        }
+
 
 
         //-------- Private Methods --------//
-        private static ResourceResponse CreateResourceResponse(string _path)
+        private static ResourceResponse CreateResourceResponse(string _path, string _overrideName = "")
         {
             var fileInfo = new FileInfo(_path);
 
@@ -443,7 +452,7 @@ namespace Modules.Utilities
 
             ResourceResponse response = new ResourceResponse
             {
-                m_Name = fileInfo.Name,
+                m_Name = _overrideName != "" ? _overrideName : fileInfo.Name,
                 m_FilePath = fileInfo.FullName,
                 m_ResourceType = resourceType,
                 m_AudioType = audioType
