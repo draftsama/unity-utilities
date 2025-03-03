@@ -13,17 +13,24 @@ using UnityEditor;
 
 public class PlaneScreenViewport : MonoBehaviour
 {
+    
+    public enum ControlType
+    {
+        None, WidthControlHeight, HeightControlWidth
+    }
     [SerializeField] public Camera m_Camera;
 
     [SerializeField] private float m_Distance = 1.0f;
     [SerializeField] private float m_AdditionalScalePer = 0f;
-
+    [SerializeField][HideInInspector] private ControlType m_ControlType = ControlType.None;
+    [SerializeField][HideInInspector]private float m_AspectRatio = -1f;
     [SerializeField] private bool m_UpdateAlways = true;
 
     //TODO: config camera settings at this component
 
     private Transform _Tr;
-
+    
+    
 
 
 
@@ -55,7 +62,10 @@ public class PlaneScreenViewport : MonoBehaviour
             return;
 
         _Tr = transform;
-
+        if(m_AspectRatio < 0)
+            m_AspectRatio = m_Camera.aspect;
+        
+        
         var isPerspectiveMode = m_Camera.orthographic == false;
         var size = 0f;
         if (isPerspectiveMode)
@@ -71,13 +81,26 @@ public class PlaneScreenViewport : MonoBehaviour
 
         var width = size * m_Camera.aspect;
         var height = size;
+      
+            
+        if (m_ControlType == ControlType.WidthControlHeight)
+        {
+            
+            height = width * (1f/ m_AspectRatio);
+        }
+        else if (m_ControlType == ControlType.HeightControlWidth)
+        {
+            width = height * m_AspectRatio;
+        }
+        
 
         // Debug.Log($"width:{width} height:{height}");
 
         if (m_AdditionalScalePer < 0) m_AdditionalScalePer = 0;
         width += (width * m_AdditionalScalePer) / 100f;
         height += (height * m_AdditionalScalePer) / 100f;
-
+        
+        
 
         // Set the scale of the screen plane to match the calculated size and aspect ratio
         _Tr.localScale = new Vector3(width, height, 1.0f);
@@ -92,6 +115,15 @@ public class PlaneScreenViewport : MonoBehaviour
 
     }
 
+   
+    public bool SetAspectRatio(float _aspectRatio)
+    {
+        if (_aspectRatio < 0)
+            return false;
+        
+        m_AspectRatio = _aspectRatio;
+        return true;
+    }
 
 }
 
@@ -103,8 +135,28 @@ public class PlaneScreenViewportEditor : Editor
     public override void OnInspectorGUI()
     {
         base.OnInspectorGUI();
-
+        
         var script = (PlaneScreenViewport)target;
+        serializedObject.Update();
+        var controlType = serializedObject.FindProperty("m_ControlType");
+        var ratio = serializedObject.FindProperty("m_AspectRatio");
+        
+        EditorGUILayout.PropertyField(controlType);
+        if(controlType.enumValueIndex != 0)
+        {
+            EditorGUILayout.PropertyField(ratio);
+
+            if (script.m_Camera && GUILayout.Button("Use Camera Aspect Ratio"))
+            {
+                script.SetAspectRatio(script.m_Camera.aspect);
+                script.UpdatePlaneScreen();
+            }
+           
+        }
+
+        serializedObject.ApplyModifiedProperties();
+        
+        
 
         //if camera is null show warning
         if (script.m_Camera == null)
