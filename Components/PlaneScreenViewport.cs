@@ -18,8 +18,8 @@ public class PlaneScreenViewport : MonoBehaviour
     {
         None, WidthControlHeight, HeightControlWidth
     }
+    
     [SerializeField] public Camera m_Camera;
-
     [SerializeField] private float m_Distance = 1.0f;
     [SerializeField] private float m_AdditionalScalePer = 0f;
     [SerializeField][HideInInspector] private ControlType m_ControlType = ControlType.None;
@@ -68,9 +68,13 @@ public class PlaneScreenViewport : MonoBehaviour
         
         var isPerspectiveMode = m_Camera.orthographic == false;
         var size = 0f;
+        
+        
         if (isPerspectiveMode)
-        {//Calculate the size of the screen plane based on the camera's field of view and the distance to the screen plane
+        {
+            //Calculate the size of the screen plane based on the camera's field of view and the distance to the screen plane
             size = 2.0f * m_Distance * Mathf.Tan(m_Camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
+            
         }
         else
         {
@@ -115,7 +119,17 @@ public class PlaneScreenViewport : MonoBehaviour
 
     }
 
+   public void SetCamera(Camera _camera)
+    {
+        m_Camera = _camera;
+        UpdatePlaneScreen();
+    }
    
+   public void SetControlType(ControlType _controlType)
+    {
+        m_ControlType = _controlType;
+        UpdatePlaneScreen();
+    }
     public bool SetAspectRatio(float _aspectRatio)
     {
         if (_aspectRatio < 0)
