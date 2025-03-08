@@ -14,7 +14,7 @@ public abstract class UIPage : MonoBehaviour
 {
     [SerializeField] [HideInInspector] public string m_GroupName = "Default";
     [SerializeField] [HideInInspector] public bool m_IsDefault;
-
+    [SerializeField] [ReadOnlyField] public bool m_IsOpened;
     protected CanvasGroup canvasGroup;
 
 
@@ -61,6 +61,8 @@ public abstract class UIPage : MonoBehaviour
             foreach (var pe in GetComponents<IPageHideEnd>())
                 pe.OnEndHidePage();
     }
+
+    
 }
 
 
@@ -135,15 +137,7 @@ public static class UIPageHelper
     // }
 }
 
-// public interface IPageEvent
-// {
-//     void OnEndShowPage();
-//     void OnEndHidePage();
-//     
-//     void OnBeginShowPage();
-//     void OnBeginHidePage();
-//     
-// }
+
 public interface IPageShowBegin
 {
     void OnBeginShowPage();

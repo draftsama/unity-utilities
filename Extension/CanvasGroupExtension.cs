@@ -53,13 +53,23 @@ namespace Modules.Utilities
                         progress += deltaTime / (_milliseconds * GlobalConstant.MILLISECONDS_TO_SECONDS);
                         if (progress < 1)
                         {
-                            _source.SetAlpha(
-                                Mathf.Clamp01(current + EasingFormula.EasingFloat(_ease, 0f, 1f, progress) * different),
-                                _adjustInteractAble);
+                            var alpha = Mathf.Clamp01(current +
+                                                      EasingFormula.EasingFloat(_ease, 0f, 1f, progress) * different);
+                            _source.alpha = alpha;
+                            if(_adjustInteractAble)
+                            {
+                                _source.SetInteractive(_target >= GlobalConstant.ALPHA_VALUE_VISIBLE);
+                                _source.SetBlocksraycasts(_target > GlobalConstant.ALPHA_VALUE_INVISIBLE);
+                            }
                         }
                         else
                         {
-                            _source.SetAlpha(Mathf.Clamp01(_target), _adjustInteractAble);
+                            _source.alpha = _target;
+                            if(_adjustInteractAble)
+                            {
+                                _source.SetInteractive(_target >= GlobalConstant.ALPHA_VALUE_VISIBLE);
+                                _source.SetBlocksraycasts(_target > GlobalConstant.ALPHA_VALUE_INVISIBLE);
+                            }
                             uts.TrySetResult();
 
                             break;

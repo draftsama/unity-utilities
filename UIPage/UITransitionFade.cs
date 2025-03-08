@@ -25,7 +25,7 @@ public class UITransitionFade : MonoBehaviour
                    var go = new GameObject("TransitionCanvas");
                      var canvas = go.AddComponent<Canvas>();
                         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                        canvas.sortingOrder = 1000;
+                        canvas.sortingOrder = 10;
                         go.AddComponent<CanvasScaler>();
                         go.AddComponent<GraphicRaycaster>();
                         var container = new GameObject("Container", typeof(RectTransform));
@@ -37,7 +37,7 @@ public class UITransitionFade : MonoBehaviour
                         contrainerRect.sizeDelta = Vector2.zero;
                         contrainerRect.anchoredPosition = Vector2.zero;
                         
-                        var fade = new GameObject("Fade", typeof(Image), typeof(RectTransform), typeof(CanvasGroup));
+                        var fade = new GameObject("Fade", typeof(Image), typeof(CanvasGroup));
                         var fadeRect = fade.GetComponent<RectTransform>();
                         fadeRect.SetParent(container.transform);
                         fadeRect.anchorMin = Vector2.zero;
