@@ -110,31 +110,19 @@ public static class UIPageHelper
         }
     }
 
-    // public static bool ResetUIPages(string _groupName, bool _notify = false)
-    // {
-    //     var uiPages = Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-    //         .Where(_ => _.m_GroupName == _groupName);
-    //
-    //     foreach (var p in uiPages)
-    //     {
-    //         p.SetShow(p.m_IsDefault);
-    //         if (_notify)
-    //         {
-    //             var pageEvents = p.GetComponents<IPageEvent>();
-    //             
-    //             foreach (var pe in pageEvents)
-    //             {
-    //                 if(p.m_IsDefault)
-    //                     pe.OnEndShowPage();
-    //                 else
-    //                     pe.OnEndHidePage();
-    //             }
-    //
-    //         }
-    //     }
-    //
-    //     return true;
-    // }
+    public static bool ResetUIPagesWithoutNotify(string _groupName)
+    {
+        var uiPages = Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+            .Where(_ => _.m_GroupName == _groupName);
+    
+        foreach (var p in uiPages)
+        {
+            p.SetShow(p.m_IsDefault);
+
+        }
+    
+        return true;
+    }
 }
 
 
