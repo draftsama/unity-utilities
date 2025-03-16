@@ -130,12 +130,12 @@ namespace Modules.Utilities
                     ValueConfig.SaveValueConfig(_Asset.m_ValueCollection);
 
                 }
-                if (_Asset.m_NeedUpdate && GUILayout.Button("Update"))
+                if (_Asset.m_NeedUpdate && GUILayout.Button("Load"))
                 {
                     m_NeedUpdateProperty.boolValue = false;
                     serializedObject.ApplyModifiedProperties();
+                    _Asset.m_ValueCollection =  ValueConfig.LoadValueConfig();
                     EditorUtility.SetDirty(_Asset);
-                    ValueConfig.SaveValueConfig(_Asset.m_ValueCollection);
 
                 }
 

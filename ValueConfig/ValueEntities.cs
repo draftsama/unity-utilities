@@ -30,6 +30,37 @@ namespace Modules.Utilities
         }
 
 
+        public static ValueType GetValueType<T>(T _value)
+        {   
+            if (_value is string)
+            {
+                return ValueType.StringType;
+            }
+            else if (_value is int)
+            {
+                return ValueType.IntType;
+            }
+            else if (_value is float)
+            {
+                return ValueType.FloatType;
+            }
+            else if (_value is bool)
+            {
+                return ValueType.BooleanType;
+            }
+            else if (_value is Vector2)
+            {
+                return ValueType.Vector2Type;
+            }
+            else if (_value is Vector3)
+            {
+                return ValueType.Vector3Type;
+            }
+            else
+            {
+                throw new System.Exception("Unsupported type");
+            }
+        }
     }
 
     [System.Serializable]

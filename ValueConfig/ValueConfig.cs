@@ -14,14 +14,14 @@ namespace Modules.Utilities
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.BeforeSceneLoad)]
         private static void OnInitRuntime()
         {
-            _Current = InitValueConfig();
+            _Current = LoadValueConfig();
         }
 
 #if UNITY_EDITOR
         [UnityEditor.InitializeOnLoadMethod]
         private static void OnAfterScriptCompile()
         {
-            InitValueConfig();
+            LoadValueConfig();
         }
 #endif
 
@@ -41,78 +41,108 @@ namespace Modules.Utilities
                 value.vector3Value = defaultValue.vector3Value;
                 valueCollection.Add(value);
             }
+
             return valueCollection;
         }
-        private static ValueCollection InitValueConfig()
+
+        public static ValueCollection LoadValueConfig()
         {
             var valueCollection = new ValueCollection();
 
             var path = Path.Combine(Environment.CurrentDirectory, "value.config.json");
-            var defaultConfig = Resources.Load<ValueConfigAsset>("Config/ValueConfig");
+             var defaultConfig = Resources.Load<ValueConfigAsset>("Config/ValueConfig");
 
-
-
-
-            var requireWriteFile = false;
+        
 
             if (File.Exists(path))
             {
                 var jsonString = File.ReadAllText(path);
                 JSONObject jsonObjects = new JSONObject(jsonString);
-                if (defaultConfig)
-                {
-                    valueCollection = CopyValue(defaultConfig.m_ValueCollection);
+              
+                
+                    valueCollection = new ValueCollection();
 
-                    for (int i = 0; i < valueCollection.Items.Count; i++)
+
+                    for (int i = 0; i < jsonObjects.Count; i++)
                     {
-                       
-                       var value = valueCollection.Items[i];
+                        var value = new Value();
 
-                        var jsonObject = jsonObjects.list.FirstOrDefault(x => x.GetField("key").str == value.key);
-                        if (jsonObject != null)
+                        var jsonObject = jsonObjects[i];
+
+                        
+                        if(jsonObject.HasFields(new string[3]{"key","valueType","value"}))
                         {
-
+                            value.key = jsonObject["key"].str;
+                            value.valueType = (Value.ValueType)jsonObject["valueType"].i;
                             switch (value.valueType)
                             {
                                 case Value.ValueType.StringType:
                                     value.stringValue = jsonObject["value"].str;
-                                    // Debug.Log($"key : {value.key} value : {value.stringValue}");
                                     break;
                                 case Value.ValueType.IntType:
                                     value.intValue = (int)jsonObject["value"].i;
-                                    // Debug.Log($"key : {value.key} value : {value.intValue}");
                                     break;
                                 case Value.ValueType.FloatType:
                                     value.floatValue = jsonObject["value"].f;
-                                    // Debug.Log($"key : {value.key} value : {value.floatValue}");
                                     break;
                                 case Value.ValueType.BooleanType:
                                     value.boolValue = jsonObject["value"].b;
-                                    // Debug.Log($"key : {value.key} value : {value.boolValue}");
                                     break;
                                 case Value.ValueType.Vector2Type:
-                                    // value.vector2Value = new Vector2(item["value"]["x"].f, item["value"]["y"].f);
                                     value.vector2Value = JSONTemplates.ToVector2(jsonObject["value"]);
-                                    // Debug.Log($"key : {value.key} value : {value.vector2Value}");
                                     break;
                                 case Value.ValueType.Vector3Type:
                                     value.vector3Value = JSONTemplates.ToVector3(jsonObject["value"]);
-                                    // Debug.Log($"key : {value.key} value : {value.vector3Value}");
                                     break;
                             }
-
+                            valueCollection.Items.Add(value);
                         }
-                        else
-                        {
-                            requireWriteFile = true;
+                        
+                        
+                        
+                        //     if (jsonObject != null)
+                        //     {
+                        //         switch (value.valueType)
+                        //         {
+                        //             case Value.ValueType.StringType:
+                        //                 value.stringValue = jsonObject["value"].str;
+                        //                 // Debug.Log($"key : {value.key} value : {value.stringValue}");
+                        //                 break;
+                        //             case Value.ValueType.IntType:
+                        //                 value.intValue = (int)jsonObject["value"].i;
+                        //                 // Debug.Log($"key : {value.key} value : {value.intValue}");
+                        //                 break;
+                        //             case Value.ValueType.FloatType:
+                        //                 value.floatValue = jsonObject["value"].f;
+                        //                 // Debug.Log($"key : {value.key} value : {value.floatValue}");
+                        //                 break;
+                        //             case Value.ValueType.BooleanType:
+                        //                 value.boolValue = jsonObject["value"].b;
+                        //                 // Debug.Log($"key : {value.key} value : {value.boolValue}");
+                        //                 break;
+                        //             case Value.ValueType.Vector2Type:
+                        //                 // value.vector2Value = new Vector2(item["value"]["x"].f, item["value"]["y"].f);
+                        //                 value.vector2Value = JSONTemplates.ToVector2(jsonObject["value"]);
+                        //                 // Debug.Log($"key : {value.key} value : {value.vector2Value}");
+                        //                 break;
+                        //             case Value.ValueType.Vector3Type:
+                        //                 value.vector3Value = JSONTemplates.ToVector3(jsonObject["value"]);
+                        //                 // Debug.Log($"key : {value.key} value : {value.vector3Value}");
+                        //                 break;
+                        //         }
+                        //     }
+                        //     else
+                        //     {
+                        //         requireWriteFile = true;
+                        //     }
+                        //
+                        //     valueCollection.Items[i] = value;
+                        // }
+                        //
+                        // if (requireWriteFile)
+                        //     SaveValueConfig(valueCollection);
 
-                        }
-                        valueCollection.Items[i] = value;
-                    }
-
-                    if (requireWriteFile)
-                        SaveValueConfig(valueCollection);
-
+                    
                 }
                 // if (jsonObjects.Count > 0)
                 // {
@@ -160,7 +190,8 @@ namespace Modules.Utilities
 
                 //     }
                 // }
-
+                
+                defaultConfig.m_ValueCollection = valueCollection;
             }
             else
             {
@@ -169,19 +200,14 @@ namespace Modules.Utilities
                 {
                     Debug.Log($"Create value config file");
                     SaveValueConfig(defaultConfig.m_ValueCollection);
-
                 }
-
-
             }
-          
-            return valueCollection;
 
+            return valueCollection;
         }
 
         public static void SaveCurrentValueConfig()
         {
-
             if (_Current != null)
                 SaveValueConfig(_Current);
             else
@@ -190,8 +216,7 @@ namespace Modules.Utilities
 
         public static void SaveValueConfig(ValueCollection valueCollection)
         {
-
-
+            Debug.Log("SaveValueConfig");
             JSONObject jsonObject = new JSONObject();
             foreach (var item in valueCollection.Items)
             {
@@ -251,7 +276,6 @@ namespace Modules.Utilities
 
             var path = Path.Combine(Environment.CurrentDirectory, "value.config.json");
             File.WriteAllText(path, jsonObject.ToString(true));
-
         }
 
         public static bool SetValue<T>(string key, T value)
@@ -260,6 +284,17 @@ namespace Modules.Utilities
                 return false;
 
             var items = _Current.Items;
+
+            //check if key not exist then add new value
+            if (!items.Any(x => x.key == key))
+            {
+                var valueItem = new Value();
+                valueItem.key = key;
+                valueItem.valueType = Value.GetValueType(value);
+                items.Add(valueItem);
+
+            }
+
 
             for (int i = 0; i < items.Count; i++)
             {
@@ -290,16 +325,21 @@ namespace Modules.Utilities
             }
 
 
-            return false;
-
-
+            return true;
         }
+
+        public static bool TryGetValue<T>(string key, out T value)
+        {
+            value = GetValue<T>(key);
+            Debug.Log("TryGetValue key:" + key + " value:" + value);
+            return !EqualityComparer<T>.Default.Equals(value, default(T));
+        }
+
         public static T GetValue<T>(string key)
         {
             if (_Current == null || _Current.Items.Count == 0) return default(T);
 
             var items = _Current.Items;
-
             for (int i = 0; i < items.Count; i++)
             {
                 if (items[i].key == key)
@@ -321,6 +361,7 @@ namespace Modules.Utilities
                     }
                 }
             }
+
             Debug.LogWarning("ValueConfig.GetValue not found key:" + key);
             return default(T);
         }
