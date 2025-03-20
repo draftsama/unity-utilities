@@ -138,6 +138,12 @@ public class PlaneScreenViewport : MonoBehaviour
         m_AspectRatio = _aspectRatio;
         return true;
     }
+    
+    public void SetDistance(float _distance)
+    {
+        m_Distance = _distance;
+        UpdatePlaneScreen();
+    }
 
 }
 
