@@ -55,7 +55,7 @@ Shader "Unlit/TransparentTextureWithColor"
                 // sample the texture
                 fixed4 col = tex2D(_BaseMap, i.uv) * _Color;
                 // apply alpha
-                col.a = _Alpha;
+                col.a *= _Alpha;
                 // apply fog
                 UNITY_APPLY_FOG(i.fogCoord, col);
                 return col;

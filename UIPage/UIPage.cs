@@ -15,6 +15,9 @@ public abstract class UIPage : MonoBehaviour
     [SerializeField] [HideInInspector] public string m_GroupName = "Default";
     [SerializeField] [HideInInspector] public bool m_IsDefault;
     [SerializeField] [ReadOnlyField] public bool m_IsOpened;
+    [SerializeField] [ReadOnlyField]  public bool m_IsTransitionPage;
+    
+    
     protected CanvasGroup canvasGroup;
 
 
@@ -36,7 +39,10 @@ public abstract class UIPage : MonoBehaviour
         if (!canvasGroup) canvasGroup = GetComponent<CanvasGroup>();
 
         canvasGroup.SetAlpha(_isShow ? 1 : 0);
+        m_IsOpened = _isShow;
     }
+    
+
 
     public async UniTask ShowPageAsync(int _milliseconds, bool _isShow, CancellationToken _token = default)
     {
@@ -60,6 +66,27 @@ public abstract class UIPage : MonoBehaviour
         else
             foreach (var pe in GetComponents<IPageHideEnd>())
                 pe.OnEndHidePage();
+        
+        m_IsOpened = _isShow;
+    }
+    
+    public static T GetPage<T>(string _groupName = "Default") where T : UIPage
+    {
+        //get page by type
+        var pages = Object.FindObjectsByType<T>(FindObjectsSortMode.None);
+        return pages.FirstOrDefault(_ => _.m_GroupName == _groupName);
+    }
+
+    public static UIPage GetCurrentPage(string _groupName = "Default")
+    {
+        return Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+            .FirstOrDefault(_ => _.m_GroupName == _groupName && _.m_IsOpened);
+    }
+    
+    public static UIPage[] GetPages(string _groupName = "Default")
+    {
+        return Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+            .Where(_ => _.m_GroupName == _groupName).ToArray();
     }
 
     
@@ -74,9 +101,32 @@ public static class UIPageHelper
         CrossFade,
     }
 
+   
+   
+    public static async UniTask TransitionPageAsync( UIPage _target, int _milliseconds = 1000,
+        TransitionType _transitionType = TransitionType.Fade, CancellationToken _token = default)
+    {
+        var current = UIPage.GetCurrentPage(_target.m_GroupName);
+        Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
+
+        if (current == null)
+        {
+            return;
+        }
+
+        await TransitionPageAsync(current, _target, _milliseconds, _transitionType, _token);
+    }
+        
+        
     public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, int _milliseconds = 1000,
         TransitionType _transitionType = TransitionType.Fade, CancellationToken _token = default)
     {
+
+        if(_current == null || _target == null || _current == _target || _current.m_IsTransitionPage || _target.m_IsTransitionPage)
+            return;
+        
+        _current.m_IsTransitionPage = true;
+        _target.m_IsTransitionPage = true;
         if (_transitionType == TransitionType.Fade)
         {
             var duration = _milliseconds * 0.5f;
@@ -108,12 +158,14 @@ public static class UIPageHelper
                 _target.ShowPageAsync(_milliseconds, true, _token)
             );
         }
+        
+        _current.m_IsTransitionPage = false;
+        _target.m_IsTransitionPage = false;
     }
 
     public static bool ResetUIPagesWithoutNotify(string _groupName)
     {
-        var uiPages = Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-            .Where(_ => _.m_GroupName == _groupName);
+        var uiPages = UIPage.GetPages(_groupName);
     
         foreach (var p in uiPages)
         {
@@ -162,8 +214,7 @@ public class UIPageEditor : Editor
         //draw properties
         EditorGUILayout.PropertyField(groupName);
 
-        var uiPagesByGroup = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-            .Where(_ => _.m_GroupName == script.m_GroupName);
+        var uiPagesByGroup = UIPage.GetPages(script.m_GroupName);
 
         var groupCount = uiPagesByGroup.Count();
 

@@ -12,7 +12,29 @@ namespace Modules.Utilities
     {
         None, NativeSize, WidthControlHeight, HeightControlWidth
     }
+    
+    public enum VideoOutputType
+    {
+        RawImage,
+        Renderer,
+    }
+    
+    //TODO : Add more video output types as needed
+    public enum PlaneVideoControl
+    {
+        None,
+        Self,
+        Screen,
 
+    }
+    
+    public enum VideoPrepareMode
+    {
+        None,
+        Prepare,
+        PrepareWithFirstFrameReady,
+        PrepareAndPlay,
+    }
 
     public enum ResourceStoreType
     {

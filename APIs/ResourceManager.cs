@@ -15,15 +15,14 @@ using UnityEngine.AddressableAssets;
 
 namespace Modules.Utilities
 {
-
     public class ResourceManager : MonoBehaviour
     {
-
         private static ResourceManager _Instance;
 
         [SerializeField] private ResourceSettingAssets m_ResourceSettingAssets;
 
         [SerializeField] private List<ResourceResponse> m_ResourceResponseList;
+
         private void Awake()
         {
             if (_Instance != null)
@@ -31,7 +30,9 @@ namespace Modules.Utilities
                 Destroy(gameObject);
                 return;
             }
+
             _Instance = this;
+            m_ResourceResponseList?.Clear();
             m_ResourceResponseList = new List<ResourceResponse>();
 
             if (m_ResourceSettingAssets == null)
@@ -58,7 +59,7 @@ namespace Modules.Utilities
 #if UNITY_2022_3_OR_NEWER
                 _Instance = FindFirstObjectByType<ResourceManager>();
 #else
-                _Instance =  FindObjectOfType<ResourceManager>();
+                _Instance = FindObjectOfType<ResourceManager>();
 #endif
 
 
@@ -70,11 +71,11 @@ namespace Modules.Utilities
 
             return _Instance;
         }
+
         private void OnDestroy()
         {
             _Instance = null;
         }
-
 
 
         //-------- Public Methods --------//
@@ -85,14 +86,13 @@ namespace Modules.Utilities
             await UniTask.Yield();
 
 
-
             if (!Directory.Exists(GetFolderResourcePath()))
                 throw new Exception($"Not found Resources Folder :{GetFolderResourcePath()}");
 
             List<ResourceResponse> resourceResponseList = new List<ResourceResponse>();
             var files = Directory.GetFiles(GetFolderResourcePath(), "*.*", SearchOption.AllDirectories)
-            .Where(file => new string[] { ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".oog" }
-                .Contains(Path.GetExtension(file)))
+                .Where(file => new string[] { ".png", ".jpg", ".jpeg", ".wav", ".mp3", ".oog" }
+                    .Contains(Path.GetExtension(file)))
                 .ToList();
 
             for (int i = 0; i < files.Count; i++)
@@ -118,19 +118,19 @@ namespace Modules.Utilities
         }
 
 
-
         public static void ClearAllResource()
         {
             var instance = GetInstance();
             for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
             {
-                if (instance.m_ResourceResponseList[i].m_Texture != null) DestroyImmediate(instance.m_ResourceResponseList[i].m_Texture, true);
-                if (instance.m_ResourceResponseList[i].m_AudioClip != null) DestroyImmediate(instance.m_ResourceResponseList[i].m_AudioClip, true);
+                if (instance.m_ResourceResponseList[i].m_Texture != null)
+                    DestroyImmediate(instance.m_ResourceResponseList[i].m_Texture, true);
+                if (instance.m_ResourceResponseList[i].m_AudioClip != null)
+                    DestroyImmediate(instance.m_ResourceResponseList[i].m_AudioClip, true);
             }
 
             instance.m_ResourceResponseList.Clear();
             instance.m_ResourceResponseList = new List<ResourceResponse>();
-
         }
 
         public static void RemoveResource(string _name)
@@ -146,15 +146,9 @@ namespace Modules.Utilities
         }
 
 
-
-
-
-
-
         // using UniTask
         public static async UniTask<Texture2D> GetTextureAsync(string _name)
         {
-
             var res = await GetResourceAsync(_name);
             return res != null ? res.m_Texture : null;
         }
@@ -165,7 +159,6 @@ namespace Modules.Utilities
             //return texture array from resource response array
             //if response is null then texture is null
             return resArray.Select(_ => _ != null ? _.m_Texture : null).ToArray();
-
         }
 
         public static async UniTask<AudioClip> GetAudioClipAsync(string _name)
@@ -180,52 +173,49 @@ namespace Modules.Utilities
             return resArray.Select(_ => _ != null ? _.m_AudioClip : null).ToArray();
         }
 
-        public static async UniTask<Texture2D> GetTextureByPathAsync(string _path, string _overrideName )
+        public static async UniTask<Texture2D> GetTextureByPathAsync(string _path, string _overrideName)
         {
             var res = await GetResourceByPathAsync(_path, _overrideName);
             return res != null ? res.m_Texture : null;
         }
 
-        public static async UniTask<AudioClip> GetAudioClipByPathAsync(string _path, string _overrideName )
+        public static async UniTask<AudioClip> GetAudioClipByPathAsync(string _path, string _overrideName)
         {
             var res = await GetResourceByPathAsync(_path, _overrideName);
             return res != null ? res.m_AudioClip : null;
         }
 
 
-
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
-
-            var instance = GetInstance();
-            await UniTask.Yield();
-
-
-            ResourceResponse response = null;
-
-            var extension = new FileInfo(_name).Extension;
-            var resourceType = GetResourceType(extension);
-
-
-            //get from cache
-            for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
-            {
-                if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) && instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
-                {
-                    await UniTask.WaitUntil(() => instance.m_ResourceResponseList[i].m_IsLoaded);
-
-                    return instance.m_ResourceResponseList[i];
-
-                }
-            }
-
-
             try
             {
+                var instance = GetInstance();
+
+
+                await UniTask.Yield();
+
+
+                var extension = Path.GetExtension(_name);
+                var resourceType = GetResourceType(extension);
+
+
+                //get from cache
+                for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
+                {
+                    if (instance.m_ResourceResponseList[i].m_Name.Equals(_name) &&
+                        instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
+                    {
+                        await UniTask.WaitUntil(() => instance.m_ResourceResponseList[i].m_IsLoaded);
+
+                        return instance.m_ResourceResponseList[i];
+                    }
+                }
+
+                Debug.Log(instance);
 
                 if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.ExternalResources)
                 {
-
                     if (!Directory.Exists(GetFolderResourcePath()))
                     {
                         //no folder resource
@@ -233,34 +223,24 @@ namespace Modules.Utilities
                         return null;
                     }
 
+
                     DirectoryInfo directoryInfo = new DirectoryInfo(GetFolderResourcePath());
-                    // string searchPattern = GetSearchPattern(resourceType);
+                    
 
-                    if (directoryInfo == null)
-                    {
-                        //no file
-                        // Debug.Log("No file");
-                        return null;
-                    }
-
-
-
-                    var fileInfo = directoryInfo.GetFiles("*" + extension, SearchOption.AllDirectories)
-                    .Where(_file => _file.Name.Equals(_name))
-                    .FirstOrDefault();
+                    var fileInfo = directoryInfo
+                        .GetFiles("*" + extension, SearchOption.AllDirectories)
+                        .FirstOrDefault(_file => _file.Name.Equals(_name));
 
                     if (fileInfo != null)
                     {
                         //init loading
-                        response = CreateResourceResponse(fileInfo.FullName);
+                       var  response = CreateResourceResponse(fileInfo.FullName);
                         instance.m_ResourceResponseList.Add(response);
 
                         //load and assign texture or audio to response
                         await LoadExternalResourcesAsync(response);
                         return response;
                     }
-
-
                 }
 #if ADDRESSABLES_PACKAGE_INSTALLED
                 else if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.Addressable)
@@ -302,26 +282,18 @@ namespace Modules.Utilities
 
                 }
 #endif
-
-
             }
             catch (Exception e)
             {
-                Debug.LogError(e.Message);
+                Debug.LogError($"name: {_name} - {e.Message}");
             }
 
 
-
-
             return null;
-
-
-
-
         }
-        public static async UniTask<ResourceResponse> GetResourceByPathAsync(string _path, string _overrideName )
-        {
 
+        public static async UniTask<ResourceResponse> GetResourceByPathAsync(string _path, string _overrideName)
+        {
             if (!File.Exists(_path))
             {
                 Debug.LogError($"Not found file : {_path}");
@@ -331,7 +303,6 @@ namespace Modules.Utilities
 
             if (string.IsNullOrEmpty(_overrideName))
             {
-
                 Debug.Log($"Override Name is empty");
                 return null;
             }
@@ -356,12 +327,12 @@ namespace Modules.Utilities
             //get from cache
             for (int i = 0; i < instance.m_ResourceResponseList.Count; i++)
             {
-                if (instance.m_ResourceResponseList[i].m_FilePath.Equals(_path) && instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
+                if (instance.m_ResourceResponseList[i].m_FilePath.Equals(_path) &&
+                    instance.m_ResourceResponseList[i].m_ResourceType == resourceType)
                 {
                     await UniTask.WaitUntil(() => instance.m_ResourceResponseList[i].m_IsLoaded);
 
                     return instance.m_ResourceResponseList[i];
-
                 }
             }
 
@@ -374,7 +345,6 @@ namespace Modules.Utilities
                 //load and assign texture or audio to response
                 await LoadExternalResourcesAsync(response);
                 return response;
-
             }
             catch (Exception e)
             {
@@ -382,8 +352,6 @@ namespace Modules.Utilities
             }
 
             return null;
-
-
         }
 
 
@@ -396,13 +364,13 @@ namespace Modules.Utilities
 
                 var res = await GetResourceAsync(fileName);
                 responselist[i] = res;
-
             }
-            return responselist;
 
+            return responselist;
         }
 
-        public static async UniTask<ResourceResponse[]> GetResourcesByPathAsync(string[] _paths, string[] _overrideNames = null)
+        public static async UniTask<ResourceResponse[]> GetResourcesByPathAsync(string[] _paths,
+            string[] _overrideNames = null)
         {
             var responselist = new ResourceResponse[_paths.Length];
             for (int i = 0; i < _paths.Length; i++)
@@ -411,12 +379,10 @@ namespace Modules.Utilities
                 var overrideName = _overrideNames != null ? _overrideNames[i] : "";
                 var res = await GetResourceByPathAsync(path, overrideName);
                 responselist[i] = res;
-
             }
+
             return responselist;
-
         }
-
 
 
         //-------- Private Methods --------//
@@ -433,21 +399,15 @@ namespace Modules.Utilities
 
             if (resourceType == ResourceResponse.ResourceType.AudioClip)
             {
-
                 if (Regex.Match(fileInfo.Extension, ".ogg").Success)
                 {
                     audioType = AudioType.OGGVORBIS;
                 }
-                else
-                if (Regex.Match(fileInfo.Extension, ".wav").Success)
+                else if (Regex.Match(fileInfo.Extension, ".wav").Success)
                 {
                     audioType = AudioType.WAV;
-
                 }
             }
-
-
-
 
 
             ResourceResponse response = new ResourceResponse
@@ -460,6 +420,7 @@ namespace Modules.Utilities
 
             return response;
         }
+
         public static string[] GetSearchPattern(ResourceResponse.ResourceType _type)
         {
             if (_type == ResourceResponse.ResourceType.Texture)
@@ -469,14 +430,13 @@ namespace Modules.Utilities
             else if (_type == ResourceResponse.ResourceType.AudioClip)
             {
                 return new string[] { ".wav", ".mp3", ".ogg" };
-
             }
-            return null;
 
+            return null;
         }
+
         private static ResourceResponse.ResourceType GetResourceType(string _extension)
         {
-
             if (Regex.Match(_extension, ".png|.jpg|.jpeg", RegexOptions.IgnoreCase).Success)
             {
                 return ResourceResponse.ResourceType.Texture;
@@ -487,15 +447,11 @@ namespace Modules.Utilities
             }
             else
                 return ResourceResponse.ResourceType.None;
-
-
         }
-
 
 
         private static async UniTask<ResourceResponse> LoadExternalResourcesAsync(ResourceResponse _dataInfo)
         {
-
             var filePath = $"file://{_dataInfo.m_FilePath}";
             if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.Texture)
             {
@@ -508,29 +464,21 @@ namespace Modules.Utilities
                 _dataInfo.m_Texture = texture;
 
 
-
-
                 return _dataInfo;
-
-
             }
             else if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.AudioClip)
             {
-
                 //get audio
-                var req = await UnityWebRequestMultimedia.GetAudioClip(filePath, _dataInfo.m_AudioType).SendWebRequest();
+                var req = await UnityWebRequestMultimedia.GetAudioClip(filePath, _dataInfo.m_AudioType)
+                    .SendWebRequest();
                 var audio = DownloadHandlerAudioClip.GetContent(req);
                 audio.name = _dataInfo.m_Name;
                 _dataInfo.m_AudioClip = audio;
 
                 return _dataInfo;
-
             }
 
             return null;
-
-
-
         }
 
         public static string GetFolderResourcePath()
@@ -543,8 +491,11 @@ namespace Modules.Utilities
         {
             public enum ResourceType
             {
-                None, Texture, AudioClip
+                None,
+                Texture,
+                AudioClip
             }
+
             public string m_Name;
             public string m_FilePath;
             public AudioClip m_AudioClip;
@@ -554,6 +505,5 @@ namespace Modules.Utilities
 
             public bool m_IsLoaded => m_Texture != null || m_AudioClip != null;
         }
-
     }
 }
