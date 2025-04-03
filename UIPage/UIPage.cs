@@ -12,11 +12,19 @@ using UnityEditor;
 [RequireComponent(typeof(CanvasGroup))]
 public abstract class UIPage : MonoBehaviour
 {
+    
+    public enum TransitionType
+    {
+        Fade,
+        CrossFade,
+    }
+    
     [SerializeField] [HideInInspector] public string m_GroupName = "Default";
     [SerializeField] [HideInInspector] public bool m_IsDefault;
     [SerializeField] [ReadOnlyField] public bool m_IsOpened;
     [SerializeField] [ReadOnlyField]  public bool m_IsTransitionPage;
-    
+    [SerializeField] public int m_TransitionDuration = 500;
+    [SerializeField]  public TransitionType m_TransitionType = TransitionType.Fade;
     
     protected CanvasGroup canvasGroup;
 
@@ -41,8 +49,14 @@ public abstract class UIPage : MonoBehaviour
         canvasGroup.SetAlpha(_isShow ? 1 : 0);
         m_IsOpened = _isShow;
     }
-    
 
+    public void OpenPage()
+    {
+        if (m_IsOpened) return;
+        var token = this.GetCancellationTokenOnDestroy();
+        UIPageHelper.TransitionPageAsync(this, m_TransitionDuration, m_TransitionType,token).Forget();
+            
+    }
 
     public async UniTask ShowPageAsync(int _milliseconds, bool _isShow, CancellationToken _token = default)
     {
@@ -95,16 +109,12 @@ public abstract class UIPage : MonoBehaviour
 
 public static class UIPageHelper
 {
-    public enum TransitionType
-    {
-        Fade,
-        CrossFade,
-    }
+   
 
    
    
     public static async UniTask TransitionPageAsync( UIPage _target, int _milliseconds = 1000,
-        TransitionType _transitionType = TransitionType.Fade, CancellationToken _token = default)
+        UIPage.TransitionType _transitionType = UIPage.TransitionType.Fade, CancellationToken _token = default)
     {
         var current = UIPage.GetCurrentPage(_target.m_GroupName);
         Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
@@ -119,7 +129,7 @@ public static class UIPageHelper
         
         
     public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, int _milliseconds = 1000,
-        TransitionType _transitionType = TransitionType.Fade, CancellationToken _token = default)
+        UIPage.TransitionType _transitionType = UIPage.TransitionType.Fade, CancellationToken _token = default)
     {
 
         if(_current == null || _target == null || _current == _target || _current.m_IsTransitionPage || _target.m_IsTransitionPage)
@@ -127,7 +137,7 @@ public static class UIPageHelper
         
         _current.m_IsTransitionPage = true;
         _target.m_IsTransitionPage = true;
-        if (_transitionType == TransitionType.Fade)
+        if (_transitionType == UIPage.TransitionType.Fade)
         {
             var duration = _milliseconds * 0.5f;
 
