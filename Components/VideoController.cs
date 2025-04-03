@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Threading;
 using Cysharp.Threading.Tasks;
+using Cysharp.Threading.Tasks.Linq;
 using UnityEngine;
 using UnityEngine.Events;
 using UnityEngine.UI;
@@ -22,7 +23,7 @@ namespace Modules.Utilities
         [SerializeField] public string m_FolderName = "Resources";
         [SerializeField] public PathType m_PathType = PathType.Relative;
 
-   
+
         [SerializeField] public VideoPrepareMode m_PrepareMode = VideoPrepareMode.Prepare;
         [SerializeField] public bool m_Loop = false;
         [SerializeField] public bool m_FadeVideo = false;
@@ -36,6 +37,10 @@ namespace Modules.Utilities
 
         [SerializeField] [HideInInspector] private RawImage _RawImage;
         [SerializeField] [HideInInspector] private CanvasGroup _CanvasGroup;
+        [SerializeField] [HideInInspector] private bool _PlayWithParentShow = false;
+        [SerializeField] [HideInInspector] private CanvasGroup _ParentCanvasGroup;
+        [SerializeField] [HideInInspector] private float _CanvasGroupThreshold = 0.1f;
+
 
         [SerializeField] [HideInInspector] private MeshFilter _MeshFilter;
         [SerializeField] [HideInInspector] private MeshRenderer _MeshRenderer;
@@ -52,8 +57,6 @@ namespace Modules.Utilities
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
 
 
-
-
         private async void Awake()
         {
             Init();
@@ -68,32 +71,62 @@ namespace Modules.Utilities
 
                     if (m_PrepareMode == VideoPrepareMode.PrepareAndPlay)
                     {
-                        PlayAsync().Forget();
+                        if (!_PlayWithParentShow)
+                        {
+                            PlayAsync().Forget();
+                        }
                     }
                     else if (m_PrepareMode == VideoPrepareMode.PrepareWithFirstFrameReady)
                     {
-                       await  PrepareFirstFrame();
+                        await PrepareFirstFrame();
                     }
                 }
             }
+
+         
+            
+            if (_PlayWithParentShow && _ParentCanvasGroup != null)
+            {
+                bool isPlaying = false;
+                UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
+                {
+                   
+                    if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
+                        {
+                            if (!isPlaying)
+                            {
+                                PlayAsync().Forget();
+                                isPlaying = true;
+                            }
+                        }
+                        else
+                        {
+                            if (isPlaying)
+                            {
+                                isPlaying = false;
+                                Stop();
+                            }
+                        }
+                }).Forget();
+            }
         }
 
-    
+
         void Start()
         {
         }
 
         public async UniTask PrepareFirstFrame()
         {
-            if(!SetupURL(m_FileName, m_PathType, m_FolderName))
+            if (!SetupURL(m_FileName, m_PathType, m_FolderName))
                 return;
-          
-     
+
+
             _VideoPlayer.Stop();
             await UniTask.NextFrame();
             _VideoPlayer.SetDirectAudioVolume(0, 0);
             _VideoPlayer.Play();
-                        
+
             await UniTask.WaitUntil(() => _VideoPlayer.isPlaying,
                 cancellationToken: this.GetCancellationTokenOnDestroy());
             _VideoPlayer.frame = 1;
@@ -101,13 +134,13 @@ namespace Modules.Utilities
             ApplyAlpha(1);
             _VideoPlayer.Pause();
         }
-        
+
         public bool SetupFullURL(string _filePath)
         {
             m_FileName = Path.GetFileName(_filePath);
             m_PathType = PathType.Absolute;
             m_FolderName = Path.GetDirectoryName(_filePath);
-            
+
 
             return SetupURL(m_FileName, m_PathType, m_FolderName);
         }
@@ -243,12 +276,12 @@ namespace Modules.Utilities
             //after cancel token be must wait for next frame
             await UniTask.Yield();
 
-            if( _token == default)
+            if (_token == default)
             {
                 _token = this.GetCancellationTokenOnDestroy();
             }
-            _Stoping = false;
 
+            _Stoping = false;
 
 
             m_Progress = 0f;
@@ -268,7 +301,7 @@ namespace Modules.Utilities
                 if (!_VideoPlayer.isPrepared)
                 {
                     SetupURL(m_FileName, m_PathType, m_FolderName);
-                    
+
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
                 }
@@ -296,9 +329,8 @@ namespace Modules.Utilities
                         fadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
                         var valueProgress =
                             Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 0f, 1f, fadeInProgress));
-
+    
                         //fade in
-
                         ApplyAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 1);
                     }
@@ -336,6 +368,7 @@ namespace Modules.Utilities
 
                         //skip fade in next loop
                         _ignoreFadeIn = true;
+
                     }
 
 
@@ -416,7 +449,7 @@ namespace Modules.Utilities
             }
         }
 
-        public void Seek(int _frame )
+        public void Seek(int _frame)
         {
             if (!_VideoPlayer.isPrepared)
             {
@@ -428,7 +461,6 @@ namespace Modules.Utilities
                 _VideoPlayer.Play();
 
             _VideoPlayer.frame = _frame;
-            
         }
 
         public void Seek(float _progress)
@@ -458,6 +490,9 @@ namespace Modules.Utilities
     {
         private SerializedProperty _RawImage;
         private SerializedProperty _CanvasGroup;
+        private SerializedProperty _PlayWithParentShow;
+        private SerializedProperty _ParentCanvasGroup;
+        private SerializedProperty _CanvasGroupThreshold;
 
         private SerializedProperty _MeshFilter;
         private SerializedProperty _MeshRenderer;
@@ -468,10 +503,13 @@ namespace Modules.Utilities
         public void OnEnable()
         {
             instance = (VideoController)target;
-            if(!Application.isPlaying)instance.Init();
+            if (!Application.isPlaying) instance.Init();
             serializedObject.Update();
             _RawImage = serializedObject.FindProperty("_RawImage");
             _CanvasGroup = serializedObject.FindProperty("_CanvasGroup");
+            _PlayWithParentShow = serializedObject.FindProperty("_PlayWithParentShow");
+            _ParentCanvasGroup = serializedObject.FindProperty("_ParentCanvasGroup");
+            _CanvasGroupThreshold = serializedObject.FindProperty("_CanvasGroupThreshold");
 
             _MeshFilter = serializedObject.FindProperty("_MeshFilter");
             _MeshRenderer = serializedObject.FindProperty("_MeshRenderer");
@@ -510,12 +548,28 @@ namespace Modules.Utilities
             {
                 DrawObjectProperty(_MeshFilter, typeof(MeshFilter));
                 DrawObjectProperty(_MeshRenderer, typeof(MeshRenderer));
+                _PlayWithParentShow.boolValue = false;
                 EditorGUILayout.PropertyField(_Material);
             }
             else if (outputType.enumValueIndex == (int)VideoOutputType.RawImage)
             {
                 DrawObjectProperty(_RawImage, typeof(RawImage));
                 DrawObjectProperty(_CanvasGroup, typeof(CanvasGroup));
+                EditorGUILayout.PropertyField(_PlayWithParentShow);
+                if (_PlayWithParentShow.boolValue)
+                {
+                    if (_ParentCanvasGroup.objectReferenceValue == null)
+                        _ParentCanvasGroup.objectReferenceValue = instance.transform.parent.GetComponent<CanvasGroup>();
+
+                    EditorGUILayout.PropertyField(_ParentCanvasGroup);
+                    if (_ParentCanvasGroup.objectReferenceValue == null)
+                    {
+                        //helpbox
+                        EditorGUILayout.HelpBox("Parent CanvasGroup is null, please assign it.", MessageType.Error);
+                    }
+
+                    EditorGUILayout.Slider(_CanvasGroupThreshold, 0.1f, 1f);
+                }
             }
 
             if (GUI.changed)
