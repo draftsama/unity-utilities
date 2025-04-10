@@ -30,21 +30,23 @@ namespace Modules.Utilities
         [SerializeField] public bool m_FadeAudio = false;
 
         [SerializeField] public int m_FadeTime = 500;
-        [SerializeField] [ReadOnlyField] public float m_Progress = 0f;
+
+        [SerializeField][ReadOnlyField] private bool m_IsPrepared = false;
+        [SerializeField][ReadOnlyField] public float m_Progress = 0f;
 
         [SerializeField] public VideoOutputType m_OutputType = VideoOutputType.RawImage;
 
 
-        [SerializeField] [HideInInspector] private RawImage _RawImage;
-        [SerializeField] [HideInInspector] private CanvasGroup _CanvasGroup;
-        [SerializeField] [HideInInspector] private bool _PlayWithParentShow = false;
-        [SerializeField] [HideInInspector] private CanvasGroup _ParentCanvasGroup;
-        [SerializeField] [HideInInspector] private float _CanvasGroupThreshold = 0.1f;
+        [SerializeField][HideInInspector] private RawImage _RawImage;
+        [SerializeField][HideInInspector] private CanvasGroup _CanvasGroup;
+        [SerializeField][HideInInspector] private bool _PlayWithParentShow = false;
+        [SerializeField][HideInInspector] private CanvasGroup _ParentCanvasGroup;
+        [SerializeField][HideInInspector] private float _CanvasGroupThreshold = 0.1f;
 
 
-        [SerializeField] [HideInInspector] private MeshFilter _MeshFilter;
-        [SerializeField] [HideInInspector] private MeshRenderer _MeshRenderer;
-        [SerializeField] [HideInInspector] private Material _Material;
+        [SerializeField][HideInInspector] private MeshFilter _MeshFilter;
+        [SerializeField][HideInInspector] private MeshRenderer _MeshRenderer;
+        [SerializeField][HideInInspector] private Material _Material;
 
         private VideoPlayer _VideoPlayer;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
@@ -55,6 +57,20 @@ namespace Modules.Utilities
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
+
+
+
+        private void OnDisable()
+        {
+            if (_VideoPlayer != null)
+            {
+                _VideoPlayer.Stop();
+                _VideoPlayer.targetTexture?.Release();
+                m_IsPrepared = false;
+                _VideoPlayer.targetTexture = null;
+            }
+        }
+
 
 
         private async void Awake()
@@ -69,6 +85,7 @@ namespace Modules.Utilities
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared,
                         cancellationToken: this.GetCancellationTokenOnDestroy());
 
+                    m_IsPrepared = true;
                     if (m_PrepareMode == VideoPrepareMode.PrepareAndPlay)
                     {
                         if (!_PlayWithParentShow)
@@ -83,30 +100,30 @@ namespace Modules.Utilities
                 }
             }
 
-         
-            
+
+
             if (_PlayWithParentShow && _ParentCanvasGroup != null)
             {
                 bool isPlaying = false;
                 UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
                 {
-                   
+
                     if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
+                    {
+                        if (!isPlaying)
                         {
-                            if (!isPlaying)
-                            {
-                                PlayAsync().Forget();
-                                isPlaying = true;
-                            }
+                            PlayAsync().Forget();
+                            isPlaying = true;
                         }
-                        else
+                    }
+                    else
+                    {
+                        if (isPlaying)
                         {
-                            if (isPlaying)
-                            {
-                                isPlaying = false;
-                                Stop();
-                            }
+                            isPlaying = false;
+                            Stop();
                         }
+                    }
                 }).Forget();
             }
         }
@@ -292,18 +309,19 @@ namespace Modules.Utilities
             {
                 _token.ThrowIfCancellationRequested();
 
-                if (string.IsNullOrEmpty(_VideoPlayer.url))
-                {
-                    //throw exception if url is empty
-                    throw new Exception($"[{gameObject.name}]  Video URL is empty.");
-                }
+
 
                 if (!_VideoPlayer.isPrepared)
                 {
                     SetupURL(m_FileName, m_PathType, m_FolderName);
-
+                    if (string.IsNullOrEmpty(_VideoPlayer.url))
+                    {
+                        //throw exception if url is empty
+                        throw new Exception($"[{gameObject.name}]  Video URL is empty.");
+                    }
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
+                    m_IsPrepared = true;
                 }
 
                 Debug.Log("Play Video : " + _VideoPlayer.url);
@@ -329,7 +347,7 @@ namespace Modules.Utilities
                         fadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
                         var valueProgress =
                             Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 0f, 1f, fadeInProgress));
-    
+
                         //fade in
                         ApplyAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 1);
@@ -435,6 +453,7 @@ namespace Modules.Utilities
                 _Material.SetTexture(BaseMap, _texture);
             }
         }
+
 
         private void ApplyAlpha(float _alpha)
         {
@@ -574,6 +593,7 @@ namespace Modules.Utilities
 
             if (GUI.changed)
             {
+                instance.Init();
                 EditorUtility.SetDirty(instance);
             }
 

@@ -331,7 +331,6 @@ namespace Modules.Utilities
         public static bool TryGetValue<T>(string key, out T value)
         {
             value = GetValue<T>(key);
-            Debug.Log("TryGetValue key:" + key + " value:" + value);
             return !EqualityComparer<T>.Default.Equals(value, default(T));
         }
 
