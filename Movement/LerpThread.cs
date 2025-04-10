@@ -6,7 +6,7 @@ using UnityEngine;
 
 namespace Modules.Utilities
 {
-    internal static class LerpThread
+    public static class LerpThread
     {
 
         //--------------------------------------------------------------------------------------------------------------
