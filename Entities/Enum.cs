@@ -28,12 +28,12 @@ namespace Modules.Utilities
 
     }
     
-    public enum VideoPrepareMode
+    public enum VideoStartMode
     {
         None,
         Prepare,
-        PrepareWithFirstFrameReady,
-        PrepareAndPlay,
+        FirstFrameReady,
+        AutoPlay,
     }
 
     public enum ResourceStoreType

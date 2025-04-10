@@ -24,7 +24,7 @@ namespace Modules.Utilities
         [SerializeField] public PathType m_PathType = PathType.Relative;
 
 
-        [SerializeField] public VideoPrepareMode m_PrepareMode = VideoPrepareMode.Prepare;
+        [SerializeField] public VideoStartMode m_StartMode = VideoStartMode.None;
         [SerializeField] public bool m_Loop = false;
         [SerializeField] public bool m_FadeVideo = false;
         [SerializeField] public bool m_FadeAudio = false;
@@ -77,23 +77,30 @@ namespace Modules.Utilities
         {
             Init();
 
-            if (m_PrepareMode != VideoPrepareMode.None)
+            if (m_StartMode != VideoStartMode.None)
             {
                 if (SetupURL(m_FileName, m_PathType, m_FolderName))
                 {
+
+                    if (string.IsNullOrEmpty(_VideoPlayer.url))
+                    {
+                        //throw exception if url is empty
+                        throw new Exception($"[{gameObject.name}]  Video URL is empty.");
+                    }
+
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared,
                         cancellationToken: this.GetCancellationTokenOnDestroy());
 
                     m_IsPrepared = true;
-                    if (m_PrepareMode == VideoPrepareMode.PrepareAndPlay)
+                    if (m_StartMode == VideoStartMode.AutoPlay)
                     {
                         if (!_PlayWithParentShow)
                         {
                             PlayAsync().Forget();
                         }
                     }
-                    else if (m_PrepareMode == VideoPrepareMode.PrepareWithFirstFrameReady)
+                    else if (m_StartMode == VideoStartMode.FirstFrameReady)
                     {
                         await PrepareFirstFrame();
                     }
@@ -132,6 +139,9 @@ namespace Modules.Utilities
         void Start()
         {
         }
+
+       
+
 
         public async UniTask PrepareFirstFrame()
         {
