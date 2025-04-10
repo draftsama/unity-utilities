@@ -1,7 +1,7 @@
 ﻿using UnityEditor;
 using UnityEngine;
 
-namespace EditorExtension.Editor
+namespace Modules.Utilities.Editor
 {
     [CustomEditor(typeof(CanvasGroup), true)]
     [CanEditMultipleObjects]

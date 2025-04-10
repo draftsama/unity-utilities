@@ -14,7 +14,7 @@ using UnityEditor.Callbacks;
 using UnityEngine;
 using Debug = UnityEngine.Debug;
 
-namespace Modules.Utilities
+namespace Modules.Utilities.Editor
 {
     public class UnityBuildSetting : IPostprocessBuildWithReport, IPreprocessBuildWithReport
     {

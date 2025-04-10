@@ -4,11 +4,11 @@ using System.Reflection;
 using UnityEditor;
 using UnityEngine;
 
-namespace Modules.Utilities
+namespace Modules.Utilities.Editor
 {
 
     [CustomEditor(typeof(MonoBehaviour), true)]
-    public class ButtonEditor : Editor
+    public class ButtonEditor : UnityEditor.Editor
     {
         public override void OnInspectorGUI()
         {

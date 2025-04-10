@@ -6,9 +6,9 @@ using System.Collections.Generic;
 using UnityEditor;
 using UnityEngine;
 
-namespace Modules.Utilities
+namespace Modules.Utilities.Editor
 {
-    public class ConfigWindowEditor : EditorWindow
+    public class ValueConfigWindowEditor : EditorWindow
     {
 
         private static ValueConfigAsset _Asset;
@@ -23,7 +23,7 @@ namespace Modules.Utilities
         public static void ShowWindow()
         {
             //Show existing window instance. If one doesn't exist, make one.
-            EditorWindow.GetWindow(typeof(ConfigWindowEditor), true, "Config Setting", true);
+            EditorWindow.GetWindow(typeof(ValueConfigWindowEditor), true, "Config Setting", true);
             LoadData();
             scrollPos = Vector2.zero;
         }
