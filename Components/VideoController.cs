@@ -58,7 +58,7 @@ namespace Modules.Utilities
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
 
-
+        CancellationTokenSource _CancellationTokenSource = new CancellationTokenSource();
 
         private void OnDisable()
         {
@@ -69,6 +69,10 @@ namespace Modules.Utilities
                 m_IsPrepared = false;
                 _VideoPlayer.targetTexture = null;
             }
+
+            _CancellationTokenSource.Cancel();
+            _CancellationTokenSource = new CancellationTokenSource();
+
         }
 
 
@@ -301,12 +305,16 @@ namespace Modules.Utilities
             _VideoPlayer.Stop();
 
             //after cancel token be must wait for next frame
-            await UniTask.Yield();
 
-            if (_token == default)
+            _CancellationTokenSource?.Cancel();
+            _CancellationTokenSource = new CancellationTokenSource();
+            await UniTask.NextFrame();
+
+            if (_token != default)
             {
-                _token = this.GetCancellationTokenOnDestroy();
+                _CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_token);
             }
+            var token = _CancellationTokenSource.Token;
 
             _Stoping = false;
 
@@ -317,7 +325,6 @@ namespace Modules.Utilities
             float fadeOutProgress = 0f;
             try
             {
-                _token.ThrowIfCancellationRequested();
 
 
 
@@ -330,7 +337,7 @@ namespace Modules.Utilities
                         throw new Exception($"[{gameObject.name}]  Video URL is empty.");
                     }
                     _VideoPlayer.Prepare();
-                    await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
+                    await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: token);
                     m_IsPrepared = true;
                 }
 
@@ -338,13 +345,13 @@ namespace Modules.Utilities
                 _VideoPlayer.frame = _frame;
                 _VideoPlayer.Play();
 
-                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: _token);
+                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: token);
 
 
                 ApplyTexture(_VideoPlayer.texture);
 
 
-                while (!_token.IsCancellationRequested)
+                while (!token.IsCancellationRequested)
                 {
                     if (_VideoPlayer == null)
                         break;
