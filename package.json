@@ -6,6 +6,7 @@
     "unity": "2021.3",
     "description": "A collection of utilities for Unity development.",
     "dependencies": {
-         "com.cysharp.unitask": "*"
+        "com.cysharp.unitask": "2.5.10"  
+        
     }
 }
