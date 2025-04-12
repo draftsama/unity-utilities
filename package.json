@@ -3,11 +3,8 @@
     "displayName": "Unity Utilities",
     "author": { "name": "Draft Sama", "url": "https://github.com/draftsama" },
     "version": "1.0.0",
-    "unity": "6",
+    "unity": "2021.3",
     "description": "A collection of utilities for Unity development.",
-    "keywords": [ "Utilities" ],
-    "license": "MIT",
-    "category": "Utilities",
     "dependencies": {
          "com.cysharp.unitask": "*"
     }
