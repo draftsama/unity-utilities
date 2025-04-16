@@ -18,11 +18,13 @@ namespace Modules.Utilities
 
 
     }
-
+}
 
 #if UNITY_EDITOR
+namespace Modules.Utilities.Editor
+{
     [CustomEditor(typeof(ValueConfigAsset))]
-    public class ValueConfigAssetEditor : Editor
+    public class ValueConfigAssetEditor : UnityEditor.Editor
     {
 
 
@@ -71,8 +73,10 @@ namespace Modules.Utilities
         }
     }
 
+}
+
 #endif
 
 
 
-}
+

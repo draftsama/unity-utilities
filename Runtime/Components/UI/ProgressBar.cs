@@ -39,7 +39,7 @@ namespace Modules.Utilities
             SetProgress(m_StartProgress);
         }
 
-       
+
 
         public IUniTaskAsyncEnumerable<AsyncUnit> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad)
         {
@@ -115,11 +115,14 @@ namespace Modules.Utilities
             }
         }
     }
+}
 
 #if UNITY_EDITOR
 
+namespace Modules.Utilities.Editor
+{
     [CustomEditor(typeof(ProgressBar))]
-    public class ProgressBarEditor : Editor
+    public class ProgressBarEditor : UnityEditor.Editor
     {
         private ProgressBar _Instance;
         private SerializedProperty _StartProgressProp;
@@ -147,6 +150,6 @@ namespace Modules.Utilities
         }
 
     }
+}
 
 #endif
-}

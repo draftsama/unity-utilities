@@ -144,7 +144,7 @@ namespace Modules.Utilities
         {
         }
 
-       
+
 
 
         public async UniTask PrepareFirstFrame()
@@ -518,11 +518,15 @@ namespace Modules.Utilities
         }
     }
 
+}
 
 #if UNITY_EDITOR
 
+namespace Modules.Utilities
+{
+
     [CustomEditor(typeof(VideoController))]
-    public class VideoControllerEditor : Editor
+    public class VideoControllerEditor : UnityEditor.Editor
     {
         private SerializedProperty _RawImage;
         private SerializedProperty _CanvasGroup;
@@ -617,5 +621,5 @@ namespace Modules.Utilities
             serializedObject.ApplyModifiedProperties();
         }
     }
-#endif
 }
+#endif

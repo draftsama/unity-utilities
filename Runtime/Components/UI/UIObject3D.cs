@@ -79,13 +79,13 @@ namespace Modules.Utilities
 
         }
 
-        public void SetTarget(Transform target,string layerName)
+        public void SetTarget(Transform target, string layerName)
         {
             m_Target = target;
             m_LayerMask = LayerMask.GetMask(layerName);
-           
+
         }
-       
+
 
 
 
@@ -145,7 +145,7 @@ namespace Modules.Utilities
             if (m_EnableLight)
                 InitLight();
             else
-                if(m_Light != null)m_Light.gameObject.SetActive(false);
+                if (m_Light != null) m_Light.gameObject.SetActive(false);
         }
 
         void InitLight()
@@ -167,7 +167,7 @@ namespace Modules.Utilities
             m_Light.transform.localRotation = Quaternion.Euler(m_LightAngle);
 
         }
-      
+
 
         public void UpdateCameraProperties()
         {
@@ -203,11 +203,13 @@ namespace Modules.Utilities
 
 
     }
-
+}
 #if UNITY_EDITOR
 
+namespace Modules.Utilities.Editor
+{
     [CustomEditor(typeof(UIObject3D))]
-    public class UIObject3DEditor : Editor
+    public class UIObject3DEditor : UnityEditor.Editor
     {
         SerializedProperty _LayerMaskProp;
         int lastLayerMask = 0;
@@ -304,6 +306,6 @@ namespace Modules.Utilities
 
         }
     }
+}
 
 #endif
-}

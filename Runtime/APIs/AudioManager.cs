@@ -54,7 +54,7 @@ namespace Modules.Utilities
             _Instance = this;
 
 
-         
+
             DontDestroyOnLoad(this);
 
             await UniTask.Yield();
@@ -299,9 +299,15 @@ namespace Modules.Utilities
         }
     }
 
+}
+
 #if UNITY_EDITOR
+
+namespace Modules.Utilities.Editor
+{
+
     [CustomEditor(typeof(AudioManager))]
-    public class AudioManagerEditor : Editor
+    public class AudioManagerEditor : UnityEditor.Editor
     {
 
         AudioManagerEditor _Instance;
@@ -326,9 +332,9 @@ namespace Modules.Utilities
         {
             serializedObject.Update();
 
-           
 
-                ResourceSettingAssets[] resourceSettingAssets = Resources.LoadAll<ResourceSettingAssets>("");
+
+            ResourceSettingAssets[] resourceSettingAssets = Resources.LoadAll<ResourceSettingAssets>("");
             if (resourceSettingAssets.Length == 0)
             {
                 EditorGUILayout.HelpBox("ResourceSettingAssets is null", MessageType.Error);
@@ -351,41 +357,42 @@ namespace Modules.Utilities
                     AssetDatabase.CreateAsset(asset, assetPath);
                     AssetDatabase.SaveAssets();
 
-                    
+
 
 
                 }
 
-            }else
+            }
+            else
+            {
+
+
+                EditorGUILayout.PropertyField(m_RequireAudios, true);
+
+                if (GUILayout.Button("Get All Audio Name From Resource"))
                 {
-                  
+                    var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
 
-                        EditorGUILayout.PropertyField(m_RequireAudios, true);
+                    string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
 
-                        if (GUILayout.Button("Get All Audio Name From Resource"))
-                        {
-                            var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
+                    var files = dir.GetFiles("*.*", SearchOption.AllDirectories).Where(file => extensions.Contains(file.Extension)).ToArray();
+                    var audioNames = files.Select(_ => _.Name).ToList();
 
-                            string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
+                    m_RequireAudios.ClearArray();
+                    m_RequireAudios.arraySize = audioNames.Count;
 
-                            var files = dir.GetFiles("*.*", SearchOption.AllDirectories).Where(file => extensions.Contains(file.Extension)).ToArray();
-                            var audioNames = files.Select(_ => _.Name).ToList();
-
-                            m_RequireAudios.ClearArray();
-                            m_RequireAudios.arraySize = audioNames.Count;
-
-                            for (int i = 0; i < audioNames.Count; i++)
-                            {
-                                m_RequireAudios.GetArrayElementAtIndex(i).stringValue = audioNames[i];
-                            }
-
-                        }
-
-                    
-
-
+                    for (int i = 0; i < audioNames.Count; i++)
+                    {
+                        m_RequireAudios.GetArrayElementAtIndex(i).stringValue = audioNames[i];
+                    }
 
                 }
+
+
+
+
+
+            }
 
 
             EditorGUILayout.PropertyField(m_Audiolist, true);
@@ -398,5 +405,5 @@ namespace Modules.Utilities
             serializedObject.ApplyModifiedProperties();
         }
     }
-#endif
 }
+#endif

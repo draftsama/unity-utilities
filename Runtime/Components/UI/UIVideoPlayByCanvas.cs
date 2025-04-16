@@ -9,10 +9,10 @@ using Cysharp.Threading.Tasks;
 using UnityEditor;
 #endif
 
+//legacy code
+
 namespace Modules.Utilities
 {
-
-
 
     [RequireComponent(typeof(UIVideoController))]
     public class UIVideoPlayByCanvas : MonoBehaviour
@@ -55,11 +55,13 @@ namespace Modules.Utilities
     }
 
 
-
+}
 #if UNITY_EDITOR
 
+namespace Modules.Utilities.Editor
+{
     [CustomEditor(typeof(UIVideoPlayByCanvas))]
-    public class UIVideoPlayByCanvasEditor : Editor
+    public class UIVideoPlayByCanvasEditor : UnityEditor.Editor
     {
         private UIVideoPlayByCanvas m_Target;
 
@@ -113,8 +115,8 @@ namespace Modules.Utilities
 
         }
     }
+}
 
 #endif
 
 
-}

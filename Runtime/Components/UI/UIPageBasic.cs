@@ -1,6 +1,11 @@
 using UnityEngine;
-
-public class UIPageBasic : UIPage
+namespace Modules.Utilities
 {
-   
+
+    [RequireComponent(typeof(CanvasGroup))]
+    public class UIPageBasic : UIPage
+    {
+
+    }
+
 }
