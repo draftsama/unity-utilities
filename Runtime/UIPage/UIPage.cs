@@ -16,18 +16,15 @@ namespace Modules.Utilities
     public abstract class UIPage : MonoBehaviour
     {
 
-        public enum TransitionType
-        {
-            Fade,
-            CrossFade,
-        }
+
 
         [SerializeField][HideInInspector] public string m_GroupName = "Default";
         [SerializeField][HideInInspector] public bool m_IsDefault;
         [SerializeField][ReadOnlyField] public bool m_IsOpened;
         [SerializeField][ReadOnlyField] public bool m_IsTransitionPage;
-        [SerializeField] public int m_TransitionDuration = 500;
-        [SerializeField] public TransitionType m_TransitionType = TransitionType.Fade;
+        [SerializeField] public TransitionInfo m_TransitionInfo;
+
+
 
         protected CanvasGroup canvasGroup;
 
@@ -57,7 +54,7 @@ namespace Modules.Utilities
         {
             if (m_IsOpened) return;
             var token = this.GetCancellationTokenOnDestroy();
-            UIPageHelper.TransitionPageAsync(this, m_TransitionDuration, m_TransitionType, token).Forget();
+            UIPageHelper.TransitionPageAsync(this, token).Forget();
 
         }
 
@@ -116,8 +113,7 @@ namespace Modules.Utilities
 
 
 
-        public static async UniTask TransitionPageAsync(UIPage _target, int _milliseconds = 1000,
-            UIPage.TransitionType _transitionType = UIPage.TransitionType.Fade, CancellationToken _token = default)
+        public static async UniTask TransitionPageAsync(UIPage _target, CancellationToken _token = default)
         {
             var current = UIPage.GetCurrentPage(_target.m_GroupName);
             Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
@@ -127,12 +123,16 @@ namespace Modules.Utilities
                 return;
             }
 
-            await TransitionPageAsync(current, _target, _milliseconds, _transitionType, _token);
+            await TransitionPageAsync(current, _target, _target.m_TransitionInfo, _token);
+        }
+        public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, CancellationToken _token = default)
+        {
+      
+            await TransitionPageAsync(_current, _target, _target.m_TransitionInfo, _token);
         }
 
 
-        public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, int _milliseconds = 1000,
-            UIPage.TransitionType _transitionType = UIPage.TransitionType.Fade, CancellationToken _token = default)
+        public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, TransitionInfo _transitionInfo, CancellationToken _token = default)
         {
 
             if (_current == null || _target == null || _current == _target || _current.m_IsTransitionPage || _target.m_IsTransitionPage)
@@ -140,9 +140,9 @@ namespace Modules.Utilities
 
             _current.m_IsTransitionPage = true;
             _target.m_IsTransitionPage = true;
-            if (_transitionType == UIPage.TransitionType.Fade)
+            if (_transitionInfo.m_Type == TransitionInfo.TransitionType.Fade)
             {
-                var duration = _milliseconds * 0.5f;
+                var duration = _transitionInfo.m_Duration * 0.5f;
 
 
                 foreach (var pe in _target.GetComponents<IPageShowBegin>())
@@ -151,12 +151,12 @@ namespace Modules.Utilities
                 foreach (var pe in _current.GetComponents<IPageHideBegin>())
                     pe.OnBeginHidePage();
 
-                await UITransitionFade.Instance.FadeIn((int)duration, Color.black, _token);
+                await UITransitionFade.Instance.FadeIn((int)duration, _transitionInfo.m_FadeColor, _token);
                 // await UniTask.Delay(300, cancellationToken: _token);
                 _current.SetShow(false);
                 _target.SetShow(true);
 
-                await UITransitionFade.Instance.FadeOut((int)duration, Color.black, _token);
+                await UITransitionFade.Instance.FadeOut((int)duration, _transitionInfo.m_FadeColor, _token);
 
                 foreach (var pe in _target.GetComponents<IPageShowEnd>())
                     pe.OnEndShowPage();
@@ -166,9 +166,11 @@ namespace Modules.Utilities
             }
             else
             {
+
+
                 await UniTask.WhenAll(
-                    _current.ShowPageAsync(_milliseconds, false, _token),
-                    _target.ShowPageAsync(_milliseconds, true, _token)
+                    _current.ShowPageAsync(_transitionInfo.m_Duration, false, _token),
+                    _target.ShowPageAsync(_transitionInfo.m_Duration, true, _token)
                 );
             }
 
@@ -220,6 +222,8 @@ namespace Modules.Utilities.Editor
     [CustomEditor(typeof(UIPage), true)]
     public class UIPageEditor : UnityEditor.Editor
     {
+
+
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
@@ -299,6 +303,12 @@ namespace Modules.Utilities.Editor
             EditorGUILayout.EndHorizontal();
 
 
+
+
+
+            base.DrawDefaultInspector();
+
+
             if (GUI.changed)
             {
                 if (isDefault.boolValue)
@@ -316,9 +326,8 @@ namespace Modules.Utilities.Editor
                 EditorUtility.SetDirty(script);
             }
 
-
             serializedObject.ApplyModifiedProperties();
-            base.DrawDefaultInspector();
+
         }
     }
 
