@@ -111,31 +111,44 @@ namespace Modules.Utilities
                 }
             }
 
+            var token = this.GetCancellationTokenOnDestroy();
 
-
-            if (_PlayWithParentShow && _ParentCanvasGroup != null)
+            if (m_StartMode == VideoStartMode.AutoPlay && _PlayWithParentShow && _ParentCanvasGroup != null)
             {
                 bool isPlaying = false;
-                UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
+                try
                 {
+                    UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
+                    {
 
-                    if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
-                    {
-                        if (!isPlaying)
+
+                        if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
                         {
-                            PlayAsync().Forget();
-                            isPlaying = true;
+                            if (!isPlaying)
+                            {
+                                PlayAsync().Forget();
+                                isPlaying = true;
+                            }
                         }
-                    }
-                    else
-                    {
-                        if (isPlaying)
+                        else
                         {
-                            isPlaying = false;
-                            Stop();
+                            if (isPlaying)
+                            {
+                                isPlaying = false;
+                                Stop();
+                            }
                         }
-                    }
-                }).Forget();
+                    }, token).Forget();
+
+                }
+                catch (OperationCanceledException e)
+                {
+                   // Debug.Log(e);
+                }
+                catch (Exception e)
+                {
+                    //Debug.Log(e);
+                }
             }
         }
 
