@@ -209,6 +209,8 @@ namespace Modules.Utilities
                 return false;
             }
 
+            if (_VideoPlayer == null)
+                _VideoPlayer = GetComponent<VideoPlayer>();
 
             _VideoPlayer.url = filePath;
             return true;
@@ -582,7 +584,7 @@ namespace Modules.Utilities
 
 
             var outputType = serializedObject.FindProperty("m_OutputType");
-
+            var startMode = serializedObject.FindProperty("m_StartMode");
 
             if (outputType.enumValueIndex == (int)VideoOutputType.Renderer)
             {
@@ -595,20 +597,25 @@ namespace Modules.Utilities
             {
                 DrawObjectProperty(_RawImage, typeof(RawImage));
                 DrawObjectProperty(_CanvasGroup, typeof(CanvasGroup));
-                EditorGUILayout.PropertyField(_PlayWithParentShow);
-                if (_PlayWithParentShow.boolValue)
+
+                if (startMode.enumValueIndex == (int)VideoStartMode.AutoPlay)
                 {
-                    if (_ParentCanvasGroup.objectReferenceValue == null)
-                        _ParentCanvasGroup.objectReferenceValue = instance.transform.parent.GetComponent<CanvasGroup>();
 
-                    EditorGUILayout.PropertyField(_ParentCanvasGroup);
-                    if (_ParentCanvasGroup.objectReferenceValue == null)
+                    EditorGUILayout.PropertyField(_PlayWithParentShow);
+                    if (_PlayWithParentShow.boolValue)
                     {
-                        //helpbox
-                        EditorGUILayout.HelpBox("Parent CanvasGroup is null, please assign it.", MessageType.Error);
-                    }
+                        if (_ParentCanvasGroup.objectReferenceValue == null)
+                            _ParentCanvasGroup.objectReferenceValue = instance.transform.parent.GetComponent<CanvasGroup>();
 
-                    EditorGUILayout.Slider(_CanvasGroupThreshold, 0.1f, 1f);
+                        EditorGUILayout.PropertyField(_ParentCanvasGroup);
+                        if (_ParentCanvasGroup.objectReferenceValue == null)
+                        {
+                            //helpbox
+                            EditorGUILayout.HelpBox("Parent CanvasGroup is null, please assign it.", MessageType.Error);
+                        }
+
+                        EditorGUILayout.Slider(_CanvasGroupThreshold, 0.1f, 1f);
+                    }
                 }
             }
 
