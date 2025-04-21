@@ -116,7 +116,7 @@ namespace Modules.Utilities
         public static async UniTask TransitionPageAsync(UIPage _target, CancellationToken _token = default)
         {
             var current = UIPage.GetCurrentPage(_target.m_GroupName);
-            Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
+            // Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
 
             if (current == null)
             {
