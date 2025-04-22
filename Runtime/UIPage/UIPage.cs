@@ -26,7 +26,10 @@ namespace Modules.Utilities
 
 
 
-        protected CanvasGroup canvasGroup;
+
+        public CanvasGroup m_CanvasGroup { get; private set; }
+
+        public RectTransform m_RectTransform { get; private set; }
 
 
         /// <summary>
@@ -34,7 +37,8 @@ namespace Modules.Utilities
         /// </summary>
         protected virtual void Awake()
         {
-            canvasGroup = GetComponent<CanvasGroup>();
+            m_CanvasGroup = GetComponent<CanvasGroup>();
+            m_RectTransform = GetComponent<RectTransform>();
             SetShow(m_IsDefault);
             if (m_IsDefault)
                 foreach (var pe in GetComponents<IPageShowEnd>())
@@ -44,10 +48,11 @@ namespace Modules.Utilities
 
         public void SetShow(bool _isShow)
         {
-            if (!canvasGroup) canvasGroup = GetComponent<CanvasGroup>();
+            if (!m_CanvasGroup) m_CanvasGroup = GetComponent<CanvasGroup>();
 
-            canvasGroup.SetAlpha(_isShow ? 1 : 0);
+            m_CanvasGroup.SetAlpha(_isShow ? 1 : 0);
             m_IsOpened = _isShow;
+
         }
 
         public void OpenPage()
@@ -61,7 +66,7 @@ namespace Modules.Utilities
         public async UniTask ShowPageAsync(int _milliseconds, bool _isShow, CancellationToken _token = default)
         {
             var targetAlpha = _isShow ? 1f : 0f;
-            if (!canvasGroup) canvasGroup = GetComponent<CanvasGroup>();
+            if (!m_CanvasGroup) m_CanvasGroup = GetComponent<CanvasGroup>();
 
 
             if (_isShow)
@@ -71,7 +76,7 @@ namespace Modules.Utilities
                 foreach (var pe in GetComponents<IPageHideBegin>())
                     pe.OnBeginHidePage();
 
-            await canvasGroup.LerpAlphaAsync(_milliseconds, targetAlpha, _token: _token);
+            await m_CanvasGroup.LerpAlphaAsync(_milliseconds, targetAlpha, _token: _token);
 
 
             if (_isShow)
@@ -127,7 +132,7 @@ namespace Modules.Utilities
         }
         public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, CancellationToken _token = default)
         {
-      
+
             await TransitionPageAsync(_current, _target, _target.m_TransitionInfo, _token);
         }
 
@@ -140,16 +145,28 @@ namespace Modules.Utilities
 
             _current.m_IsTransitionPage = true;
             _target.m_IsTransitionPage = true;
+            _current.m_CanvasGroup.blocksRaycasts = false;
+            _target.m_CanvasGroup.blocksRaycasts = false;
+
+            //if target sibling index is less than current sibling index, set target sibling index to current sibling index
+
+            if (_target.m_RectTransform.GetSiblingIndex() < _current.m_RectTransform.GetSiblingIndex())
+            {
+                _target.m_RectTransform.SetSiblingIndex(_current.m_RectTransform.GetSiblingIndex());
+
+            }
+
+
+            foreach (var pe in _target.GetComponents<IPageShowBegin>())
+                pe.OnBeginShowPage();
+
+            foreach (var pe in _current.GetComponents<IPageHideBegin>())
+                pe.OnBeginHidePage();
+
             if (_transitionInfo.m_Type == TransitionInfo.TransitionType.Fade)
             {
                 var duration = _transitionInfo.m_Duration * 0.5f;
 
-
-                foreach (var pe in _target.GetComponents<IPageShowBegin>())
-                    pe.OnBeginShowPage();
-
-                foreach (var pe in _current.GetComponents<IPageHideBegin>())
-                    pe.OnBeginHidePage();
 
                 await UITransitionFade.Instance.FadeIn((int)duration, _transitionInfo.m_FadeColor, _token);
                 // await UniTask.Delay(300, cancellationToken: _token);
@@ -158,24 +175,56 @@ namespace Modules.Utilities
 
                 await UITransitionFade.Instance.FadeOut((int)duration, _transitionInfo.m_FadeColor, _token);
 
-                foreach (var pe in _target.GetComponents<IPageShowEnd>())
-                    pe.OnEndShowPage();
 
-                foreach (var pe in _current.GetComponents<IPageHideEnd>())
-                    pe.OnEndHidePage();
             }
-            else
+            else if (_transitionInfo.m_Type == TransitionInfo.TransitionType.CrossFade)
             {
 
 
                 await UniTask.WhenAll(
-                    _current.ShowPageAsync(_transitionInfo.m_Duration, false, _token),
-                    _target.ShowPageAsync(_transitionInfo.m_Duration, true, _token)
+                    _current.m_CanvasGroup.LerpAlphaAsync(_transitionInfo.m_Duration, 0f, _token: _token),
+                    _target.m_CanvasGroup.LerpAlphaAsync(_transitionInfo.m_Duration, 1f, _token: _token)
                 );
+                _current.SetShow(false);
+                _target.SetShow(true);
+
+
+
             }
+            else if (_transitionInfo.m_Type == TransitionInfo.TransitionType.Slide)
+            {
+                var duration = Mathf.FloorToInt(_transitionInfo.m_Duration * 0.5f);
+                _target.m_RectTransform.anchoredPosition = _transitionInfo.m_StartPosition;
+                _target.m_CanvasGroup.SetAlpha(1f);
+                await UniTask.WhenAll(
+                                 _current.m_RectTransform.LerpAnchorPositionAsync(
+                                     duration,
+                                        _transitionInfo.m_EndPosition - _transitionInfo.m_StartPosition,
+                                        _ease: _transitionInfo.m_Ease,
+                                     _token: _token
+                                 ),
+                                _target.m_RectTransform.LerpAnchorPositionAsync(
+                                    duration,
+                                    _transitionInfo.m_EndPosition,
+                                    _ease: _transitionInfo.m_Ease,
+                                    _token: _token
+                                )
+                             );
+
+                _current.SetShow(false);
+                _target.SetShow(true);
+
+            }
+
+            foreach (var pe in _target.GetComponents<IPageShowEnd>())
+                pe.OnEndShowPage();
+
+            foreach (var pe in _current.GetComponents<IPageHideEnd>())
+                pe.OnEndHidePage();
 
             _current.m_IsTransitionPage = false;
             _target.m_IsTransitionPage = false;
+
         }
 
         public static bool ResetUIPagesWithoutNotify(string _groupName)
@@ -246,6 +295,7 @@ namespace Modules.Utilities.Editor
             if (!isDefault.boolValue && currentDefault != script && GUILayout.Button("Set As Default Page"))
             {
                 isDefault.boolValue = true;
+
             }
 
 
@@ -263,6 +313,7 @@ namespace Modules.Utilities.Editor
 
                 if (GUILayout.Button("Clear Default Page"))
                     isDefault.boolValue = false;
+
             }
 
             EditorGUILayout.EndHorizontal();
@@ -305,12 +356,15 @@ namespace Modules.Utilities.Editor
 
 
 
+            serializedObject.ApplyModifiedProperties();
 
             base.DrawDefaultInspector();
 
 
             if (GUI.changed)
             {
+
+
                 if (isDefault.boolValue)
                 {
                     var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
@@ -326,7 +380,6 @@ namespace Modules.Utilities.Editor
                 EditorUtility.SetDirty(script);
             }
 
-            serializedObject.ApplyModifiedProperties();
 
         }
     }
