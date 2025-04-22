@@ -54,14 +54,22 @@ namespace Modules.Utilities
             m_IsOpened = _isShow;
 
         }
-
         public void OpenPage()
+        {
+            OpenPage(null);
+        }
+
+      
+
+
+        public void OpenPage(TransitionInfo _overrideTransitionInfo = null)
         {
             if (m_IsOpened) return;
             var token = this.GetCancellationTokenOnDestroy();
-            UIPageHelper.TransitionPageAsync(this, token).Forget();
+            UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, token).Forget();
 
         }
+       
 
         public async UniTask ShowPageAsync(int _milliseconds, bool _isShow, CancellationToken _token = default)
         {
@@ -118,7 +126,7 @@ namespace Modules.Utilities
 
 
 
-        public static async UniTask TransitionPageAsync(UIPage _target, CancellationToken _token = default)
+        public static async UniTask TransitionPageAsync(UIPage _target, TransitionInfo _overrideTransition = null, CancellationToken _token = default)
         {
             var current = UIPage.GetCurrentPage(_target.m_GroupName);
             // Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
@@ -128,17 +136,16 @@ namespace Modules.Utilities
                 return;
             }
 
-            await TransitionPageAsync(current, _target, _target.m_TransitionInfo, _token);
+            await TransitionPageAsync(current, _target, _overrideTransition, _token);
         }
-        public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, CancellationToken _token = default)
+ 
+
+
+        public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
 
-            await TransitionPageAsync(_current, _target, _target.m_TransitionInfo, _token);
-        }
-
-
-        public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, TransitionInfo _transitionInfo, CancellationToken _token = default)
-        {
+            var transitionInfo = _overrideTransitionInfo ?? _target.m_TransitionInfo;
+            
 
             if (_current == null || _target == null || _current == _target || _current.m_IsTransitionPage || _target.m_IsTransitionPage)
                 return;
@@ -163,27 +170,27 @@ namespace Modules.Utilities
             foreach (var pe in _current.GetComponents<IPageHideBegin>())
                 pe.OnBeginHidePage();
 
-            if (_transitionInfo.m_Type == TransitionInfo.TransitionType.Fade)
+            if (transitionInfo.m_Type == TransitionInfo.TransitionType.Fade)
             {
-                var duration = _transitionInfo.m_Duration * 0.5f;
+                var duration = transitionInfo.m_Duration * 0.5f;
 
 
-                await UITransitionFade.Instance.FadeIn((int)duration, _transitionInfo.m_FadeColor, _token);
+                await UITransitionFade.Instance.FadeIn((int)duration, transitionInfo.m_FadeColor, _token);
                 // await UniTask.Delay(300, cancellationToken: _token);
                 _current.SetShow(false);
                 _target.SetShow(true);
 
-                await UITransitionFade.Instance.FadeOut((int)duration, _transitionInfo.m_FadeColor, _token);
+                await UITransitionFade.Instance.FadeOut((int)duration, transitionInfo.m_FadeColor, _token);
 
 
             }
-            else if (_transitionInfo.m_Type == TransitionInfo.TransitionType.CrossFade)
+            else if (transitionInfo.m_Type == TransitionInfo.TransitionType.CrossFade)
             {
 
 
                 await UniTask.WhenAll(
-                    _current.m_CanvasGroup.LerpAlphaAsync(_transitionInfo.m_Duration, 0f, _token: _token),
-                    _target.m_CanvasGroup.LerpAlphaAsync(_transitionInfo.m_Duration, 1f, _token: _token)
+                    _current.m_CanvasGroup.LerpAlphaAsync(transitionInfo.m_Duration, 0f, _token: _token),
+                    _target.m_CanvasGroup.LerpAlphaAsync(transitionInfo.m_Duration, 1f, _token: _token)
                 );
                 _current.SetShow(false);
                 _target.SetShow(true);
@@ -191,22 +198,22 @@ namespace Modules.Utilities
 
 
             }
-            else if (_transitionInfo.m_Type == TransitionInfo.TransitionType.Slide)
+            else if (transitionInfo.m_Type == TransitionInfo.TransitionType.Slide)
             {
-                var duration = Mathf.FloorToInt(_transitionInfo.m_Duration * 0.5f);
-                _target.m_RectTransform.anchoredPosition = _transitionInfo.m_StartPosition;
+                var duration = Mathf.FloorToInt(transitionInfo.m_Duration * 0.5f);
+                _target.m_RectTransform.anchoredPosition = transitionInfo.m_StartPosition;
                 _target.m_CanvasGroup.SetAlpha(1f);
                 await UniTask.WhenAll(
                                  _current.m_RectTransform.LerpAnchorPositionAsync(
                                      duration,
-                                        _transitionInfo.m_EndPosition - _transitionInfo.m_StartPosition,
-                                        _ease: _transitionInfo.m_Ease,
+                                        transitionInfo.m_EndPosition - transitionInfo.m_StartPosition,
+                                        _ease: transitionInfo.m_Ease,
                                      _token: _token
                                  ),
                                 _target.m_RectTransform.LerpAnchorPositionAsync(
                                     duration,
-                                    _transitionInfo.m_EndPosition,
-                                    _ease: _transitionInfo.m_Ease,
+                                    transitionInfo.m_EndPosition,
+                                    _ease: transitionInfo.m_Ease,
                                     _token: _token
                                 )
                              );
