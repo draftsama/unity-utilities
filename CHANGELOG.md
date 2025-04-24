@@ -9,3 +9,7 @@
 ## [1.0.2] - 2025-04-20
 ### Added
 - Added UIPage slide transition effect.
+
+## [1.0.3] - 2025-04-25
+### Fixed
+- Fixed a bug in VideoController that fade in was not working correctly.
