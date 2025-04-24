@@ -143,7 +143,7 @@ namespace Modules.Utilities
                 }
                 catch (OperationCanceledException e)
                 {
-                   // Debug.Log(e);
+                    // Debug.Log(e);
                 }
                 catch (Exception e)
                 {
@@ -377,8 +377,9 @@ namespace Modules.Utilities
                     if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stoping)
                     {
                         fadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
-                        var valueProgress =
-                            Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 0f, 1f, fadeInProgress));
+
+                        fadeInProgress = Mathf.Clamp01(fadeInProgress);
+                        var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseInQuad, 0f, 1f, fadeInProgress);
 
                         //fade in
                         ApplyAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
@@ -387,11 +388,13 @@ namespace Modules.Utilities
                     else if (!m_Loop && _VideoPlayer.time >=
                              _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) || _Stoping)
                     {
+
                         fadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
-                        var valueProgress =
-                            Mathf.Clamp01(EasingFormula.EasingFloat(Easing.Ease.EaseInOutQuad, 1f, 0f,
-                                fadeOutProgress));
+                    fadeOutProgress = Mathf.Clamp01(fadeOutProgress);
+                        var valueProgress =EasingFormula.EasingFloat(Easing.Ease.EaseOutQuad, 1f, 0f,
+                                fadeOutProgress);
                         //fade out
+
                         ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
 
