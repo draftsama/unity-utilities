@@ -212,7 +212,6 @@ namespace Modules.Utilities
                     }
                 }
 
-                Debug.Log(instance);
 
                 if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.ExternalResources)
                 {

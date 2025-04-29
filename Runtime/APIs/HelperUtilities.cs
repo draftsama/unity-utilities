@@ -137,10 +137,20 @@ namespace Modules.Utilities
 
         public static int RandomIndexWithoutCurrent(int _currentIndex, int _max, int _limitRepeat = 20)
         {
-            var index = UnityEngine.Random.Range(0, _max);
+            // var index = UnityEngine.Random.Range(0, _max);
 
-            if (index == _currentIndex && _limitRepeat > 0) return RandomIndexWithoutCurrent(_currentIndex, _max, _limitRepeat - 1);
-            else return index;
+            // if (index == _currentIndex && _limitRepeat > 0) return RandomIndexWithoutCurrent(_currentIndex, _max, _limitRepeat - 1);
+            // else return index;
+
+            int randomIndex;
+            int count = 0;
+            do
+            {
+                randomIndex = Random.Range(0, _max);
+                count++;
+                if (count > _limitRepeat) break;
+            } while (randomIndex == _currentIndex);
+            return randomIndex;
         }
 
         public static Bounds CalculateBoxColliderFromMeshs(Transform _target, bool _isIncludeChildren = false)
