@@ -10,8 +10,6 @@ namespace Modules.Utilities
     {
     }
 
-
-
     [AttributeUsage(AttributeTargets.Method, Inherited = true, AllowMultiple = false)]
     public class ButtonAttribute : Attribute
     {

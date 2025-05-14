@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Threading.Tasks;
 using System.IO;
 using System.Threading;
+using System.Net.Sockets;
 
 namespace Modules.Utilities
 {
@@ -84,7 +85,19 @@ namespace Modules.Utilities
             return Rgx.IsMatch(URL);
         }
 
-
+       public static string GetLocalIPv4()
+        {
+            string localIP = "";
+            foreach (var ip in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
+            {
+                if (ip.AddressFamily == AddressFamily.InterNetwork)
+                {
+                    localIP = ip.ToString();
+                    break; // Remove this line if you want all local IPs
+                }
+            }
+            return localIP;
+        }
 
 
 
