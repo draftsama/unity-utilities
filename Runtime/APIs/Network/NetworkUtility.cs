@@ -7,52 +7,76 @@ using System.Threading.Tasks;
 using System.IO;
 using System.Threading;
 using System.Net.Sockets;
+using Cysharp.Threading.Tasks;
+
+using System.Net.NetworkInformation;
+using Ping = System.Net.NetworkInformation.Ping;
+using System.Collections.Generic;
+
+
 
 namespace Modules.Utilities
 {
     public static class NetworkUtility
     {
-        public static bool Ping(string _hostname = "google.com")
+        // <summary>
+        // Check if the device is connected to the internet
+        // </summary>
+
+        public static async UniTask<bool> IsInternetAvailable()
         {
             try
             {
-                //I strongly recommend to check Ping, Ping.Send & PingOptions on microsoft C# docu or other C# info source
-                //in this block you configure the ping call to your host or server in order to check if there is network connection.
-
-                //from https://stackoverflow.com/questions/55461884/how-to-ping-for-ipv4-only
-                //from https://stackoverflow.com/questions/49069381/why-ping-timeout-is-not-working-correctly
-                //and from https://stackoverflow.com/questions/2031824/what-is-the-best-way-to-check-for-internet-connectivity-using-net
-
-
-                System.Net.NetworkInformation.Ping myPing = new System.Net.NetworkInformation.Ping();
-
-                byte[] buffer = new byte[32]; //array that contains data to be sent with the ICMP echo
-                int timeout = 10000; //in milliseconds
-                System.Net.NetworkInformation.PingOptions pingOptions = new System.Net.NetworkInformation.PingOptions(64, true);
-
-                string ip = GetIPAddress(_hostname);
-                if (string.IsNullOrEmpty(ip)) return false;
-
-                System.Net.NetworkInformation.PingReply reply = myPing.Send(ip, timeout, buffer, pingOptions); //the same method can be used without the timeout, data buffer & pingOptions overloadd but this works for me
-                if (reply.Status == System.Net.NetworkInformation.IPStatus.Success)
+                using (var client = new HttpClient())
                 {
-                    return true;
-                }
-                else if (reply.Status == System.Net.NetworkInformation.IPStatus.TimedOut) //to handle the timeout scenario
-                {
-                    return false;
-                }
-                else
-                {
-                    return false;
+                    using (var cts = new CancellationTokenSource(10000))
+                    {
+                        var result = await client.GetAsync("http://www.google.com", cts.Token);
+                        return result.IsSuccessStatusCode;
+                    }
                 }
             }
-            catch (Exception e) //To catch any exception of the method
+            catch (Exception e)
             {
                 Debug.Log(e);
                 return false;
             }
         }
+
+        /// <summary>
+        /// Ping a host or IP address to check if it is reachable
+        /// </summary>
+        /// <param name="_hostnameOrIpAddress">The hostname or IP address to ping</param>
+        /// <param name="_timeout">The timeout in milliseconds</param>
+        /// <returns>True if the host is reachable, false otherwise</returns>
+        /// <remarks>Note: This method uses the System.Net.NetworkInformation.Ping class</remarks>
+        /// <remarks>Note: This method is asynchronous and returns a UniTask</remarks>
+        /// <remarks>Note: This method may throw an exception if the ping fails</remarks>
+        public static async UniTask<bool> Ping(string _hostnameOrIpAddress = "google.com", int _timeout = 10000)
+        {
+            var ping = new Ping();
+
+            try
+            {
+                byte[] buffer = new byte[32]; //array that contains data to be sent with the ICMP echo
+                PingOptions pingOptions = new PingOptions(64, true);
+
+                var reply = await ping.SendPingAsync(_hostnameOrIpAddress, _timeout, buffer, pingOptions);
+                return reply.Status == IPStatus.Success;
+            }
+            catch (Exception)
+            {
+                throw;
+            }
+            finally
+            {
+                ping.Dispose();
+            }
+
+
+        }
+
+
 
         public static string GetIPAddress(string _hostname = "google.com")
         {
@@ -70,7 +94,7 @@ namespace Modules.Utilities
 
             foreach (IPAddress ip in host.AddressList)
             {
-                if (ip.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork) //filter just the IPv4 IPs
+                if (ip.AddressFamily == AddressFamily.InterNetwork) //filter just the IPv4 IPs
                 {                                                                      //you can play around with this and get all the IP arrays (if any)
                     return ip.ToString();                                              //and check the connection with all of then if needed
                 }
@@ -85,7 +109,7 @@ namespace Modules.Utilities
             return Rgx.IsMatch(URL);
         }
 
-       public static string GetLocalIPv4()
+        public static string GetLocalIPv4()
         {
             string localIP = "";
             foreach (var ip in Dns.GetHostEntry(Dns.GetHostName()).AddressList)
@@ -98,6 +122,31 @@ namespace Modules.Utilities
             }
             return localIP;
         }
+
+        public static async UniTask<List<string>> ScanLAN(string baseIP = "192.168.1." , int timeout = 1000)
+        {
+    
+
+            // Create a list to store the alive IPs
+            List<string> aliveIPs = new List<string>();
+            List<UniTask> tasks = new List<UniTask>();
+
+            for (int i = 1; i < 255; i++)
+            {
+                string ip = $"{baseIP}{i}";
+                tasks.Add(Ping(ip, timeout).ContinueWith(t =>
+                {
+                    if (t)
+                        aliveIPs.Add(ip);
+                }));
+            }
+
+            await UniTask.WhenAll(tasks);
+            return aliveIPs;
+        }
+       
+
+
 
 
 
