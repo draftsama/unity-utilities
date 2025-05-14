@@ -141,11 +141,11 @@ namespace Modules.Utilities
                     }, token).Forget();
 
                 }
-                catch (OperationCanceledException e)
+                catch (OperationCanceledException)
                 {
                     // Debug.Log(e);
                 }
-                catch (Exception e)
+                catch (Exception)
                 {
                     //Debug.Log(e);
                 }
@@ -343,7 +343,7 @@ namespace Modules.Utilities
 
 
 
-                if (!_VideoPlayer.isPrepared)
+                if (!_VideoPlayer.isPrepared || !m_IsPrepared)
                 {
                     SetupURL(m_FileName, m_PathType, m_FolderName);
                     if (string.IsNullOrEmpty(_VideoPlayer.url))
