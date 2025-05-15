@@ -7,11 +7,12 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using Modules.Utilities;
-using NUnit.Framework;
 using UnityEngine.Events;
-using UnityEditor.VersionControl;
-using Unity.Android.Gradle.Manifest;
 using Cysharp.Threading.Tasks.Linq;
+using System.Linq;
+using Unity.Android.Gradle.Manifest;
+
+
 
 
 #if UNITY_EDITOR
@@ -26,52 +27,103 @@ namespace Modules.Utilities
         [System.Serializable]
         public struct ConnectorInfo
         {
-            public string ip;
+            public int id;
+            public string ipAddress;
             public long lastPing;
             public IPEndPoint remoteEndPoint;
 
             public void Clear()
             {
-                ip = string.Empty;
+                ipAddress = string.Empty;
                 lastPing = -1;
                 remoteEndPoint = null;
             }
             public bool IsEmpty()
             {
-                return string.IsNullOrEmpty(ip) && lastPing == -1 && remoteEndPoint == null;
+                return string.IsNullOrEmpty(ipAddress) && lastPing == -1 && remoteEndPoint == null;
             }
         }
+
+        [System.Serializable]
+        public class PacketConfirm
+        {
+            public int packetId;
+            public ushort index;
+            public int id;
+        }
+
 
         [System.Serializable]
         public class PacketResponse
         {
             public int packetId;
+            public int senderId;
             public PacketType packetType;
+            public DataType dataType;
             public ushort action;
+            public ushort index;
             public bool isCompleted;
             public byte[] data;
             public IPEndPoint remoteEndPoint;
+            public bool requestConfirm;
+            public long createdAt;
+
+        }
+
+        [System.Serializable]
+        public class PacketRequest
+        {
+            public int packetId;
+            public int senderId;
+            public PacketType packetType;
+            public DataType dataType;
+            public ushort action;
+            public int index;
+            public SendPacketStatus sendPacketStatus;
+            public byte[] packetData;
+            public IPEndPoint remoteEndPoint;
+            public long createdAt;
+            public bool requestConfirm;
         }
 
 
         public enum PacketType
         {
             PING = 0,
-            STRING_DATA = 1,
-            BYTE_DATA = 2,
-            FLOAT_DATA = 3,
-            INT_DATA = 4,
-            LONG_DATA = 5,
-            VECTOR2_DATA = 6,
-            VECTOR3_DATA = 7,
-            VECTOR4_DATA = 8,
-            QUATERNION_DATA = 9,
-            COLOR_DATA = 10,
-            BOOL_DATA = 11,
+            SEND_DATA = 1,
+            SEND_DATA_CONFIRM = 3,
+
+        }
+        public enum SendPacketStatus
+        {
+            NONE,
+            SEND,
+            SEND_COMPLETE,
+        }
+
+        public enum DataType
+        {
+            NONE,
+            STRING,
+            BYTES,
+            FLOAT,
+            INT,
+            LONG,
+            VECTOR2,
+            VECTOR3,
+            VECTOR4,
+            QUATERNION,
+            COLOR,
+            BOOL,
+            DOUBLE,
+            TRANSFORM
 
         }
 
 
+
+
+        [SerializeField] private int m_Id = -1;
 
         [SerializeField] private string m_Host = "";
         [SerializeField] private int m_Port = 5555;
@@ -106,17 +158,22 @@ namespace Modules.Utilities
         //4 bytes for id(int)
         //2 bytes for total chunks(ushort)
         //2 bytes for chunk index(ushort)
-        //2 byte for type(ushort)
+        //2 byte for packet type(ushort)
+        //2 byte for data type(ushort)
         //2 byte for action(ushort)
-        private const int PACKET_HEADER_SIZE = 12;
+        //1 byte for request complete(bool)
+        //4 bytes for senderId(int)
+        private const int PACKET_HEADER_SIZE = 19;
         private Dictionary<int, List<byte[]>> receivedChunks = new Dictionary<int, List<byte[]>>();
-
+        private List<PacketRequest> packetSendQueue = new List<PacketRequest>();
+        private List<PacketConfirm> packetWaitConfirmList = new List<PacketConfirm>();
 
         private void OnEnable()
         {
+
             if (m_StartOnEnable)
             {
-                Connect(m_IsServer).Forget();
+                Connect(m_Host, m_Port, m_IsServer).Forget();
             }
 
         }
@@ -148,6 +205,10 @@ namespace Modules.Utilities
             m_IsWaitingReconnect = false;
             m_ClientInfoList.Clear();
             m_ServerInfo.Clear();
+            packetSendQueue.Clear();
+            packetWaitConfirmList.Clear();
+            receivedChunks.Clear();
+
             Log("UDP client closed");
         }
         private void Log(object message)
@@ -158,7 +219,7 @@ namespace Modules.Utilities
             Debug.Log($"[{prefix}] {message}");
         }
 
-        public async UniTask Connect(bool _isServer)
+        public async UniTask Connect(string _host, int _port, bool _isServer)
         {
             if (m_IsRunning || m_IsWaitingReconnect)
                 return;
@@ -171,13 +232,17 @@ namespace Modules.Utilities
             try
             {
                 m_IsServer = _isServer;
-
+                m_Host = _host;
+                m_Port = _port;
                 m_IsRunning = false;
                 m_IsConnected = false;
                 m_IsWaitingReconnect = false;
                 m_ClientInfoList.Clear();
                 m_ServerInfo.Clear();
-
+                packetSendQueue.Clear();
+                packetWaitConfirmList.Clear();
+                receivedChunks.Clear();
+                m_Id = GetRandomId();
 
                 if (m_IsServer)
                 {
@@ -221,9 +286,10 @@ namespace Modules.Utilities
 
 
                 await UniTask.WhenAll(
-                    PingInterval(1000, token),
+                    PingProcess(1000, token),
                     ReceiveDataProcess(token),
-                    ConnectionMonitor(1000, 1100, token)
+                    SendDataProcess(token),
+                    ConnectionMonitorProcess(1000, 1100, token)
                 );
 
 
@@ -236,7 +302,7 @@ namespace Modules.Utilities
             {
                 Log($"Socket Error: {ex.Message}");
                 if (!_isServer)
-                    Reconnect(false, 3000).Forget();
+                    Reconnect(3000).Forget();
             }
             catch (ObjectDisposedException)
             {
@@ -247,20 +313,15 @@ namespace Modules.Utilities
 
                 Log($"Error: {ex.Message}");
                 if (!_isServer)
-                    Reconnect(false, 3000).Forget();
+                    Reconnect(3000).Forget();
             }
-
-
-
 
 
         }
 
 
 
-
-
-        private async UniTask Reconnect(bool _isServer, int _delay)
+        private async UniTask Reconnect(int _delay)
         {
             await UniTask.SwitchToMainThread();
             m_IsWaitingReconnect = true;
@@ -278,13 +339,16 @@ namespace Modules.Utilities
             m_IsConnected = false;
             m_ClientInfoList.Clear();
             m_ServerInfo.Clear();
+            packetSendQueue.Clear();
+            receivedChunks.Clear();
+
             try
             {
 
                 await UniTask.Delay(_delay, cancellationToken: token);
                 m_IsWaitingReconnect = false;
 
-                Connect(_isServer).Forget();
+                Connect(m_Host, m_Port, m_IsServer).Forget();
 
             }
             catch (OperationCanceledException)
@@ -301,13 +365,13 @@ namespace Modules.Utilities
 
 
         }
-        private int GetRandomPacketId()
+        private int GetRandomId()
         {
             return new System.Random().Next();
         }
 
 
-        public async UniTask PingInterval(int _interval, CancellationToken _token)
+        public async UniTask PingProcess(int _interval, CancellationToken _token)
         {
 
 
@@ -316,16 +380,8 @@ namespace Modules.Utilities
 
                 try
                 {
-
-
-                    var messageId = GetRandomPacketId();
-                    var action = 0;
-
-                    await SendPacket(messageId, PacketType.PING, (ushort)action, null, _token);
-
+                    await SendPing(_token);
                     await UniTask.Delay(_interval, cancellationToken: _token);
-
-
                 }
 
 
@@ -338,7 +394,7 @@ namespace Modules.Utilities
         }
 
 
-        public async UniTask ConnectionMonitor(int _interval, int disconnectTime, CancellationToken _token)
+        public async UniTask ConnectionMonitorProcess(int _interval, int disconnectTime, CancellationToken _token)
         {
 
 
@@ -363,7 +419,7 @@ namespace Modules.Utilities
                             {
                                 // Client disconnected
                                 m_OnClientDisconnected?.Invoke(client);
-                                Log($"Client {client.ip} disconnected");
+                                Log($"Client {client.ipAddress} disconnected");
                                 m_ClientInfoList.RemoveAt(i);
                                 i--;
                             }
@@ -398,7 +454,81 @@ namespace Modules.Utilities
             }
 
         }
+        private async UniTask SendDataProcess(CancellationToken token)
+        {
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
 
+                    if (packetSendQueue.Count == 0)
+                    {
+                        await UniTask.Yield(token);
+                        continue;
+                    }
+                    //find request in queue
+                    var list = packetSendQueue.FindAll(x => x.sendPacketStatus != SendPacketStatus.SEND_COMPLETE);
+
+                    if (list.Count == 0)
+                    {
+                        await UniTask.Yield(token);
+                        continue;
+                    }
+
+                    var request = list[0];
+
+                    if (!m_IsServer)
+                    {
+                        //send to server
+                        await udpClient.SendAsync(request.packetData, request.packetData.Length).AsUniTask(false).AttachExternalCancellation(token);
+                        request.sendPacketStatus = SendPacketStatus.SEND;
+
+                    }
+                    else
+                    {
+                        //send to client
+                        await udpClient.SendAsync(request.packetData, request.packetData.Length, request.remoteEndPoint).AsUniTask(false).AttachExternalCancellation(token);
+                        request.sendPacketStatus = SendPacketStatus.SEND;
+
+                    }
+
+                    packetSendQueue.RemoveAt(0);
+
+
+                    if (request.requestConfirm)
+                    {
+
+                        if (request.sendPacketStatus == SendPacketStatus.SEND_COMPLETE)
+                        {
+                            packetSendQueue.RemoveAt(0);
+                        }
+                        else
+                        {
+                            //add request back to queue
+                            packetSendQueue.Add(request);
+                        }
+
+                    }
+
+
+                    // await UniTask.Delay(300, cancellationToken: token);
+
+                    await UniTask.Yield(token);
+
+
+
+
+
+                }
+
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+            }
+
+
+        }
         private async UniTask ReceiveDataProcess(CancellationToken _token)
         {
 
@@ -415,29 +545,68 @@ namespace Modules.Utilities
 
                     if (packetResponse == null)
                         continue;
-                    if (!packetResponse.isCompleted)
-                        continue;
+
 
                     switch (packetResponse.packetType)
                     {
                         case PacketType.PING:
-                            if (m_IsServer)
-                                UpdateClientConnected(result.RemoteEndPoint);
-                            else
-                                UpdateServerConnected(result.RemoteEndPoint);
+                            UpdateConnectors(packetResponse);
                             break;
-                        case PacketType.STRING_DATA:
-                        case PacketType.BYTE_DATA:
-                        case PacketType.FLOAT_DATA:
-                        case PacketType.INT_DATA:
-                        case PacketType.LONG_DATA:
-                        case PacketType.VECTOR2_DATA:
-                        case PacketType.VECTOR3_DATA:
-                        case PacketType.VECTOR4_DATA:
-                        case PacketType.QUATERNION_DATA:
-                        case PacketType.COLOR_DATA:
-                        case PacketType.BOOL_DATA:
-                            m_OnDataReceived?.Invoke(packetResponse);
+                        case PacketType.SEND_DATA:
+                            //receiver side
+
+                
+
+                            var isExist = packetWaitConfirmList
+                                    .FindIndex(x => x.packetId == packetResponse.packetId &&
+                                    x.index == packetResponse.index &&
+                                    x.id == packetResponse.senderId) != -1;
+
+                            if (packetResponse.requestConfirm)
+                            {
+
+                                //send back to confirm
+                                var confirmDataSend = new PacketConfirm()
+                                {
+                                    packetId = packetResponse.packetId,
+                                    index = packetResponse.index,
+                                    id = packetResponse.senderId
+                                };
+
+                                if (!isExist)
+                                {
+                                    packetWaitConfirmList.Add(confirmDataSend);
+
+                                }
+
+                                SendDataConfirm(confirmDataSend);
+
+                            }
+
+
+
+
+                            if (packetResponse.isCompleted)
+                            {
+                                //add response to list
+                                //check id if not exist then Invoke
+                                if (!isExist)
+                                    m_OnDataReceived?.Invoke(packetResponse);
+
+                            }
+
+                            break;
+                        case PacketType.SEND_DATA_CONFIRM:
+                            //sender side
+                            //remove request from queue
+                            var confirmData = UnityConverter.FromBytes<PacketConfirm>(packetResponse.data);
+
+                            var index = packetSendQueue.FindIndex(x => x.packetId == confirmData.packetId && x.index == confirmData.index && x.senderId == confirmData.id);
+
+                            if (index != -1)
+                            {
+                                packetSendQueue.RemoveAt(index);
+                            }
                             break;
 
                     }
@@ -457,36 +626,55 @@ namespace Modules.Utilities
 
 
 
-        public void UpdateClientConnected(IPEndPoint _remoteEndPoint)
+        public void UpdateConnectors(PacketResponse _packetResponse)
         {
-            if (!m_IsServer)
-                return;
+            var senderId = _packetResponse.senderId;
+            var remoteEndPoint = _packetResponse.remoteEndPoint;
+            var ipAddress = remoteEndPoint.Address.ToString();
+
             // Log($"m_ClientInfoList count : {m_ClientInfoList.Count}");
             var timeNow = DateTime.UtcNow.Ticks;
             try
             {
-                var _ip = _remoteEndPoint.Address.ToString();
-                var index = m_ClientInfoList.FindIndex(x => x.ip == _ip);
-
-
-                if (index == -1)
+                if (m_IsServer)
                 {
-                    Log($"Client connected: {_ip}");
-                    var clientInfo = new ConnectorInfo()
-                    {
-                        ip = _ip,
-                        lastPing = timeNow,
-                        remoteEndPoint = _remoteEndPoint
-                    };
-                    m_OnClientConnected?.Invoke(clientInfo);
+                    var index = m_ClientInfoList.FindIndex(x => x.ipAddress == ipAddress);
 
-                    m_ClientInfoList.Add(clientInfo);
+
+                    if (index == -1)
+                    {
+                        Log($"Client connected: {ipAddress}");
+                        var clientInfo = new ConnectorInfo()
+                        {
+                            id = senderId,
+                            ipAddress = ipAddress,
+                            lastPing = timeNow,
+                            remoteEndPoint = remoteEndPoint
+                        };
+
+                        m_OnClientConnected?.Invoke(clientInfo);
+                        m_ClientInfoList.Add(clientInfo);
+                    }
+                    else
+                    {
+                        var clientInfo = m_ClientInfoList[index];
+                        clientInfo.lastPing = timeNow;
+                        m_ClientInfoList[index] = clientInfo;
+                    }
                 }
                 else
                 {
-                    var clientInfo = m_ClientInfoList[index];
-                    clientInfo.lastPing = timeNow;
-                    m_ClientInfoList[index] = clientInfo;
+                    m_ServerInfo.id = senderId;
+                    m_ServerInfo.ipAddress = ipAddress;
+                    m_ServerInfo.lastPing = timeNow;
+                    m_ServerInfo.remoteEndPoint = remoteEndPoint;
+
+                    if (!m_IsConnected)
+                    {
+                        m_OnServerConnected?.Invoke(m_ServerInfo);
+                    }
+
+                    m_IsConnected = true;
                 }
 
             }
@@ -498,48 +686,22 @@ namespace Modules.Utilities
 
         }
 
-        public void UpdateServerConnected(IPEndPoint _remoteEndPoint)
+
+
+
+        public List<byte[]> CreatePackets(int messageId, PacketType _packetType, DataType _dataType, ushort _action, byte[] _data, bool _requestComplete)
         {
-            if (m_IsServer)
-                return;
-
-            var timeNow = DateTime.UtcNow.Ticks;
-
-
-            try
-            {
-                m_ServerInfo.ip = _remoteEndPoint.Address.ToString();
-                m_ServerInfo.lastPing = timeNow;
-                m_ServerInfo.remoteEndPoint = _remoteEndPoint;
-
-                if (!m_IsConnected)
-                {
-                    m_OnServerConnected?.Invoke(m_ServerInfo);
-                }
-
-                m_IsConnected = true;
-
-
-
-            }
-            catch (Exception ex)
-            {
-                throw ex;
-            }
-
-        }
-        private async UniTask SendPacket(int messageId, PacketType _packetType, ushort _action, byte[] _data, CancellationToken _token)
-        {
-            if (udpClient == null)
-                return;
-
             if (_data == null)
                 _data = new byte[1]{
                 0x00
             };
 
+            List<byte[]> result;
+
             try
             {
+
+                result = new List<byte[]>();
 
                 var payloadSize = MAX_CHUNK_SIZE - PACKET_HEADER_SIZE;
                 int totalChunks = (int)Math.Ceiling((double)_data.Length / payloadSize);
@@ -549,47 +711,162 @@ namespace Modules.Utilities
 
                     int offset = i * payloadSize;
                     int size = Math.Min(payloadSize, _data.Length - offset);
-
-                    byte[] packet = new byte[PACKET_HEADER_SIZE + size];
+                    var packet = new byte[PACKET_HEADER_SIZE + _data.Length];
                     //header
                     Buffer.BlockCopy(BitConverter.GetBytes(messageId), 0, packet, 0, 4);
                     Buffer.BlockCopy(BitConverter.GetBytes((ushort)totalChunks), 0, packet, 4, 2);
                     Buffer.BlockCopy(BitConverter.GetBytes((ushort)i), 0, packet, 6, 2);
                     Buffer.BlockCopy(BitConverter.GetBytes((ushort)_packetType), 0, packet, 8, 2);
-                    Buffer.BlockCopy(BitConverter.GetBytes(_action), 0, packet, 10, 2);
+                    Buffer.BlockCopy(BitConverter.GetBytes((ushort)_dataType), 0, packet, 10, 2);
+                    Buffer.BlockCopy(BitConverter.GetBytes(_action), 0, packet, 12, 2);
+                    Buffer.BlockCopy(BitConverter.GetBytes(_requestComplete), 0, packet, 14, 1);
+                    Buffer.BlockCopy(BitConverter.GetBytes(m_Id), 0, packet, 15, 4);
+
 
 
                     //payload
-                    Buffer.BlockCopy(_data, offset, packet, 12, size);
-                    //send packet
-                    if (m_IsServer)
-                    {
-                        //send to all clients
-                        for (int j = 0; j < m_ClientInfoList.Count; j++)
-                        {
-                            var client = m_ClientInfoList[j];
-                            if (client.remoteEndPoint == null)
-                                continue;
-                            var endPoint = client.remoteEndPoint;
-                            await udpClient.SendAsync(packet, packet.Length, endPoint).AsUniTask(false).AttachExternalCancellation(_token);
-                        }
+                    Buffer.BlockCopy(_data, offset, packet, PACKET_HEADER_SIZE, size);
 
-                    }
-                    else
-                    {
-                        //send to server
-                        await udpClient.SendAsync(packet, packet.Length).AsUniTask(false).AttachExternalCancellation(_token);
-                    }
+                    result.Add(packet);
 
 
                 }
             }
 
-
-            catch (Exception ex) when (ex is not OperationCanceledException)
+            catch (Exception ex)
             {
                 throw ex;
             }
+            return result;
+        }
+        public async UniTask SendPing(CancellationToken _token)
+        {
+            var packetId = GetRandomId();
+            var action = 0;
+            var packetType = PacketType.PING;
+            var dataType = DataType.NONE;
+
+            var data =  new byte[1]{
+                0x00
+            };
+
+            var requests = CreatePackets(packetId, packetType, dataType, (ushort)action, data, false);
+            if (requests == null)
+                return;
+            try
+            {
+                var packet = requests[0];
+                if (m_IsServer)
+                {
+                    //send to all clients
+                    for (int j = 0; j < m_ClientInfoList.Count; j++)
+                    {
+                        var client = m_ClientInfoList[j];
+                        if (client.remoteEndPoint == null)
+                            continue;
+                        var endPoint = client.remoteEndPoint;
+                        await udpClient.SendAsync(packet, packet.Length, endPoint).AsUniTask(false).AttachExternalCancellation(_token);
+                    }
+
+                }
+                else
+                {
+                    //send to server
+                    await udpClient.SendAsync(packet, packet.Length).AsUniTask(false).AttachExternalCancellation(_token);
+                }
+            }
+            catch (Exception ex)
+            {
+                throw ex;
+
+
+            }
+        }
+
+        private void SendDataConfirm(PacketConfirm _confirmData, CancellationToken _token = default)
+        {
+            var packetId = GetRandomId();
+            var action = 0;
+            var packetType = PacketType.SEND_DATA_CONFIRM;
+            var dataType = DataType.NONE;
+            try
+            {
+                var confirmData = UnityConverter.ToBytes(_confirmData);
+                AddPacketToQueue(packetId, packetType, dataType, (ushort)action, confirmData, false);
+
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Error converting confirm data: {ex.Message}");
+            }
+
+
+
+
+        }
+        private void AddPacketToQueue(int messageId, PacketType _packetType, DataType _dataType, ushort _action, byte[] _data, bool _requestConfirm)
+        {
+
+            var packets = CreatePackets(messageId, _packetType, _dataType, _action, _data, _requestConfirm);
+            if (packets == null)
+                return;
+
+            for (int i = 0; i < packets.Count; i++)
+            {
+                var packet = packets[i];
+                if (m_IsServer)
+                {
+                    //send to all clients
+                    for (int j = 0; j < m_ClientInfoList.Count; j++)
+                    {
+                        var client = m_ClientInfoList[j];
+                        if (client.remoteEndPoint == null)
+                            continue;
+                        var endPoint = client.remoteEndPoint;
+                        var request = new PacketRequest()
+                        {
+                            packetId = messageId,
+                            senderId = m_Id,
+                            packetType = _packetType,
+                            dataType = _dataType,
+                            action = _action,
+                            index = i,
+                            sendPacketStatus = SendPacketStatus.NONE,
+                            packetData = packet,
+                            remoteEndPoint = endPoint,
+                            requestConfirm = _requestConfirm,
+                            createdAt = DateTime.UtcNow.Ticks
+                        };
+                        //add request each client
+                        packetSendQueue.Add(request);
+                    }
+
+                }
+                else
+                {
+
+                    if (!m_IsConnected) break;
+
+                    var request = new PacketRequest()
+                    {
+                        packetId = messageId,
+                        senderId = m_Id,
+                        packetType = _packetType,
+                        dataType = _dataType,
+                        action = _action,
+                        index = i,
+                        sendPacketStatus = SendPacketStatus.NONE,
+                        packetData = packet,
+                        remoteEndPoint = m_ServerInfo.remoteEndPoint,
+                        requestConfirm = _requestConfirm,
+                        createdAt = DateTime.UtcNow.Ticks
+
+                    };
+                    //add request to server
+                    packetSendQueue.Add(request);
+                }
+            }
+
 
 
         }
@@ -605,8 +882,12 @@ namespace Modules.Utilities
             int packetId = BitConverter.ToInt32(data, 0);
             ushort totalChunks = BitConverter.ToUInt16(data, 4);
             ushort chunkIndex = BitConverter.ToUInt16(data, 6);
-            var type = BitConverter.ToUInt16(data, 8);
-            var action = BitConverter.ToUInt16(data, 10);
+            var packetType = BitConverter.ToUInt16(data, 8);
+            var dataType = BitConverter.ToUInt16(data, 10);
+            var action = BitConverter.ToUInt16(data, 12);
+            var requestConfirm = BitConverter.ToBoolean(data, 14);
+            //senderId
+            var senderId = BitConverter.ToInt32(data, 15);
 
             //payload
             var payload = new byte[data.Length - PACKET_HEADER_SIZE];
@@ -636,22 +917,34 @@ namespace Modules.Utilities
                 return new PacketResponse()
                 {
                     packetId = packetId,
-                    packetType = (PacketType)type,
+                    senderId = senderId,
+                    packetType = (PacketType)packetType,
+                    dataType = (DataType)dataType,
                     action = action,
+                    index = chunkIndex,
                     isCompleted = true,
                     data = completePacket,
-                    remoteEndPoint = _result.RemoteEndPoint
+                    remoteEndPoint = _result.RemoteEndPoint,
+                    requestConfirm = requestConfirm,
+                    createdAt = DateTime.UtcNow.Ticks
+
                 };
             }
 
             return new PacketResponse()
             {
                 packetId = packetId,
-                packetType = (PacketType)type,
+                senderId = senderId,
+                packetType = (PacketType)packetType,
+                dataType = (DataType)dataType,
                 action = action,
                 isCompleted = false,
+                index = chunkIndex,
                 data = null,
-                remoteEndPoint = _result.RemoteEndPoint
+                remoteEndPoint = _result.RemoteEndPoint,
+                requestConfirm = requestConfirm,
+                createdAt = DateTime.UtcNow.Ticks
+
             };
 
 
@@ -664,7 +957,7 @@ namespace Modules.Utilities
 
 
 
-        public async UniTask SendDataAsync(ushort _action, PacketType _packetType, byte[] _data, CancellationToken _token)
+        public async UniTask SendDataAsync(ushort _action, DataType _dataType, byte[] _data, bool _requestComplete = false, CancellationToken _token = default)
         {
             if (udpClient == null || !m_IsRunning)
                 return;
@@ -681,9 +974,26 @@ namespace Modules.Utilities
             try
             {
 
-                var messageId = GetRandomPacketId();
-                //send data
-                await SendPacket(messageId, _packetType, _action, _data, _token);
+                var messageId = GetRandomId();
+                AddPacketToQueue(messageId, PacketType.SEND_DATA, _dataType, _action, _data, _requestComplete);
+
+                //find request in queue
+                var requests = packetSendQueue.FindAll(x => x.packetId == messageId);
+
+                //wait for all requests to be isCompleted is true or requests elements is null
+                while (!_token.IsCancellationRequested)
+                {
+                    requests = packetSendQueue.FindAll(x => x.packetId == messageId);
+                    if (requests == null || requests.Count == 0)
+                        break;
+
+                    // var allCompleted = requests.All(x => x.sendPacketStatus == SendPacketStatus.SEND_COMPLETE);
+                    // if (allCompleted) break;
+
+                    await UniTask.Yield(_token);
+                }
+
+
 
             }
 
@@ -753,6 +1063,8 @@ namespace Modules.Utilities
             // base.OnInspectorGUI();
             var udpConnector = (UDPConnector)target;
             serializedObject.Update();
+            var id = serializedObject.FindProperty("m_Id");
+
             var isRunning = serializedObject.FindProperty("m_IsRunning");
             var isConnected = serializedObject.FindProperty("m_IsConnected");
             var isServer = serializedObject.FindProperty("m_IsServer");
@@ -810,7 +1122,7 @@ namespace Modules.Utilities
             EditorGUILayout.EndVertical();
 
             GUI.backgroundColor = Color.white;
-
+            EditorGUILayout.LabelField("Id", id.intValue.ToString());
             DrawProperty(host, !isServer.boolValue);
             DrawProperty(port);
             DrawProperty(isRunning, isReadOnly: true);
@@ -876,7 +1188,7 @@ namespace Modules.Utilities
                         if (GUILayout.Button("Connect"))
                         {
                             m_IpAddress = isServer.boolValue ? NetworkUtility.GetLocalIPv4() : host.stringValue;
-                            udpConnector.Connect(isServer.boolValue).Forget();
+                            udpConnector.Connect(host.stringValue, port.intValue, isServer.boolValue).Forget();
 
                         }
                     }

@@ -1,5 +1,7 @@
 using System;
+using System.IO;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization;
 using System.Text;
 using UnityEngine;
 
@@ -183,57 +185,51 @@ namespace Modules.Utilities
 
 
         public static byte[] ToBytes<T>(T obj)
-        {
-            int size = Marshal.SizeOf(obj);
-            byte[] arr = new byte[size];
-            IntPtr ptr = Marshal.AllocHGlobal(size);
-            try
-            {
-                try
-                {
-
-
-                    Marshal.StructureToPtr(obj, ptr, true);
-                    Marshal.Copy(ptr, arr, 0, size);
-
-
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"Error converting struct to byte array: {ex.Message}");
-                    throw;
-                }
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(ptr);
-            }
-            return arr;
-        }
-
-
-        public static T FromBytes<T>(byte[] arr)
+    {
+        if (typeof(T).IsValueType)
         {
             int size = Marshal.SizeOf(typeof(T));
+            byte[] arr = new byte[size];
             IntPtr ptr = Marshal.AllocHGlobal(size);
-            try
+            Marshal.StructureToPtr(obj, ptr, true);
+            Marshal.Copy(ptr, arr, 0, size);
+            Marshal.FreeHGlobal(ptr);
+            return arr;
+        }
+        else
+        {
+            using (MemoryStream ms = new MemoryStream())
             {
-                try
-                {
-                    Marshal.Copy(arr, 0, ptr, size);
-                    return (T)Marshal.PtrToStructure(ptr, typeof(T));
-                }
-                catch (Exception ex)
-                {
-                    Debug.LogError($"Error converting byte array to struct: {ex.Message}");
-                    throw;
-                }
-            }
-            finally
-            {
-                Marshal.FreeHGlobal(ptr);
+                var serializer = new DataContractSerializer(typeof(T));
+                serializer.WriteObject(ms, obj);
+                return ms.ToArray();
             }
         }
+    }
+
+    public static T FromBytes<T>(byte[] data)
+    {
+        if (typeof(T).IsValueType)
+        {
+            int size = Marshal.SizeOf(typeof(T));
+            if (data.Length != size)
+                throw new ArgumentException("Byte array size does not match type size");
+
+            IntPtr ptr = Marshal.AllocHGlobal(size);
+            Marshal.Copy(data, 0, ptr, size);
+            T obj = Marshal.PtrToStructure<T>(ptr);
+            Marshal.FreeHGlobal(ptr);
+            return obj;
+        }
+        else
+        {
+            using (MemoryStream ms = new MemoryStream(data))
+            {
+                var serializer = new DataContractSerializer(typeof(T));
+                return (T)serializer.ReadObject(ms);
+            }
+        }
+    }
 
 
 
