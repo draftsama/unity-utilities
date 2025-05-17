@@ -34,19 +34,37 @@ namespace Modules.Utilities
             Center
         }
 
+        CancellationTokenSource _cts = new CancellationTokenSource();
+
         void Start()
         {
             SetProgress(m_StartProgress);
         }
-
-
-
-        public IUniTaskAsyncEnumerable<AsyncUnit> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad)
+        private void OnDestroy()
         {
-            return UniTaskAsyncEnumerable.Create<AsyncUnit>(async (writer, token) =>
+            _cts.Cancel();
+            _cts.Dispose();
+        }
+
+
+
+        public IUniTaskAsyncEnumerable<float> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad, CancellationToken _token = default)
+        {
+            _cts?.Cancel();
+            _cts = new CancellationTokenSource();
+            var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token, _token);
+
+            var asyncEnumerable = LerpThread.FloatLerpAsyncEnumerable(_millisecond, Progress, _progress, _ease, _token: linkedCts.Token);
+            asyncEnumerable.ForEachAsync(_ =>
             {
-                await LerpThread.FloatLerpAsyncEnumerable(_millisecond, Progress, _progress, _ease).ForEachAsync(SetProgress);
-            });
+                SetProgress(_);
+            }, linkedCts.Token).Forget();
+            return asyncEnumerable;
+
+        }
+        public void StopLerp()
+        {
+            _cts?.Cancel();
         }
 
 
