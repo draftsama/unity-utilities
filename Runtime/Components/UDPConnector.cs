@@ -757,7 +757,7 @@ namespace Modules.Utilities
         private async UniTaskVoid InvokeOnClientDisconnected(ConnectorInfo _clientInfo)
         {
             await UniTask.SwitchToMainThread();
-            m_OnServerDisconnected?.Invoke(_clientInfo);
+            m_OnClientDisconnected?.Invoke(_clientInfo);
         }
 
 

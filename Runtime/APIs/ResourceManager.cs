@@ -8,8 +8,9 @@ using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Networking;
 
-
+#if PACKAGE_ADDRESSABLES_INSTALLED
 using UnityEngine.AddressableAssets;
+#endif
 
 namespace Modules.Utilities
 {
@@ -239,6 +240,7 @@ namespace Modules.Utilities
                         return response;
                     }
                 }
+                #if PACKAGE_ADDRESSABLES_INSTALLED
                 else if (instance.m_ResourceSettingAssets.m_ResourceStoreType == ResourceStoreType.Addressable)
                 {
                     switch (resourceType)
@@ -247,7 +249,7 @@ namespace Modules.Utilities
                             var texture = await Addressables.LoadAssetAsync<Texture2D>(_name).Task;
                             if (texture != null)
                             {
-                              var   response = new ResourceResponse
+                                var response = new ResourceResponse
                                 {
                                     m_Name = _name,
                                     m_Texture = texture,
@@ -262,7 +264,7 @@ namespace Modules.Utilities
                             var audio = await Addressables.LoadAssetAsync<AudioClip>(_name).Task;
                             if (audio != null)
                             {
-                               var response = new ResourceResponse
+                                var response = new ResourceResponse
                                 {
                                     m_Name = _name,
                                     m_AudioClip = audio,
@@ -277,6 +279,7 @@ namespace Modules.Utilities
 
 
                 }
+                #endif
             }
             catch (Exception e)
             {
