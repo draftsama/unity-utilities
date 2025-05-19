@@ -48,7 +48,7 @@ namespace Modules.Utilities
 
 
 
-        public IUniTaskAsyncEnumerable<float> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.EaseOutQuad, CancellationToken _token = default)
+        public IUniTaskAsyncEnumerable<float> LerpProgressAsyncEnumerable(int _millisecond, float _progress, Easing.Ease _ease = Easing.Ease.Linear, CancellationToken _token = default)
         {
             _cts?.Cancel();
             _cts = new CancellationTokenSource();

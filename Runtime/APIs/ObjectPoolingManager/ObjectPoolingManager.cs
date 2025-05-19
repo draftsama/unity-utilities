@@ -29,6 +29,7 @@ public class ObjectPoolingManager : MonoBehaviour
 
     private void Awake()
     {
+        m_PoolingObjectList.Clear();
     }
 
     public List<PoolingObject> m_PoolingObjectList = new List<PoolingObject>();

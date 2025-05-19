@@ -13,3 +13,8 @@
 ## [1.0.3] - 2025-04-25
 ### Fixed
 - Fixed a bug in VideoController that fade in was not working correctly.
+
+## [1.0.4] - 2025-04-30
+### Added
+- Added check and require install dependencies package.
+
