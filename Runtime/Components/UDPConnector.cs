@@ -23,7 +23,6 @@ namespace Modules.Utilities
         #region private variables
 
         [SerializeField] private int m_Id = -1;
-        [SerializeField] private string m_IpAddress = "";
 
         [SerializeField] private string m_Host = "";
         [SerializeField] private int m_Port = 5555;
@@ -1108,12 +1107,11 @@ namespace Modules.Utilities
     public class UDPConnectorEditor : UnityEditor.Editor
     {
 
-        private SerializedProperty m_IpAddress;
+        private string m_IpAddress;
 
         private void OnEnable()
         {
-            m_IpAddress = serializedObject.FindProperty("m_IpAddress");
-            m_IpAddress.stringValue = NetworkUtility.GetLocalIPv4();
+            m_IpAddress = NetworkUtility.GetLocalIPv4();
 
             serializedObject.ApplyModifiedProperties();
         }
@@ -1259,7 +1257,7 @@ namespace Modules.Utilities
                 {
 
                     GUI.color = Color.green;
-                    EditorGUILayout.LabelField($"Running on Ip:{m_IpAddress.stringValue} - Port:{port.intValue}", EditorStyles.boldLabel);
+                    EditorGUILayout.LabelField($"Running on Ip:{m_IpAddress} - Port:{port.intValue}", EditorStyles.boldLabel);
 
 
                     GUI.color = Color.red;

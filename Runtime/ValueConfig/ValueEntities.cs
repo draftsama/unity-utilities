@@ -13,125 +13,241 @@ namespace Modules.Utilities
 
 
     [System.Serializable]
-    public class Value
+    public class Variable
     {
         [SerializeField] public string key;
-        [SerializeField] public ValueType valueType;
+        [SerializeField] public Type type;
         [SerializeField] public string stringValue;
         [SerializeField] public int intValue;
         [SerializeField] public float floatValue;
         [SerializeField] public bool boolValue;
         [SerializeField] public Vector2 vector2Value;
         [SerializeField] public Vector3 vector3Value;
-
-        public enum ValueType
+        public enum Type
         {
-            StringType = 0, IntType = 1, FloatType = 2, BooleanType = 3, Vector2Type = 4, Vector3Type = 5
+            String = 0, Int = 1, Float = 2, Boolean = 3, Vector2 = 4, Vector3 = 5
         }
 
 
-        public static ValueType GetValueType<T>(T _value)
-        {   
+        public static Type GetType<T>(T _value)
+        {
             if (_value is string)
             {
-                return ValueType.StringType;
+                return Type.String;
             }
             else if (_value is int)
             {
-                return ValueType.IntType;
+                return Type.Int;
             }
             else if (_value is float)
             {
-                return ValueType.FloatType;
+                return Type.Float;
             }
             else if (_value is bool)
             {
-                return ValueType.BooleanType;
+                return Type.Boolean;
             }
             else if (_value is Vector2)
             {
-                return ValueType.Vector2Type;
+                return Type.Vector2;
             }
             else if (_value is Vector3)
             {
-                return ValueType.Vector3Type;
+                return Type.Vector3;
             }
             else
             {
                 throw new System.Exception("Unsupported type");
             }
         }
+
+        public void Set(object value)
+        {
+            if (value is string)
+            {
+                this.type = Type.String;
+                this.stringValue = value as string;
+            }
+            else if (value is int)
+            {
+                this.type = Type.Int;
+                this.intValue = (int)(object)value;
+            }
+            else if (value is float)
+            {
+                this.type = Type.Float;
+                this.floatValue = (float)(object)value;
+            }
+            else if (value is bool)
+            {
+                this.type = Type.Boolean;
+                this.boolValue = (bool)(object)value;
+            }
+            else if (value is Vector2)
+            {
+                this.type = Type.Vector2;
+                this.vector2Value = (Vector2)(object)value;
+            }
+            else if (value is Vector3)
+            {
+                this.type = Type.Vector3;
+                this.vector3Value = (Vector3)(object)value;
+            }
+        }
+        public T Get<T>()
+        {
+            object value = type switch
+            {
+                Type.String => stringValue,
+                Type.Int => intValue,
+                Type.Float => floatValue,
+                Type.Boolean => boolValue,
+                Type.Vector2 => vector2Value,
+                Type.Vector3 => vector3Value,
+                _ => throw new Exception("Unsupported type"),
+            };
+
+            if (value is T tValue)
+            {
+                return tValue;
+            }
+            else
+            {
+                throw new InvalidCastException($"Cannot cast value of type {value.GetType()} to {typeof(T)}");
+            }
+        }
+
+        
     }
 
     [System.Serializable]
-    public class ValueCollection 
+    public class VariableCollection
     {
-        [SerializeField] private List<Value> m_Items = new List<Value>();
-        public Value this[string key]
+        [SerializeField] private List<Variable> m_Items = new List<Variable>();
+        public Variable this[string key]
         {
             get
             {
                 return this.m_Items.FirstOrDefault(x => x.key == key);
             }
         }
-        public List<Value> Items
+        public List<Variable> Items
         {
             get
             {
                 return this.m_Items;
             }
         }
-        public void Add(Value value)
+
+        public int Count
         {
+            get
+            {
+                return this.m_Items.Count;
+            }
+        }
+
+        public void AddVariable(Variable value)
+        {
+            var existingValue = this.m_Items.Find(x => x.key == value.key);
+            if (existingValue != null)
+            {
+                this.m_Items.Remove(existingValue);
+            }
             this.m_Items.Add(value);
         }
 
-        public void AddValue<T>(string key, T value)
-        {
-            var v = new Value();
-            v.key = key;
+        public T GetValue<T>(string key, T defaultValue = default(T))
 
-            if (value is string)
+        {
+            var valueItem = this.m_Items.Find(x => x.key == key);
+            if (valueItem != null)
             {
-                v.valueType = Value.ValueType.StringType;
-                v.stringValue = value as string;
-            }
-            else if (value is int)
-            {
-                v.valueType = Value.ValueType.IntType;
-                v.intValue = (int)(object)value;
-            }
-            else if (value is float)
-            {
-                v.valueType = Value.ValueType.FloatType;
-                v.floatValue = (float)(object)value;
-            }
-            else if (value is bool)
-            {
-                v.valueType = Value.ValueType.BooleanType;
-                v.boolValue = (bool)(object)value;
-            }
-            else if (value is Vector2)
-            {
-                v.valueType = Value.ValueType.Vector2Type;
-                v.vector2Value = (Vector2)(object)value;
-            }
-            else if (value is Vector3)
-            {
-                v.valueType = Value.ValueType.Vector3Type;
-                v.vector3Value = (Vector3)(object)value;
+                return valueItem.Get<T>();
+
             }
             else
             {
-                throw new System.Exception("Unsupported type");
+                return defaultValue;
             }
+        }
 
-            this.m_Items.Add(v);
+        public bool TryGetValue<T>(string key, out T value)
+        {
+            value = GetValue<T>(key);
+            return !EqualityComparer<T>.Default.Equals(value, default(T));
+        }
 
+        public bool SetValue<T>(string key, T value)
+        {
+            try
+            {
+                var valueItem = this.m_Items.Find(x => x.key == key);
+
+                if (valueItem == null)
+                {
+                    // Create a new Value item if it doesn't exist
+                    valueItem = new Variable();
+                    valueItem.key = key;
+                    this.m_Items.Add(valueItem);
+                }
+                // Set the value based on its type
+                valueItem.Set(value);
+
+                return true;
+
+
+
+            }
+            catch (Exception e)
+            {
+                Debug.LogError(e);
+                return false;
+            }
+        }
+
+        public bool Remove(string key)
+        {
+            var item = this.m_Items.FirstOrDefault(x => x.key == key);
+            if (item != null)
+            {
+                this.m_Items.Remove(item);
+                return true;
+            }
+            return false;
+        }
+        public void Clear()
+        {
+            this.m_Items.Clear();
+        }
+        public bool ContainsKey(string key)
+        {
+            return this.m_Items.Any(x => x.key == key);
+        }
+
+        public VariableCollection CloneCollection()
+        {
+            VariableCollection clone = new VariableCollection();
+            foreach (var item in this.m_Items)
+            {
+                Variable newItem = new Variable();
+                newItem.key = item.key;
+                newItem.type = item.type;
+                newItem.stringValue = item.stringValue;
+                newItem.intValue = item.intValue;
+                newItem.floatValue = item.floatValue;
+                newItem.boolValue = item.boolValue;
+                newItem.vector2Value = item.vector2Value;
+                newItem.vector3Value = item.vector3Value;
+
+                clone.m_Items.Add(newItem);
+            }
+            return clone;
         }
 
 
     }
+
 
 
 
@@ -152,7 +268,7 @@ namespace Modules.Utilities
 
 
 
-    [CustomPropertyDrawer(typeof(Value))]
+    [CustomPropertyDrawer(typeof(Variable))]
     public class ValuePropertyDrawer : PropertyDrawer
     {
         float height = 92;
@@ -178,28 +294,28 @@ namespace Modules.Utilities
 
                 PropertyField("Key", "key", property, ref currentRect);
 
-                var valueTypeProperty = PropertyField("Value Type", "valueType", property, ref currentRect);
+                var valueTypeProperty = PropertyField("Value Type", "type", property, ref currentRect);
 
 
-                switch ((Value.ValueType)valueTypeProperty.enumValueIndex)
+                switch ((Variable.Type)valueTypeProperty.enumValueIndex)
                 {
-                    case Value.ValueType.StringType:
+                    case Variable.Type.String:
 
                         PropertyField("String Value", "stringValue", property, ref currentRect);
                         break;
-                    case Value.ValueType.IntType:
+                    case Variable.Type.Int:
                         PropertyField("Int Value", "intValue", property, ref currentRect);
                         break;
-                    case Value.ValueType.FloatType:
+                    case Variable.Type.Float:
                         PropertyField("Float Value", "floatValue", property, ref currentRect);
                         break;
-                    case Value.ValueType.BooleanType:
+                    case Variable.Type.Boolean:
                         PropertyField("Bool Value", "boolValue", property, ref currentRect);
                         break;
-                    case Value.ValueType.Vector2Type:
+                    case Variable.Type.Vector2:
                         PropertyField("Vector2 Value", "vector2Value", property, ref currentRect);
                         break;
-                    case Value.ValueType.Vector3Type:
+                    case Variable.Type.Vector3:
                         PropertyField("Vector3 Value", "vector3Value", property, ref currentRect);
                         break;
                 }
