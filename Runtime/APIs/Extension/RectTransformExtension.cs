@@ -8,7 +8,7 @@ namespace Modules.Utilities
 {
     public static class RectTransformExtension
     {
-       
+
 
         static Vector2 RandomPosition(float _radius)
         {
@@ -122,7 +122,7 @@ namespace Modules.Utilities
         }
 
         public static UniTask LerpRotationZAsync(this RectTransform _rectTransform, int _milliseconds, float _target,
-            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false,
+            Easing.Ease _ease = Easing.Ease.EaseInOutQuad, bool _ignoreTimeScale = false, bool _useLocal = false,
             CancellationToken _token = default)
         {
             var token = _token;
@@ -134,7 +134,9 @@ namespace Modules.Utilities
                 try
                 {
                     var progress = 0f;
-                    var currentRotation = _rectTransform.rotation;
+                    var currentRotation = _useLocal
+                        ? _rectTransform.localRotation
+                        : _rectTransform.rotation;
                     var rotationTarget = Quaternion.Euler(0, 0, _target);
                     float seconds = _milliseconds * GlobalConstant.MILLISECONDS_TO_SECONDS;
                     Quaternion valueTarget;
@@ -153,12 +155,19 @@ namespace Modules.Utilities
                                 EasingFormula.EasingFloat(_ease, currentRotation.z, rotationTarget.z, progress);
                             valueTarget.w =
                                 EasingFormula.EasingFloat(_ease, currentRotation.w, rotationTarget.w, progress);
-                            _rectTransform.rotation = valueTarget;
+
+                            if (_useLocal)
+                                _rectTransform.localRotation = valueTarget;
+                            else
+                                _rectTransform.rotation = valueTarget;
                         }
                         else
                         {
                             valueTarget = rotationTarget;
-                            _rectTransform.rotation = valueTarget;
+                            if (_useLocal)
+                                _rectTransform.localRotation = valueTarget;
+                            else
+                                _rectTransform.rotation = valueTarget;
 
                             uts.TrySetResult();
                             break;
