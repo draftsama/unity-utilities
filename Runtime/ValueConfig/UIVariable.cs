@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using Modules.Utilities;
 using TMPro;
-using Unity.VisualScripting.YamlDotNet.Core.Tokens;
 using UnityEngine;
 
 public class UIVariable : MonoBehaviour
