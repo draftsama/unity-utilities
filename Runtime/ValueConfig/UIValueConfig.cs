@@ -8,11 +8,13 @@ using TMPro;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using UnityEngine.Events;
+
 
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
-public class UIValueConfig : MonoBehaviour
+public class UIValueConfig : Singleton<UIValueConfig>
 {
 
     [SerializeField][HideInInspector] private UIVariable.Data[] m_Data;
@@ -22,7 +24,7 @@ public class UIValueConfig : MonoBehaviour
 
     [SerializeField] public KeyCode m_OpenKey = KeyCode.C;
 
-    [SerializeField] private string m_Password = "1234";
+    [SerializeField] private string m_Password = "112233";
 
     [SerializeField] private CanvasGroup m_ProtectedCanvasGroup;
     [SerializeField] private TMP_InputField m_PasswordInputField;
@@ -36,10 +38,16 @@ public class UIValueConfig : MonoBehaviour
 
     bool m_IsOpen = false;
 
+    private int tapCount = 0;
+    private float lastTap = -1;
+
+    
+    public UnityEvent OnSaved = new UnityEvent();
 
 
-    private void Awake()
+    protected override void Awake()
     {
+        base.Awake();
         m_ContentCanvasGroup.SetAlpha(0f);
     }
     void Start()
@@ -57,6 +65,32 @@ public class UIValueConfig : MonoBehaviour
                 m_ProtectedCanvasGroup.SetAlpha(string.IsNullOrEmpty(m_Password) ? 0f : 1f);
                 m_ContentCanvasGroup.LerpAlphaAsync(300, 1f, _token: token).Forget();
             }
+            if (!m_IsOpen && Input.GetMouseButtonDown(0))
+            {
+                Vector3 pos = Input.mousePosition;
+                if (pos.x < 200 && pos.y < 200)
+                {
+                    if (Time.time - lastTap < 0.3f)
+                    {
+                        tapCount++;
+                    }
+                    else
+                    {
+                        tapCount = 1;
+                    }
+                    lastTap = Time.time;
+
+                    if (tapCount == 6)
+                    {
+                        m_IsOpen = true;
+                        m_PasswordInputField.text = string.Empty;
+
+                        m_ProtectedCanvasGroup.SetAlpha(string.IsNullOrEmpty(m_Password) ? 0f : 1f);
+                        m_ContentCanvasGroup.LerpAlphaAsync(300, 1f, _token: token).Forget();
+                        tapCount = 0;
+                    }
+                }
+            }
         }, token);
 
         m_SaveButton.OnClickAsAsyncEnumerable().ForEachAsync(_ =>
@@ -69,6 +103,7 @@ public class UIValueConfig : MonoBehaviour
 
             m_ContentCanvasGroup.LerpAlphaAsync(300, 0f, _token: token).ContinueWith(() =>
             {
+                OnSaved?.Invoke();
                 m_IsOpen = false;
             }).Forget();
         }, token);
@@ -156,9 +191,6 @@ public class UIValueConfigEditor : Editor
 {
     protected int _InputNameID;
     protected Variable[] _Results;
-
-
-
     string _SearchInput;
 
     SerializedProperty m_DataProperty;
