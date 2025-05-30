@@ -3,7 +3,7 @@ namespace Modules.Utilities
 {
     public enum PathType
     {
-        StreamAssets,
+        StreamingAssets,
         Relative,
         Absolute
     }

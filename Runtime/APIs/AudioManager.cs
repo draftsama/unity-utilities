@@ -199,7 +199,7 @@ namespace Modules.Utilities
             //  }).AddTo(GetInstance());
         }
 
-        public static async UniTask PlayFX(string _name, float _volume = 1f, CancellationToken _token = default)
+        public static async UniTask PlayFX(string _name, float _volume = 1f, bool _loop = false,CancellationToken _token = default)
         {
             var instance = GetInstance();
             if (_token == default) _token = instance.GetCancellationTokenOnDestroy();
@@ -233,6 +233,7 @@ namespace Modules.Utilities
                 audioPlayer = instance.GetAudioSource();
                 audioPlayer.volume = _volume;
                 audioPlayer.clip = clip;
+                audioPlayer.loop = _loop;
                 audioPlayer.Play();
 
                 await UniTask.WaitUntil(() => audioPlayer.isPlaying == false, cancellationToken: _token);

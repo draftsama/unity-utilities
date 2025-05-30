@@ -40,7 +40,7 @@ namespace Modules.Utilities
         private static void LoadValueConfig()
         {
             _Collection = new VariableCollection();
-            var path = Path.Combine(Environment.CurrentDirectory, "value.config.json");
+            var path = Path.Combine(Application.persistentDataPath, "value.config.json");
 
             if (File.Exists(path))
             {
@@ -153,7 +153,7 @@ namespace Modules.Utilities
                 }
             }
 
-            var path = Path.Combine(Environment.CurrentDirectory, "value.config.json");
+            var path = Path.Combine(Application.persistentDataPath, "value.config.json");
             File.WriteAllText(path, jsonObject.ToString(true));
         }
 

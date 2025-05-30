@@ -236,7 +236,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 0.5660378, g: 0.24296905, b: 0.24296905, a: 1}
+  m_Color: {r: 1, g: 1, b: 1, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -5191,6 +5191,9 @@ MonoBehaviour:
   m_SaveButton: {fileID: 3301508780659578696}
   m_ContainerRt: {fileID: 6658581238861388245}
   m_ValuePrefab: {fileID: 7510181473341734140}
+  OnSaved:
+    m_PersistentCalls:
+      m_Calls: []
 --- !u!1 &9014003866247852355
 GameObject:
   m_ObjectHideFlags: 0

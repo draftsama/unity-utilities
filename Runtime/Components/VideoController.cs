@@ -197,12 +197,12 @@ namespace Modules.Utilities
 
             var filePath = string.Empty;
 
-            if (m_PathType == PathType.StreamAssets)
+            if (m_PathType == PathType.StreamingAssets)
             {
                 if (string.IsNullOrEmpty(m_FolderName))
-                    filePath = Path.Combine(Application.streamingAssetsPath, m_FileName);
+                    filePath = Path.Combine("file://",Application.streamingAssetsPath, m_FileName);
                 else
-                    filePath = Path.Combine(Application.streamingAssetsPath, m_FolderName, m_FileName);
+                    filePath = Path.Combine("file://",Application.streamingAssetsPath, m_FolderName, m_FileName);
             }
             else if (m_PathType == PathType.Relative)
             {
