@@ -9,6 +9,48 @@ namespace Modules.Utilities
     public static class RectTransformExtension
     {
 
+        public static async UniTask ShakeAsync(this RectTransform _rectTransform, float _duration = -1, float interval = 0.1f, float _strength = 20f,
+            CancellationToken _token = default)
+        {
+            var token = _token;
+            if (token == default) token = _rectTransform.GetCancellationTokenOnDestroy();
+
+            if (_duration < 0)
+            {
+                _duration = float.MaxValue;
+            }
+
+            var uts = new UniTaskCompletionSource();
+
+            try
+            {
+                var startTime = Time.time;
+                var originalPosition = _rectTransform.anchoredPosition;
+                while (!token.IsCancellationRequested && (Time.time - startTime) < _duration)
+                {
+                    var randomVector2 = UnityEngine.Random.insideUnitCircle * _strength; // Ensure the random seed is different each time
+                    _rectTransform.anchoredPosition = originalPosition + randomVector2;
+                    await UniTask.Delay(TimeSpan.FromSeconds(interval), cancellationToken: token);
+                }
+
+                _rectTransform.anchoredPosition = originalPosition;
+                uts.TrySetResult();
+            }
+            catch (OperationCanceledException) when (_token.IsCancellationRequested)
+            {
+                uts.TrySetCanceled();
+            }
+            catch (System.Exception e)
+            {
+                uts.TrySetException(e);
+            }finally
+            {
+                _rectTransform.anchoredPosition = _rectTransform.anchoredPosition; // Ensure the position is set back to the original
+            }
+
+            await uts.Task;
+
+        }
 
         static Vector2 RandomPosition(float _radius)
         {
@@ -16,6 +58,8 @@ namespace Modules.Utilities
             float randomRadius = UnityEngine.Random.Range(0, _radius);
             return Quaternion.Euler(0, 0, angle) * new Vector3(0, randomRadius, 0);
         }
+
+
 
         public static IUniTaskAsyncEnumerable<AsyncUnit> FloatingAnimationAsyncEnumerable(
             this RectTransform _rectTransform, float _speed, float _radius,

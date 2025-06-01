@@ -3399,7 +3399,7 @@ RectTransform:
   m_AnchorMin: {x: 0, y: 0.5}
   m_AnchorMax: {x: 0, y: 0.5}
   m_AnchoredPosition: {x: 0, y: 0}
-  m_SizeDelta: {x: 528.9761, y: 107.3445}
+  m_SizeDelta: {x: 870, y: 100}
   m_Pivot: {x: 0, y: 0.5}
 --- !u!222 &7261600566396475386
 CanvasRenderer:
@@ -3456,7 +3456,7 @@ MonoBehaviour:
   m_faceColor:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontSize: 60
+  m_fontSize: 46
   m_fontSizeBase: 60
   m_fontWeight: 400
   m_enableAutoSizing: 0
@@ -5183,6 +5183,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   m_Data: []
   m_ContentCanvasGroup: {fileID: 4408956967871179693}
+  m_HeaderText: {fileID: 6407898545886939686}
   m_OpenKey: 99
   m_Password: 1234
   m_ProtectedCanvasGroup: {fileID: 6920477417630190848}

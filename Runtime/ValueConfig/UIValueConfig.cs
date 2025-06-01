@@ -21,7 +21,7 @@ public class UIValueConfig : Singleton<UIValueConfig>
 
     [SerializeField] private CanvasGroup m_ContentCanvasGroup;
 
-
+    [SerializeField] public TextMeshProUGUI m_HeaderText;
     [SerializeField] public KeyCode m_OpenKey = KeyCode.C;
 
     [SerializeField] private string m_Password = "112233";
@@ -53,7 +53,7 @@ public class UIValueConfig : Singleton<UIValueConfig>
     void Start()
     {
         var token = this.GetCancellationTokenOnDestroy();
-
+m_HeaderText.text = $"Value Config (App v{Application.version})";
         UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
         {
             if (!m_IsOpen && Input.GetKeyDown(m_OpenKey))

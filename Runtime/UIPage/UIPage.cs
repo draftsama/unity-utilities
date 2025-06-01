@@ -56,20 +56,21 @@ namespace Modules.Utilities
         }
         public void OpenPage()
         {
-            OpenPage(null);
+            var token = this.GetCancellationTokenOnDestroy();
+            OpenPage(_overrideTransitionInfo: null, _token: token);
         }
 
-      
 
 
-        public void OpenPage(TransitionInfo _overrideTransitionInfo = null)
+        public void OpenPage(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
             if (m_IsOpened) return;
-            var token = this.GetCancellationTokenOnDestroy();
-            UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, token).Forget();
+            if(_token == default)
+                _token = this.GetCancellationTokenOnDestroy();
+            UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, _token).Forget();
 
         }
-       
+
 
         public async UniTask ShowPageAsync(int _milliseconds, bool _isShow, CancellationToken _token = default)
         {
@@ -138,14 +139,14 @@ namespace Modules.Utilities
 
             await TransitionPageAsync(current, _target, _overrideTransition, _token);
         }
- 
+
 
 
         public static async UniTask TransitionPageAsync(UIPage _current, UIPage _target, TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
 
             var transitionInfo = _overrideTransitionInfo ?? _target.m_TransitionInfo;
-            
+
 
             if (_current == null || _target == null || _current == _target || _current.m_IsTransitionPage || _target.m_IsTransitionPage)
                 return;
