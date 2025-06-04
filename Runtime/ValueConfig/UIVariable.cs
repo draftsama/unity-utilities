@@ -6,7 +6,7 @@ using UnityEngine;
 public class UIVariable : MonoBehaviour
 {
 
-    public Data m_Data;
+    public ValueInspector m_Data;
 
     [SerializeField] private TextMeshProUGUI m_Title;
 
@@ -18,8 +18,10 @@ public class UIVariable : MonoBehaviour
     {
 
     }
-    public void SetData(Data _data)
+    public void SetData(ValueInspector _data)
     {
+       _data.variable = ValueConfig.GetVariable(_data.variable.key);
+
         foreach (var item in m_InputFields)
         {
             item.gameObject.SetActive(false);

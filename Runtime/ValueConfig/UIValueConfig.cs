@@ -17,7 +17,7 @@ using UnityEditor;
 public class UIValueConfig : Singleton<UIValueConfig>
 {
 
-    [SerializeField][HideInInspector] private UIVariable.Data[] m_Data;
+    [SerializeField][HideInInspector] private ValueInspector[] m_Data;
 
     [SerializeField] private CanvasGroup m_ContentCanvasGroup;
 
