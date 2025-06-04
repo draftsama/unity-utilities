@@ -29,18 +29,30 @@ namespace Modules.Utilities.Editor
             OpenFolder(folderPath);
         }
 
-
+        [MenuItem("Utilities/Value Config/Clear")]
+        public static void ClearValueConfig()
+        {
+            ValueConfig.Clear();
+        }
+        [MenuItem("Utilities/Value Config/Open Config File")]
+        public static void OpenConfigFile()
+        {
+            var path = Path.Combine(Application.persistentDataPath, "value.config.json");
+            UnityEngine.Debug.Log("Open Config File: " + path);
+            OpenFolder(path);
+        }
 
         public static void OpenFolder(string path)
         {
 
 #if UNITY_EDITOR_WIN
-        Process.Start("explorer.exe", path);
+        Process.Start("explorer.exe", $"\"{path}\"");
 #elif UNITY_EDITOR_OSX
-            Process.Start("open", path);
+            Process.Start("open", $"\"{path}\"");
 #endif
         }
 
+  
     }
 
 

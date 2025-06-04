@@ -160,8 +160,8 @@ namespace Modules.Utilities
         public static bool SetValue<T>(string key, T value)
         {
 
-
-            if (_Collection.SetValue(key, value))
+            
+            if (GetCollection().SetValue(key, value))
             {
                 SaveValueConfig();
                 return true;
@@ -174,7 +174,7 @@ namespace Modules.Utilities
 
         }
 
-        
+
 
         public static bool TryGetValue<T>(string key, out T value)
 
@@ -188,6 +188,9 @@ namespace Modules.Utilities
 
             return GetCollection().GetValue(key, defaultValue);
         }
+
+
+
 
         public static bool Remove(string key)
         {
@@ -215,7 +218,7 @@ namespace Modules.Utilities
         {
             return GetCollection().Items.Find(x => x.key == key);
         }
-        
+
 
 
     }

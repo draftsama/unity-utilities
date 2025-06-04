@@ -107,14 +107,8 @@ namespace Modules.Utilities
                 _ => throw new Exception("Unsupported type"),
             };
 
-            if (value is T tValue)
-            {
-                return tValue;
-            }
-            else
-            {
-                throw new InvalidCastException($"Cannot cast value of type {value.GetType()} to {typeof(T)}");
-            }
+           //cast the value to the requested type
+            return (T)Convert.ChangeType(value, typeof(T));
         }
 
         
