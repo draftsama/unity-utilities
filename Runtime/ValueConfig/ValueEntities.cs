@@ -107,8 +107,23 @@ namespace Modules.Utilities
                 _ => throw new Exception("Unsupported type"),
             };
 
-           //cast the value to the requested type
+            //cast the value to the requested type
             return (T)Convert.ChangeType(value, typeof(T));
+        }
+        
+        public Variable Clone()
+        {
+            return new Variable
+            {
+                key = this.key,
+                type = this.type,
+                stringValue = this.stringValue,
+                intValue = this.intValue,
+                floatValue = this.floatValue,
+                boolValue = this.boolValue,
+                vector2Value = this.vector2Value,
+                vector3Value = this.vector3Value
+            };
         }
 
         

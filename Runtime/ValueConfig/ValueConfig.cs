@@ -41,53 +41,63 @@ namespace Modules.Utilities
         {
             _Collection = new VariableCollection();
             var path = Path.Combine(Application.persistentDataPath, "value.config.json");
+            Debug.Log($"Loading value config from: {path}");
 
-            if (File.Exists(path))
+            try
             {
-                var jsonString = File.ReadAllText(path);
-                JSONObject jsonObjects = new JSONObject(jsonString);
-
-                for (int i = 0; i < jsonObjects.Count; i++)
+                if (File.Exists(path))
                 {
-                    var value = new Variable();
+                    var jsonString = File.ReadAllText(path);
+                    JSONObject jsonObjects = new JSONObject(jsonString);
 
-                    var jsonObject = jsonObjects[i];
-
-
-                    if (jsonObject.HasFields(new string[3] { "key", "valueType", "value" }))
+                    for (int i = 0; i < jsonObjects.Count; i++)
                     {
-                        value.key = jsonObject["key"].str;
-                        value.type = (Variable.Type)jsonObject["valueType"].i;
-                        switch (value.type)
+                        var value = new Variable();
+
+                        var jsonObject = jsonObjects[i];
+
+
+                        if (jsonObject.HasFields(new string[3] { "key", "valueType", "value" }))
                         {
-                            case Variable.Type.String:
-                                value.stringValue = jsonObject["value"].str;
-                                break;
-                            case Variable.Type.Int:
-                                value.intValue = (int)jsonObject["value"].i;
-                                break;
-                            case Variable.Type.Float:
-                                value.floatValue = jsonObject["value"].f;
-                                break;
-                            case Variable.Type.Boolean:
-                                value.boolValue = jsonObject["value"].b;
-                                break;
-                            case Variable.Type.Vector2:
-                                value.vector2Value = JSONTemplates.ToVector2(jsonObject["value"]);
-                                break;
-                            case Variable.Type.Vector3:
-                                value.vector3Value = JSONTemplates.ToVector3(jsonObject["value"]);
-                                break;
+                            value.key = jsonObject["key"].str;
+                            value.type = (Variable.Type)jsonObject["valueType"].i;
+                            switch (value.type)
+                            {
+                                case Variable.Type.String:
+                                    value.stringValue = jsonObject["value"].str;
+                                    break;
+                                case Variable.Type.Int:
+                                    value.intValue = (int)jsonObject["value"].i;
+                                    break;
+                                case Variable.Type.Float:
+                                    value.floatValue = jsonObject["value"].f;
+                                    break;
+                                case Variable.Type.Boolean:
+                                    value.boolValue = jsonObject["value"].b;
+                                    break;
+                                case Variable.Type.Vector2:
+                                    value.vector2Value = JSONTemplates.ToVector2(jsonObject["value"]);
+                                    break;
+                                case Variable.Type.Vector3:
+                                    value.vector3Value = JSONTemplates.ToVector3(jsonObject["value"]);
+                                    break;
+                            }
+                            _Collection.AddVariable(value);
                         }
-                        _Collection.AddVariable(value);
+
+
+
                     }
-
-
 
                 }
 
             }
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to load value config: {e.Message}");
+            }
 
+            Debug.Log($"Value config loaded with {_Collection.Items.Count} items.");
 
 
         }

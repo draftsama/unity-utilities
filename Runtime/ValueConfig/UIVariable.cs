@@ -20,19 +20,29 @@ public class UIVariable : MonoBehaviour
     }
     public void SetData(ValueInspector _data)
     {
-       _data.variable = ValueConfig.GetVariable(_data.variable.key);
+       var variable = ValueConfig.GetVariable(_data.variable.key);
+       m_Data = new ValueInspector();
+       m_Data.title = _data.title;
+
+        if (variable == null)
+        {
+            m_Data.variable = _data.variable.Clone();
+        }
+        else
+        {
+            m_Data.variable = variable;
+        }
 
         foreach (var item in m_InputFields)
-        {
-            item.gameObject.SetActive(false);
-        }
+            {
+                item.gameObject.SetActive(false);
+            }
         m_Dropdowns.options.Clear();
         m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("True"));
         m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("False"));
         m_Dropdowns.gameObject.SetActive(false);
 
 
-        m_Data = _data;
         m_Title.text =  $"{m_Data.title}:";
 
 
