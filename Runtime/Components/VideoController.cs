@@ -56,14 +56,16 @@ namespace Modules.Utilities
 
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
-        public bool m_IsPlaying => _VideoPlayer != null && _VideoPlayer.isPlaying;
+        public bool m_IsPlaying { private set; get; } = false;
 
         CancellationTokenSource _CancellationTokenSource = new CancellationTokenSource();
 
+        private bool _IsResume = false;
         private void OnDisable()
         {
             if (_VideoPlayer != null)
             {
+                _IsResume = m_IsPlaying;
                 _VideoPlayer.Stop();
                 _VideoPlayer.targetTexture?.Release();
                 m_IsPrepared = false;
@@ -77,11 +79,14 @@ namespace Modules.Utilities
 
 
 
-        private async void Awake()
+        private async void OnEnable()
         {
             Init();
-
-            if (m_StartMode != VideoStartMode.None)
+            if (_IsResume)
+            {
+                PlayAsync().Forget();
+            }
+            else if (m_StartMode != VideoStartMode.None)
             {
                 if (SetupURL(m_FileName, m_PathType, m_FolderName))
                 {
@@ -110,6 +115,7 @@ namespace Modules.Utilities
                     }
                 }
             }
+
 
             var token = this.GetCancellationTokenOnDestroy();
 
@@ -200,9 +206,9 @@ namespace Modules.Utilities
             if (m_PathType == PathType.StreamingAssets)
             {
                 if (string.IsNullOrEmpty(m_FolderName))
-                    filePath = Path.Combine("file://",Application.streamingAssetsPath, m_FileName);
+                    filePath = Path.Combine("file://", Application.streamingAssetsPath, m_FileName);
                 else
-                    filePath = Path.Combine("file://",Application.streamingAssetsPath, m_FolderName, m_FileName);
+                    filePath = Path.Combine("file://", Application.streamingAssetsPath, m_FolderName, m_FileName);
             }
             else if (m_PathType == PathType.Relative)
             {
@@ -357,6 +363,7 @@ namespace Modules.Utilities
                 }
 
                 Debug.Log("Play Video : " + _VideoPlayer.url);
+                m_IsPlaying = true;
                 _VideoPlayer.frame = _frame;
                 _VideoPlayer.Play();
 
@@ -390,8 +397,8 @@ namespace Modules.Utilities
                     {
 
                         fadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
-                    fadeOutProgress = Mathf.Clamp01(fadeOutProgress);
-                        var valueProgress =EasingFormula.EasingFloat(Easing.Ease.EaseOutQuad, 1f, 0f,
+                        fadeOutProgress = Mathf.Clamp01(fadeOutProgress);
+                        var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseOutQuad, 1f, 0f,
                                 fadeOutProgress);
                         //fade out
 
@@ -431,6 +438,7 @@ namespace Modules.Utilities
             catch (System.OperationCanceledException)
             {
                 Debug.Log("Video Canceled.");
+
             }
             catch (Exception e)
             {
@@ -439,6 +447,8 @@ namespace Modules.Utilities
             finally
             {
                 _Stoping = false;
+                m_IsPlaying = false;
+                m_IsPrepared = false;
                 if (_VideoPlayer != null) _VideoPlayer.Stop();
                 ApplyAlpha(0);
             }
