@@ -319,6 +319,9 @@ namespace Modules.Utilities
         public async UniTask PlayAsync(int _frame = 0, bool _ignoreFadeIn = false, bool _ignoreFadeOut = false,
             bool _forcePlay = false, CancellationToken _token = default)
         {
+            if (_VideoPlayer == null)
+                _VideoPlayer = GetComponent<VideoPlayer>();
+
             if (_VideoPlayer.isPlaying && !_forcePlay)
                 return;
 
@@ -354,8 +357,8 @@ namespace Modules.Utilities
                     SetupURL(m_FileName, m_PathType, m_FolderName);
                     if (string.IsNullOrEmpty(_VideoPlayer.url))
                     {
-                        //throw exception if url is empty
-                        throw new Exception($"[{gameObject.name}]  Video URL is empty.");
+                        Debug.Log("Video URL is empty, please check the file path.");
+                        return;
                     }
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: token);
@@ -538,6 +541,8 @@ namespace Modules.Utilities
             _progress = Mathf.Clamp(_progress, 0, 1);
             _VideoPlayer.time = _progress * _VideoPlayer.length;
         }
+
+       
 
 
         public IUniTaskAsyncEnumerable<AsyncUnit> OnEndAsyncEnumerable(CancellationToken _token)
