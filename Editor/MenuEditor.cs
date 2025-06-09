@@ -41,6 +41,14 @@ namespace Modules.Utilities.Editor
             UnityEngine.Debug.Log("Open Config File: " + path);
             OpenFolder(path);
         }
+        [MenuItem("Utilities/Build Manager")]
+        public static void OpenBuildManager()
+        {
+            BuildManagerWindowEditor window =
+                UnityEditor.EditorWindow.GetWindow<BuildManagerWindowEditor>();
+            window.titleContent = new GUIContent("Build Manager");
+            window.Show();
+        }
 
         public static void OpenFolder(string path)
         {
@@ -52,7 +60,7 @@ namespace Modules.Utilities.Editor
 #endif
         }
 
-  
+
     }
 
 
