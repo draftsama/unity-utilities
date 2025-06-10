@@ -100,13 +100,21 @@ namespace Modules.Utilities
             _RectTransform = GetComponent<RectTransform>();
             _AspectRatioFitter = GetComponent<AspectRatioFitter>();
 
-            var texture = await ResourceManager.GetResourceAsync(m_FileName);
-            if (texture != null && texture.m_Texture != null)
+            try
             {
-                ApplyImage(texture.m_Texture);
+                var texture = await ResourceManager.GetResourceAsync(m_FileName);
+                if (texture != null && texture.m_Texture != null)
+                {
+                    ApplyImage(texture.m_Texture);
+                }
+                else
+                {
+                    gameObject.SetActive(false);
+                }
             }
-            else
+            catch (Exception ex)
             {
+                Debug.LogError($"Error loading image: {ex.Message}");
                 gameObject.SetActive(false);
             }
            

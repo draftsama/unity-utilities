@@ -39,10 +39,7 @@ namespace Modules.Utilities
     public enum ResourceStoreType
     {
         ExternalResources,
-
-#if PACKAGE_ADDRESSABLES_INSTALLED
         Addressable,
-#endif
         
 
     }
