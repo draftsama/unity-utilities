@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Net;
+using System.Runtime.InteropServices;
 using UnityEditor;
 using UnityEditor.Build;
 using UnityEditor.Build.Profile;
@@ -24,6 +25,12 @@ namespace Modules.Utilities.Editor
         List<string> copyFolderPaths = new List<string>();
 
         public int callbackOrder { get; }
+        string buildVersion = string.Empty;
+
+        const string PROFILE_SELECT_INDEX_KEY = "BM_PROFILE_SELECT_INDEX";
+        const string BUILD_FOLDER_PATH_KEY = "BM_BUILD_FOLDER_PATH";
+        const string COPY_FOLDER_PATHS_KEY = "BM_COPY_FOLDER_PATHS";
+        const string ENABLE_COPY_FOLDERS_KEY = "BM_ENABLE_COPY_FOLDERS";
 
         void OnEnable()
         {
@@ -69,9 +76,16 @@ namespace Modules.Utilities.Editor
                     string path = AssetDatabase.GUIDToAssetPath(profilePaths[i]);
                     buildProfiles[i] = AssetDatabase.LoadAssetAtPath<BuildProfile>(path);
                 }
-                selectedBuildProfileIndex = PlayerPrefs.GetInt("SelectedBuildProfileIndex", 0);
-                buildFolderPath = PlayerPrefs.GetString($"{buildProfiles[selectedBuildProfileIndex].name}_BuildFolderPath", string.Empty);
-                string copyFolderPathsString = PlayerPrefs.GetString($"{buildProfiles[selectedBuildProfileIndex].name}_CopyFolderPaths", string.Empty);
+                selectedBuildProfileIndex = PlayerPrefs.GetInt(PROFILE_SELECT_INDEX_KEY, -1);
+                if(selectedBuildProfileIndex < 0 || selectedBuildProfileIndex >= buildProfiles.Length)
+                {
+                    selectedBuildProfileIndex = 0; // Default to first profile if index is invalid
+                    PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
+                    
+                }
+                var profile = buildProfiles[selectedBuildProfileIndex];
+                buildFolderPath = PlayerPrefs.GetString($"{BUILD_FOLDER_PATH_KEY}_{profile.name}", string.Empty);
+                string copyFolderPathsString = PlayerPrefs.GetString($"{COPY_FOLDER_PATHS_KEY}_{profile.name}", string.Empty);
                 if (!string.IsNullOrEmpty(copyFolderPathsString))
                 {
                     copyFolderPaths = new List<string>(copyFolderPathsString.Split(';'));
@@ -80,7 +94,8 @@ namespace Modules.Utilities.Editor
                 {
                     copyFolderPaths.Clear();
                 }
-                enableCopyFolders = PlayerPrefs.GetInt($"{buildProfiles[selectedBuildProfileIndex].name}_EnableCopyFolders", 1) == 1;
+                enableCopyFolders = PlayerPrefs.GetInt($"{ENABLE_COPY_FOLDERS_KEY}_{profile.name}", 1) == 1;
+                buildVersion = PlayerSettings.bundleVersion;
             }
             catch (System.Exception e)
             {
@@ -172,7 +187,7 @@ namespace Modules.Utilities.Editor
                     {
                         BuildProfile.SetActiveBuildProfile(selectedBuildProfile);
                         Debug.Log($"Set {selectedBuildProfile.name} as active build profile.");
-                        PlayerPrefs.SetInt("SelectedBuildProfileIndex", selectedBuildProfileIndex);
+                        PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
                         GUI.FocusControl(null);
                     }
                     catch (System.Exception e)
@@ -204,26 +219,17 @@ namespace Modules.Utilities.Editor
                     GUILayout.BeginHorizontal();
                     GUILayout.Label("Version: ", EditorStyles.label);
 
-                    string currentVersion = "";
-                    try
-                    {
-                        currentVersion = PlayerSettings.bundleVersion;
-                    }
-                    catch
-                    {
-                        currentVersion = "Loading...";
-                    }
 
-                    string newVersion = GUILayout.TextField(currentVersion, GUILayout.Width(100));
+                    buildVersion = GUILayout.TextField(buildVersion, GUILayout.Width(100));
 
                     // Disable update button during compilation
                     GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
 
-                    if (newVersion != currentVersion && GUILayout.Button("Update", GUILayout.Width(60)))
+                    if (PlayerSettings.bundleVersion != buildVersion && GUILayout.Button("Update", GUILayout.Width(60)))
                     {
                         try
                         {
-                            PlayerSettings.bundleVersion = newVersion;
+                            PlayerSettings.bundleVersion = buildVersion;
                             AssetDatabase.SaveAssets();
                         }
                         catch (System.Exception e)
@@ -247,7 +253,7 @@ namespace Modules.Utilities.Editor
                         {
                             buildFolderPath = path;
                             // Save the path to PlayerPrefs for persistence
-                            PlayerPrefs.SetString($"{selectedBuildProfile.name}_BuildFolderPath", buildFolderPath);
+                            PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{selectedBuildProfile.name}", buildFolderPath);
                         }
                     }
                     GUILayout.EndHorizontal();
@@ -264,7 +270,7 @@ namespace Modules.Utilities.Editor
                         GUILayout.FlexibleSpace();
                         enableCopyFolders = GUILayout.Toggle(enableCopyFolders, "Enable Copy Folders", GUILayout.Width(150));
                         //save the toggle state to PlayerPrefs
-                        PlayerPrefs.SetInt($"{selectedBuildProfile.name}_EnableCopyFolders", enableCopyFolders ? 1 : 0);
+                        PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{selectedBuildProfile.name}", enableCopyFolders ? 1 : 0);
                         GUILayout.EndHorizontal();
 
                         if (copyFolderPaths != null && copyFolderPaths.Count > 0)
@@ -289,7 +295,7 @@ namespace Modules.Utilities.Editor
                             if (indexToRemove >= 0)
                             {
                                 copyFolderPaths.RemoveAt(indexToRemove);
-                                PlayerPrefs.SetString($"{selectedBuildProfile.name}_CopyFolderPaths", string.Join(";", copyFolderPaths));
+                                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{selectedBuildProfile.name}", string.Join(";", copyFolderPaths));
                             }
 
                         }
@@ -309,7 +315,7 @@ namespace Modules.Utilities.Editor
                             if (!string.IsNullOrEmpty(path))
                             {
                                 copyFolderPaths.Add(path);
-                                PlayerPrefs.SetString($"{selectedBuildProfile.name}_CopyFolderPaths", string.Join(";", copyFolderPaths));
+                                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{selectedBuildProfile.name}", string.Join(";", copyFolderPaths));
                             }
 
 
@@ -351,6 +357,15 @@ namespace Modules.Utilities.Editor
             }
 
 
+            if (GUI.changed)
+            {
+                PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
+                 PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", buildFolderPath);
+                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", string.Join(";", copyFolderPaths));
+                PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", enableCopyFolders ? 1 : 0);
+            }
+
+
 
 
         }
@@ -371,11 +386,12 @@ namespace Modules.Utilities.Editor
 
                 //version = 0.0.3 to v0_0_3
                 var versionParts = PlayerSettings.bundleVersion.Split('.');
-                var versionString = string.Join("-", versionParts);
+                var versionString = string.Join("_", versionParts);
 
                 var buildTarget = EditorUserBuildSettings.activeBuildTarget;
                 var extension = "";
-                var folderSuffix = "";
+                var folderName = $"{selectedBuildProfile.name}_v{versionString}-{dateString}";
+                var appName = selectedBuildProfile.name;
 
                 switch (buildTarget)
                 {
@@ -386,37 +402,17 @@ namespace Modules.Utilities.Editor
                     case BuildTarget.StandaloneOSX:
                         extension = ".app";
                         break;
-                    case BuildTarget.StandaloneLinux64:
-                        extension = "";
-                        break;
                     case BuildTarget.Android:
                         extension = ".apk";
+                        appName = folderName;
                         break;
-                    case BuildTarget.iOS:
-                        folderSuffix = "-iOS";
-                        break;
-                    case BuildTarget.WebGL:
-                        folderSuffix = "-WebGL";
-                        break;
-                    case BuildTarget.WSAPlayer:
-                        folderSuffix = "-UWP";
-                        break;
-                    case BuildTarget.tvOS:
-                        folderSuffix = "-tvOS";
-                        break;
-                    case BuildTarget.VisionOS:
-                        folderSuffix = "-VisionOS";
-                        break;
-                    default:
-                        folderSuffix = $"-{buildTarget}";
-                        break;
+
                 }
 
-                var name = string.IsNullOrEmpty(folderSuffix)
-                    ? $"{selectedBuildProfile.name}-v{versionString}-{dateString}/{selectedBuildProfile.name}{extension}"
-                    : $"{selectedBuildProfile.name}-v{versionString}-{dateString}{folderSuffix}";
 
-                var buildPath = System.IO.Path.Combine(buildFolderPath, name);
+                
+
+                var buildPath = System.IO.Path.Combine(buildFolderPath, folderName, $"{appName}{extension}");
 
                 BuildPipeline.BuildPlayer(EditorBuildSettings.scenes, buildPath, buildTarget, BuildOptions.None);
 
@@ -494,7 +490,6 @@ namespace Modules.Utilities.Editor
                 return;
             }
 
-            Debug.Log("platform: " + report.summary.platform);
 
 
             var buildFileFolder = Path.GetDirectoryName(report.summary.outputPath);
@@ -521,8 +516,10 @@ namespace Modules.Utilities.Editor
                     }
                 }
             }
+                    var profile = buildProfiles[selectedBuildProfileIndex];
 
-
+            SendMessage(
+                $"[Build Success!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
 
             // Optionally, you can reveal the build folder in the file explorer
             EditorUtility.RevealInFinder(buildFileFolder);
