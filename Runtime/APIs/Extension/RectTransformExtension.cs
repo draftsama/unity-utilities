@@ -58,6 +58,28 @@ namespace Modules.Utilities
             float randomRadius = UnityEngine.Random.Range(0, _radius);
             return Quaternion.Euler(0, 0, angle) * new Vector3(0, randomRadius, 0);
         }
+        public static async UniTask ShakeAsync(this RectTransform _rectTransform, int _duration, int _frequency,float _strength,  CancellationToken _token = default)
+        {
+            var token = _token;
+            if (token == default) token = _rectTransform.GetCancellationTokenOnDestroy();
+
+            var originalPosition = _rectTransform.anchoredPosition;
+            var elapsed = 0f;
+            var shakeDuration = _duration * GlobalConstant.MILLISECONDS_TO_SECONDS;
+            while (elapsed < shakeDuration && !token.IsCancellationRequested)
+            {
+                var deltaTime = Time.deltaTime;
+                elapsed += deltaTime;
+
+                var pos = UnityEngine.Random.insideUnitCircle * _strength;
+
+                _rectTransform.anchoredPosition = originalPosition + pos;
+
+                await UniTask.Delay(_frequency, cancellationToken: token);
+            }
+
+            _rectTransform.anchoredPosition = originalPosition;
+        }
 
 
 
