@@ -30,10 +30,13 @@ namespace Modules.Utilities
             m_ResourceResponseList?.Clear();
             m_ResourceResponseList = new List<ResourceResponse>();
 
-            //if not windows standalone or editor, use addressable
-#if !UNITY_STANDALONE_WIN || !UNITY_EDITOR
-            m_ResourceStoreType = ResourceStoreType.Addressable;
-#endif
+            //if mobile platform, use Addressable
+            if (Application.platform == RuntimePlatform.Android ||
+               Application.platform == RuntimePlatform.IPhonePlayer)
+            {
+                m_ResourceStoreType = ResourceStoreType.Addressable;
+            }
+
 
             _Instance = this;
 
