@@ -310,8 +310,7 @@ namespace Modules.Utilities
                 _VideoPlayer.playOnAwake = false;
                 _VideoPlayer.renderMode = VideoRenderMode.MaterialOverride;
             }
-
-            ApplyAlpha(0);
+            if(Application.isPlaying) ApplyAlpha(0);
         }
 
         //------------------------------------ Public Method ----------------------------------

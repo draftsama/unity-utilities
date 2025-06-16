@@ -114,7 +114,7 @@ namespace Modules.Utilities
             }
             catch (Exception ex)
             {
-                Debug.LogError($"Error loading image: {ex.Message}");
+                Debug.LogError($"[{gameObject.name}]Error loading image: {ex.Message}");
                 gameObject.SetActive(false);
             }
            
