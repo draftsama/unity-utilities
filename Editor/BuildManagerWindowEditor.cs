@@ -77,11 +77,11 @@ namespace Modules.Utilities.Editor
                     buildProfiles[i] = AssetDatabase.LoadAssetAtPath<BuildProfile>(path);
                 }
                 selectedBuildProfileIndex = PlayerPrefs.GetInt(PROFILE_SELECT_INDEX_KEY, -1);
-                if(selectedBuildProfileIndex < 0 || selectedBuildProfileIndex >= buildProfiles.Length)
+                if (selectedBuildProfileIndex < 0 || selectedBuildProfileIndex >= buildProfiles.Length)
                 {
                     selectedBuildProfileIndex = 0; // Default to first profile if index is invalid
                     PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
-                    
+
                 }
                 var profile = buildProfiles[selectedBuildProfileIndex];
                 buildFolderPath = PlayerPrefs.GetString($"{BUILD_FOLDER_PATH_KEY}_{profile.name}", string.Empty);
@@ -360,7 +360,7 @@ namespace Modules.Utilities.Editor
             if (GUI.changed)
             {
                 PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
-                 PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", buildFolderPath);
+                PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", buildFolderPath);
                 PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", string.Join(";", copyFolderPaths));
                 PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", enableCopyFolders ? 1 : 0);
             }
@@ -410,7 +410,7 @@ namespace Modules.Utilities.Editor
                 }
 
 
-                
+
 
                 var buildPath = System.IO.Path.Combine(buildFolderPath, folderName, $"{appName}{extension}");
 
@@ -459,22 +459,21 @@ namespace Modules.Utilities.Editor
                     RunCommand("afplay /System/Library/Sounds/Glass.aiff");
 #endif
                 Application.logMessageReceived -= OnBuildError;
-                if (true)
-                {
-                    while (condition.Contains("\n"))
-                    {
-                        condition = condition.Replace("\n", " ");
-                    }
-                    while (stackTrace.Contains("\n"))
-                    {
-                        stackTrace = stackTrace.Replace("\n", " ");
-                    }
-                    var profile = buildProfiles[selectedBuildProfileIndex];
-                    //write error message
-                    SendMessage(
-                        $"[Build Fail!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget} \nError: {condition} \nStackTrace: {stackTrace}");
 
+                if (condition.Contains("\n"))
+                {
+                    condition = condition.Replace("\n", " ");
                 }
+                if (stackTrace.Contains("\n"))
+                {
+                    stackTrace = stackTrace.Replace("\n", " ");
+                }
+                var profile = buildProfiles[selectedBuildProfileIndex];
+                //write error message
+                SendMessage(
+                    $"[Build Fail!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget} \nError: {condition} \nStackTrace: {stackTrace}");
+
+
             }
         }
 
@@ -516,7 +515,7 @@ namespace Modules.Utilities.Editor
                     }
                 }
             }
-                    var profile = buildProfiles[selectedBuildProfileIndex];
+            var profile = buildProfiles[selectedBuildProfileIndex];
 
             SendMessage(
                 $"[Build Success!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
@@ -531,19 +530,42 @@ namespace Modules.Utilities.Editor
         private const string _API_MESSAGE = "https://api.telegram.org/bot1671713978:AAGGuzmbA2IQlZlQz66Z9yNWtckivBZZuuw/sendMessage?chat_id=1575164820&text=";
         private void SendMessage(string _message)
         {
+            //4096 //characters limit for telegram message
+            if (_message.Length > 4096)
+            {
+                Debug.LogWarning("Message exceeds Telegram character limit, truncating.");
+                _message = _message.Substring(0, 4096);
+            }
+            // Replace spaces with %20 for URL encoding
+            _message = Uri.EscapeDataString(_message);
+            // Send the message to Telegram
             Get($"{_API_MESSAGE}{_message}");
         }
 
         private string Get(string _uri)
         {
-            HttpWebRequest request = (HttpWebRequest)WebRequest.Create(_uri);
-            request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
-
-            using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
-            using (Stream stream = response.GetResponseStream())
-            using (StreamReader reader = new StreamReader(stream))
+            try
             {
-                return reader.ReadToEnd();
+                HttpWebRequest request = (HttpWebRequest)WebRequest.Create(_uri);
+                request.AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate;
+
+                using (HttpWebResponse response = (HttpWebResponse)request.GetResponse())
+                using (Stream stream = response.GetResponseStream())
+                using (StreamReader reader = new StreamReader(stream))
+                {
+                    return reader.ReadToEnd();
+                }
+
+            }
+            catch (WebException ex)
+            {
+                Debug.LogError($"Error fetching data from {_uri}: {ex.Message}");
+                return null;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogError($"Unexpected error: {ex.Message}");
+                return null;
             }
         }
 
