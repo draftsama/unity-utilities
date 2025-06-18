@@ -26,11 +26,13 @@ namespace Modules.Utilities.Editor
 
         public int callbackOrder { get; }
         string buildVersion = string.Empty;
+        string buildName = string.Empty;
 
         const string PROFILE_SELECT_INDEX_KEY = "BM_PROFILE_SELECT_INDEX";
         const string BUILD_FOLDER_PATH_KEY = "BM_BUILD_FOLDER_PATH";
         const string COPY_FOLDER_PATHS_KEY = "BM_COPY_FOLDER_PATHS";
         const string ENABLE_COPY_FOLDERS_KEY = "BM_ENABLE_COPY_FOLDERS";
+        const string BUILD_NAME_KEY = "BM_BUILD_NAME";
 
         void OnEnable()
         {
@@ -96,6 +98,7 @@ namespace Modules.Utilities.Editor
                 }
                 enableCopyFolders = PlayerPrefs.GetInt($"{ENABLE_COPY_FOLDERS_KEY}_{profile.name}", 1) == 1;
                 buildVersion = PlayerSettings.bundleVersion;
+                buildName = PlayerPrefs.GetString($"{BUILD_NAME_KEY}_{profile.name}", profile.name);
             }
             catch (System.Exception e)
             {
@@ -215,6 +218,16 @@ namespace Modules.Utilities.Editor
                         GUILayout.Label("Platform: Loading...", EditorStyles.label);
                     }
 
+                    GUILayout.BeginHorizontal();
+                    GUILayout.Label("Build Name: ", EditorStyles.label);
+                    buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
+                    GUILayout.EndHorizontal();
+                    if (GUI.changed)
+                    {
+                        // Debug.Log($"Build Name changed to: {buildName}");
+                        PlayerPrefs.SetString($"{BUILD_NAME_KEY}_{selectedBuildProfile.name}", buildName);
+                    }
+
                     // Current version
                     GUILayout.BeginHorizontal();
                     GUILayout.Label("Version: ", EditorStyles.label);
@@ -230,6 +243,7 @@ namespace Modules.Utilities.Editor
                         try
                         {
                             PlayerSettings.bundleVersion = buildVersion;
+                            Debug.Log($"Updated build version to: {buildVersion}");
                             AssetDatabase.SaveAssets();
                         }
                         catch (System.Exception e)
@@ -390,8 +404,8 @@ namespace Modules.Utilities.Editor
 
                 var buildTarget = EditorUserBuildSettings.activeBuildTarget;
                 var extension = "";
-                var folderName = $"{selectedBuildProfile.name}_v{versionString}-{dateString}";
-                var appName = selectedBuildProfile.name;
+                var folderName = $"{buildName}_v{versionString}-{dateString}";
+                var appName = buildName;
 
                 switch (buildTarget)
                 {
