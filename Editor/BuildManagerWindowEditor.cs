@@ -28,11 +28,16 @@ namespace Modules.Utilities.Editor
         string buildVersion = string.Empty;
         string buildName = string.Empty;
 
+        bool isNotify = false;
+
+
+
         const string PROFILE_SELECT_INDEX_KEY = "BM_PROFILE_SELECT_INDEX";
         const string BUILD_FOLDER_PATH_KEY = "BM_BUILD_FOLDER_PATH";
         const string COPY_FOLDER_PATHS_KEY = "BM_COPY_FOLDER_PATHS";
         const string ENABLE_COPY_FOLDERS_KEY = "BM_ENABLE_COPY_FOLDERS";
         const string BUILD_NAME_KEY = "BM_BUILD_NAME";
+        const string IS_NOTIFY_KEY = "BM_IS_NOTIFY";
 
         void OnEnable()
         {
@@ -87,6 +92,7 @@ namespace Modules.Utilities.Editor
                 }
                 var profile = buildProfiles[selectedBuildProfileIndex];
                 buildFolderPath = PlayerPrefs.GetString($"{BUILD_FOLDER_PATH_KEY}_{profile.name}", string.Empty);
+                // Debug.Log($"Loaded build folder path: {buildFolderPath} using key: {BUILD_FOLDER_PATH_KEY}_{profile.name}");
                 string copyFolderPathsString = PlayerPrefs.GetString($"{COPY_FOLDER_PATHS_KEY}_{profile.name}", string.Empty);
                 if (!string.IsNullOrEmpty(copyFolderPathsString))
                 {
@@ -99,6 +105,7 @@ namespace Modules.Utilities.Editor
                 enableCopyFolders = PlayerPrefs.GetInt($"{ENABLE_COPY_FOLDERS_KEY}_{profile.name}", 1) == 1;
                 buildVersion = PlayerSettings.bundleVersion;
                 buildName = PlayerPrefs.GetString($"{BUILD_NAME_KEY}_{profile.name}", profile.name);
+                isNotify = PlayerPrefs.GetInt(IS_NOTIFY_KEY, 0) == 1;
             }
             catch (System.Exception e)
             {
@@ -345,6 +352,9 @@ namespace Modules.Utilities.Editor
                         enableCopyFolders = false;
                     }
 
+                    //draw checkbox for isNotify
+                    isNotify = GUILayout.Toggle(isNotify, "Enable Notifications", GUILayout.Width(150));
+
                     GUILayout.BeginHorizontal();
                     GUILayout.FlexibleSpace();
                     if (GUILayout.Button("Build", GUILayout.Width(100)))
@@ -373,10 +383,15 @@ namespace Modules.Utilities.Editor
 
             if (GUI.changed)
             {
+                var selectedBuildProfile = buildProfiles[selectedBuildProfileIndex];
                 PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
-                PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", buildFolderPath);
-                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", string.Join(";", copyFolderPaths));
-                PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{buildProfiles[selectedBuildProfileIndex].name}", enableCopyFolders ? 1 : 0);
+                PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{selectedBuildProfile.name}", buildFolderPath);
+                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{selectedBuildProfile.name}", string.Join(";", copyFolderPaths));
+                PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{selectedBuildProfile.name}", enableCopyFolders ? 1 : 0);
+                PlayerPrefs.SetInt($"{IS_NOTIFY_KEY}_{selectedBuildProfile.name}", isNotify ? 1 : 0);
+                
+                PlayerPrefs.Save();
+
             }
 
 
@@ -484,8 +499,11 @@ namespace Modules.Utilities.Editor
                 }
                 var profile = buildProfiles[selectedBuildProfileIndex];
                 //write error message
-                SendMessage(
-                    $"[Build Fail!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget} \nError: {condition} \nStackTrace: {stackTrace}");
+                if(isNotify)
+                {
+                    SendMessage(
+                        $"[Build Fail!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget} \nError: {condition} \nStackTrace: {stackTrace}");
+                }
 
 
             }
@@ -530,9 +548,12 @@ namespace Modules.Utilities.Editor
                 }
             }
             var profile = buildProfiles[selectedBuildProfileIndex];
-
-            SendMessage(
-                $"[Build Success!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
+            if(isNotify)
+            {
+                // Notify via Telegram
+                SendMessage(
+                    $"[Build Success!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
+            }
 
             // Optionally, you can reveal the build folder in the file explorer
             EditorUtility.RevealInFinder(buildFileFolder);
