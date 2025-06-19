@@ -41,7 +41,7 @@ namespace Modules.Utilities
         {
             _Collection = new VariableCollection();
             var path = Path.Combine(Application.persistentDataPath, "value.config.json");
-            Debug.Log($"Loading value config from: {path}");
+            // Debug.Log($"Loading value config from: {path}");
 
             try
             {
@@ -97,7 +97,7 @@ namespace Modules.Utilities
                 Debug.LogError($"Failed to load value config: {e.Message}");
             }
 
-            Debug.Log($"Value config loaded with {_Collection.Items.Count} items.");
+            // Debug.Log($"Value config loaded with {_Collection.Items.Count} items.");
 
 
         }
