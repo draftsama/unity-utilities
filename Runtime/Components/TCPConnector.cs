@@ -25,18 +25,18 @@ namespace Modules.Utilities
         #region Private Variables
 
         [Header("Connection Settings")]
-        [SerializeField] private string m_Host = "127.0.0.1";
-        [SerializeField] private int m_Port = 7777;
-        [SerializeField] private bool m_IsServer = false;
+        [SerializeField] public string m_Host = "127.0.0.1";
+        [SerializeField] public int m_Port = 7777;
+        [SerializeField] public bool m_IsServer = false;
 
         [Header("Behavior")]
-        [SerializeField] private bool m_StartOnEnable = true;
-        [SerializeField] private bool m_IsDebug = true;
+        [SerializeField] public bool m_StartOnEnable = true;
+        [SerializeField] public bool m_IsDebug = true;
 
         [Header("Auto Discovery (UDP Broadcast)")]
-        [SerializeField] private bool m_EnableDiscovery = true;
-        [SerializeField] private int m_DiscoveryPort = 7778;
-        [SerializeField] private string m_DiscoveryMessage = "DiscoverServer";
+        [SerializeField] public bool m_EnableDiscovery = true;
+        [SerializeField] public int m_DiscoveryPort = 7778;
+        [SerializeField] public string m_DiscoveryMessage = "DiscoverServer";
 
         // --- Status ---
         [SerializeField] private bool m_IsRunning = false;
