@@ -8,6 +8,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
+using Newtonsoft.Json;
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -27,7 +28,7 @@ namespace Modules.Utilities
         [SerializeField] private string m_Host = "127.0.0.1";
         [SerializeField] private int m_Port = 7777;
         [SerializeField] private bool m_IsServer = false;
-        
+
         [Header("Behavior")]
         [SerializeField] private bool m_StartOnEnable = true;
         [SerializeField] private bool m_IsDebug = true;
@@ -58,7 +59,7 @@ namespace Modules.Utilities
         private CancellationTokenSource _cts;
 
         // --- Packet Structure ---
-        private const int PACKET_HEADER_SIZE = 14; // 4-id, 4-sender, 2-type, 2-dataType, 2-action
+        private const int PACKET_HEADER_SIZE = 10; // 4-id, 4-sender, 2-type
 
         #endregion
 
@@ -108,11 +109,11 @@ namespace Modules.Utilities
 
             _cts?.Cancel();
             _cts = new CancellationTokenSource();
-            
+
             if (m_IsServer)
             {
                 m_IsRunning = true; // <<< Set IsRunning true for server here
-                if(m_EnableDiscovery)
+                if (m_EnableDiscovery)
                 {
                     BroadcastPresenceAsync(_cts.Token).Forget();
                 }
@@ -125,7 +126,7 @@ namespace Modules.Utilities
                 ClientConnectionLoopAsync(_cts.Token).Forget();
             }
         }
-        
+
         public void StopConnection()
         {
             Log("Stopping connection...");
@@ -136,8 +137,8 @@ namespace Modules.Utilities
 
             if (m_IsServer)
             {
-                _tcpListener?.Stop(); 
-                lock(m_Clients)
+                _tcpListener?.Stop();
+                lock (m_Clients)
                 {
                     foreach (var client in m_Clients.Keys)
                     {
@@ -150,7 +151,7 @@ namespace Modules.Utilities
             else
             {
                 _tcpClient?.Close();
-                if(m_IsConnected)
+                if (m_IsConnected)
                 {
                     m_IsConnected = false;
                     m_OnServerDisconnected?.Invoke(m_ServerInfo);
@@ -196,8 +197,8 @@ namespace Modules.Utilities
                 port = clientEndPoint.Port,
                 remoteEndPoint = clientEndPoint
             };
-            
-            lock(m_Clients) { m_Clients.Add(client, clientInfo); }
+
+            lock (m_Clients) { m_Clients.Add(client, clientInfo); }
             Log($"Client connected: {clientInfo.ipAddress}:{clientInfo.port}");
             await UniTask.SwitchToMainThread();
             m_OnClientConnected?.Invoke(clientInfo);
@@ -208,7 +209,7 @@ namespace Modules.Utilities
             finally
             {
                 Log($"Client disconnected: {clientInfo.ipAddress}:{clientInfo.port}");
-                lock(m_Clients) { m_Clients.Remove(client); }
+                lock (m_Clients) { m_Clients.Remove(client); }
                 client.Close();
                 await UniTask.SwitchToMainThread();
                 m_OnClientDisconnected?.Invoke(clientInfo);
@@ -220,7 +221,7 @@ namespace Modules.Utilities
             using var udpClient = new UdpClient { EnableBroadcast = true };
             var broadcastAddress = new IPEndPoint(IPAddress.Broadcast, m_DiscoveryPort);
             var messageBytes = Encoding.UTF8.GetBytes(m_DiscoveryMessage);
-            
+
             Log($"Starting discovery broadcast on UDP port {m_DiscoveryPort}");
             try
             {
@@ -294,7 +295,7 @@ namespace Modules.Utilities
                     Log($"Connected to server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
                     await UniTask.SwitchToMainThread();
                     m_OnServerConnected?.Invoke(m_ServerInfo);
-                    
+
                     var stream = _tcpClient.GetStream();
                     await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
                 }
@@ -324,7 +325,7 @@ namespace Modules.Utilities
             try
             {
                 var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-                
+
                 var receivedMessage = Encoding.UTF8.GetString(receiveResult.Buffer);
                 if (receivedMessage == m_DiscoveryMessage)
                 {
@@ -347,7 +348,7 @@ namespace Modules.Utilities
             {
                 int bytesRead = await stream.ReadAsync(lengthBuffer, 0, lengthBuffer.Length, token);
                 if (bytesRead < 4) break; // Connection closed
-                
+
                 int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
                 if (messageLength <= 0 || messageLength > 1024 * 1024 * 4) // <<< Sanity check for message size (e.g., max 4MB)
                 {
@@ -357,13 +358,13 @@ namespace Modules.Utilities
                 var dataBuffer = new byte[messageLength];
 
                 int totalBytesRead = 0;
-                while(totalBytesRead < messageLength)
+                while (totalBytesRead < messageLength)
                 {
                     bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, messageLength - totalBytesRead, token);
                     if (bytesRead == 0) throw new InvalidOperationException("Connection closed prematurely.");
                     totalBytesRead += bytesRead;
                 }
-                
+
                 PacketResponse response = ReadPacket(dataBuffer, connectorInfo.remoteEndPoint);
                 if (response != null)
                 {
@@ -372,21 +373,21 @@ namespace Modules.Utilities
                 }
             }
         }
-        
-        public async UniTask SendDataAsync(ushort action, DataType dataType, byte[] data, CancellationToken token = default)
+
+        public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
         {
             if (!m_IsRunning) return;
 
-            byte[] message = CreatePacket(PacketType.SEND_DATA, dataType, action, data);
+            byte[] message = CreatePacket(action, data);
             try
             {
                 if (m_IsServer)
                 {
                     // Create a copy of the list to avoid issues if a client disconnects during the send
                     List<TcpClient> clientsToSend;
-                    lock(m_Clients) { clientsToSend = m_Clients.Keys.ToList(); }
+                    lock (m_Clients) { clientsToSend = m_Clients.Keys.ToList(); }
 
-                    var sendTasks = clientsToSend.Select(client => 
+                    var sendTasks = clientsToSend.Select(client =>
                         client.GetStream().WriteAsync(message, 0, message.Length, token).AsUniTask().AttachExternalCancellation(token)
                     ).ToList();
                     await UniTask.WhenAll(sendTasks);
@@ -403,25 +404,43 @@ namespace Modules.Utilities
             }
         }
 
-        private byte[] CreatePacket(PacketType packetType, DataType dataType, ushort action, byte[] data)
+        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
+            if (!m_IsRunning) return;
+
+            byte[] serializedData;
+            try
+            {
+                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));   
+            }
+            catch (Exception ex)
+            {
+                Log($"Serialization Error: {ex.Message}");
+                return;
+            }
+
+            await SendDataAsync(action, serializedData, token);
+        }
+
+        private byte[] CreatePacket(ushort action, byte[] data)
         {
             data ??= Array.Empty<byte>();
             byte[] packet = new byte[PACKET_HEADER_SIZE + data.Length];
             int offset = 0;
-            
+
             int myId = m_IsServer ? -1 : _tcpClient?.GetHashCode() ?? 0;
 
             Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, packet, offset, 4); offset += 4;
             Buffer.BlockCopy(BitConverter.GetBytes(myId), 0, packet, offset, 4); offset += 4;
-            Buffer.BlockCopy(BitConverter.GetBytes((ushort)packetType), 0, packet, offset, 2); offset += 2;
-            Buffer.BlockCopy(BitConverter.GetBytes((ushort)dataType), 0, packet, offset, 2); offset += 2;
+
             Buffer.BlockCopy(BitConverter.GetBytes(action), 0, packet, offset, 2);
 
             Buffer.BlockCopy(data, 0, packet, PACKET_HEADER_SIZE, data.Length);
-            
+
             byte[] lengthPrefix = BitConverter.GetBytes(packet.Length);
             byte[] finalMessage = new byte[4 + packet.Length];
-            
+
             Buffer.BlockCopy(lengthPrefix, 0, finalMessage, 0, 4);
             Buffer.BlockCopy(packet, 0, finalMessage, 4, packet.Length);
 
@@ -434,27 +453,26 @@ namespace Modules.Utilities
             int offset = 0;
             int messageId = BitConverter.ToInt32(data, offset); offset += 4;
             int senderId = BitConverter.ToInt32(data, offset); offset += 4;
-            var packetType = (PacketType)BitConverter.ToUInt16(data, offset); offset += 2;
-            var dataType = (DataType)BitConverter.ToUInt16(data, offset); offset += 2;
             var action = BitConverter.ToUInt16(data, offset);
-            
+
             var payload = new byte[data.Length - PACKET_HEADER_SIZE];
             Buffer.BlockCopy(data, PACKET_HEADER_SIZE, payload, 0, payload.Length);
-            
+
             return new PacketResponse
             {
-                messageId = messageId, senderId = senderId, packetType = packetType,
-                dataType = dataType, action = action, data = payload, remoteEndPoint = remoteEndPoint
+                messageId = messageId,
+                senderId = senderId,
+                action = action,
+                data = payload,
+                remoteEndPoint = remoteEndPoint
             };
         }
         #endregion
 
         #region Nested Classes & Enums
-        
+
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
-        public class PacketResponse { public int messageId; public int senderId; public PacketType packetType; public DataType dataType; public ushort action; public byte[] data; public IPEndPoint remoteEndPoint; }
-        public enum PacketType { SEND_DATA = 1 }
-        public enum DataType { NONE, STRING, BYTES, FLOAT, INT, LONG, VECTOR2, VECTOR3, VECTOR4, QUATERNION, COLOR, BOOL, DOUBLE, TRANSFORM }
+        public class PacketResponse { public int messageId; public int senderId; public ushort action; public byte[] data; public IPEndPoint remoteEndPoint; }
 
         #endregion
 
@@ -477,14 +495,14 @@ namespace Modules.Utilities
     {
         public override void OnInspectorGUI()
         {
-            
+
             var tcpConnector = (TCPConnector)target;
             if (tcpConnector == null) return;
 
             serializedObject.Update();
 
             var isServer = serializedObject.FindProperty("m_IsServer");
-            
+
             // --- UI for Server/Client toggle ---
             EditorGUILayout.BeginHorizontal();
             GUI.color = isServer.boolValue ? Color.green : Color.gray;
@@ -517,13 +535,13 @@ namespace Modules.Utilities
             // <<< Discovery can be enabled/disabled for server too
             if (isServer.boolValue)
             {
-                 EditorGUILayout.PropertyField(enableDiscovery);
+                EditorGUILayout.PropertyField(enableDiscovery);
             }
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryPort"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
-            
+
             EditorGUILayout.Space();
-            
+
             // --- Status Box ---
             if (Application.isPlaying)
             {
