@@ -38,8 +38,8 @@ namespace Modules.Utilities
         [SerializeField] private string m_DiscoveryMessage = "DiscoverServer";
 
         // --- Status ---
-        private bool m_IsRunning = false;
-        private bool m_IsConnected = false;
+        [SerializeField] private bool m_IsRunning = false;
+        [SerializeField] private bool m_IsConnected = false;
 
         // --- TCP Components ---
         private TcpListener _tcpListener; // Server
@@ -111,44 +111,31 @@ namespace Modules.Utilities
             
             if (m_IsServer)
             {
-                // Start broadcasting presence in parallel if enabled
+                m_IsRunning = true; // <<< Set IsRunning true for server here
                 if(m_EnableDiscovery)
                 {
                     BroadcastPresenceAsync(_cts.Token).Forget();
                 }
-                // Start the main TCP server
                 await StartServerAsync(_cts.Token);
             }
             else
             {
-                string serverIp = m_Host;
-                if (m_EnableDiscovery)
-                {
-                    Log("Starting to listen for server broadcast...");
-                    serverIp = await ListenForServerAsync(_cts.Token);
-                    if (string.IsNullOrEmpty(serverIp))
-                    {
-                        Log("Could not find server via auto-discovery. Stopping.");
-                        return; // Exit if no server found
-                    }
-                    Log($"Server found at {serverIp}! Connecting via TCP...");
-                    m_Host = serverIp;
-                }
-                
-                await StartClientAsync(_cts.Token);
+                m_IsRunning = true; // <<< Set IsRunning true for client here
+                // <<< This is the new main client loop that handles reconnects
+                ClientConnectionLoopAsync(_cts.Token).Forget();
             }
         }
         
         public void StopConnection()
         {
             Log("Stopping connection...");
+            m_IsRunning = false; // <<< Set IsRunning false first
             _cts?.Cancel();
             _cts?.Dispose();
             _cts = null;
 
             if (m_IsServer)
             {
-                // Closing listener will cause AcceptTcpClientAsync to throw exception and stop
                 _tcpListener?.Stop(); 
                 lock(m_Clients)
                 {
@@ -163,12 +150,13 @@ namespace Modules.Utilities
             else
             {
                 _tcpClient?.Close();
-                if(m_IsConnected) m_OnServerDisconnected?.Invoke(m_ServerInfo);
+                if(m_IsConnected)
+                {
+                    m_IsConnected = false;
+                    m_OnServerDisconnected?.Invoke(m_ServerInfo);
+                }
                 Log("Client connection closed.");
             }
-
-            m_IsRunning = false;
-            m_IsConnected = false;
         }
 
         #endregion
@@ -181,7 +169,6 @@ namespace Modules.Utilities
             {
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
                 _tcpListener.Start();
-                m_IsRunning = true;
                 Log($"Server listening on TCP port {m_Port}.");
 
                 while (!token.IsCancellationRequested)
@@ -252,18 +239,50 @@ namespace Modules.Utilities
 
         #region Client Methods
 
+        // <<< NEW: The main loop for the client
+        private async UniTask ClientConnectionLoopAsync(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                string serverIp = null;
+                if (m_EnableDiscovery)
+                {
+                    Log("Searching for server...");
+                    serverIp = await ListenForServerAsync(token);
+                }
+                else
+                {
+                    serverIp = m_Host; // Use manual host if discovery is disabled
+                }
+
+                if (!string.IsNullOrEmpty(serverIp) && !token.IsCancellationRequested)
+                {
+                    Log($"Server found at {serverIp}. Attempting to connect...");
+                    m_Host = serverIp;
+                    // This method will now block until the connection is lost
+                    await StartClientAsync(token);
+                }
+
+                // If connection fails or is lost, wait before retrying
+                if (!token.IsCancellationRequested)
+                {
+                    await UniTask.Delay(TimeSpan.FromSeconds(1), cancellationToken: token);
+                    Log("Retrying connection...");
+                }
+            }
+        }
+
         private async UniTask StartClientAsync(CancellationToken token)
         {
+            // This method now only handles a single connection attempt and lifetime
             try
             {
                 _tcpClient = new TcpClient();
-                Log($"Attempting to connect to {m_Host}:{m_Port}...");
                 await _tcpClient.ConnectAsync(m_Host, m_Port).AsUniTask().AttachExternalCancellation(token);
 
                 if (_tcpClient.Connected)
                 {
-                    m_IsRunning = true;
-                    m_IsConnected = true;
+                    m_IsConnected = true; // Set connected status
                     var serverEndPoint = (IPEndPoint)_tcpClient.Client.RemoteEndPoint;
                     m_ServerInfo = new ConnectorInfo
                     {
@@ -280,7 +299,7 @@ namespace Modules.Utilities
                     await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
                 }
             }
-            catch (OperationCanceledException) { Log("Connection attempt canceled."); }
+            catch (OperationCanceledException) { Log("Connection attempt canceled by token."); }
             catch (Exception ex) { Log($"Failed to connect or connection lost: {ex.Message}"); }
             finally
             {
@@ -291,25 +310,27 @@ namespace Modules.Utilities
                     await UniTask.SwitchToMainThread();
                     m_OnServerDisconnected?.Invoke(m_ServerInfo);
                 }
-                m_IsRunning = false;
                 _tcpClient?.Close();
             }
         }
 
         private async UniTask<string> ListenForServerAsync(CancellationToken token)
         {
-            using var udpClient = new UdpClient(m_DiscoveryPort);
+            using var udpClient = new UdpClient();
+            // <<< Allow reusing the address to avoid issues on quick restarts
+            udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, m_DiscoveryPort));
+
             try
             {
-                var receiveResult = await udpClient.ReceiveAsync().AsUniTask()
-                    .AttachExternalCancellation(token).Timeout(TimeSpan.FromSeconds(5));    
+                var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
+                
                 var receivedMessage = Encoding.UTF8.GetString(receiveResult.Buffer);
                 if (receivedMessage == m_DiscoveryMessage)
                 {
                     return receiveResult.RemoteEndPoint.Address.ToString();
                 }
             }
-            catch (TimeoutException) { Log("Server discovery timed out."); }
             catch (OperationCanceledException) { }
             catch (Exception ex) { Log($"UDP Listen Error: {ex.Message}"); }
             return null;
@@ -318,7 +339,7 @@ namespace Modules.Utilities
         #endregion
 
         #region Data Handling
-
+        // ... (No changes in this region) ...
         private async UniTask ReceiveDataLoopAsync(NetworkStream stream, ConnectorInfo connectorInfo, CancellationToken token)
         {
             var lengthBuffer = new byte[4];
@@ -328,6 +349,11 @@ namespace Modules.Utilities
                 if (bytesRead < 4) break; // Connection closed
                 
                 int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
+                if (messageLength <= 0 || messageLength > 1024 * 1024 * 4) // <<< Sanity check for message size (e.g., max 4MB)
+                {
+                    Log($"Invalid message length received: {messageLength}. Disconnecting.");
+                    break;
+                }
                 var dataBuffer = new byte[messageLength];
 
                 int totalBytesRead = 0;
@@ -356,7 +382,11 @@ namespace Modules.Utilities
             {
                 if (m_IsServer)
                 {
-                    var sendTasks = m_Clients.Keys.Select(client => 
+                    // Create a copy of the list to avoid issues if a client disconnects during the send
+                    List<TcpClient> clientsToSend;
+                    lock(m_Clients) { clientsToSend = m_Clients.Keys.ToList(); }
+
+                    var sendTasks = clientsToSend.Select(client => 
                         client.GetStream().WriteAsync(message, 0, message.Length, token).AsUniTask().AttachExternalCancellation(token)
                     ).ToList();
                     await UniTask.WhenAll(sendTasks);
@@ -369,8 +399,7 @@ namespace Modules.Utilities
             catch (Exception ex)
             {
                 Log($"Send Data Error: {ex.Message}");
-                // A failed write usually means connection is dead.
-                StopConnection();
+                // A failed write usually means connection is dead. The receive loop will handle the disconnect.
             }
         }
 
@@ -418,7 +447,6 @@ namespace Modules.Utilities
                 dataType = dataType, action = action, data = payload, remoteEndPoint = remoteEndPoint
             };
         }
-
         #endregion
 
         #region Nested Classes & Enums
@@ -449,7 +477,10 @@ namespace Modules.Utilities
     {
         public override void OnInspectorGUI()
         {
+            
             var tcpConnector = (TCPConnector)target;
+            if (tcpConnector == null) return;
+
             serializedObject.Update();
 
             var isServer = serializedObject.FindProperty("m_IsServer");
@@ -470,9 +501,9 @@ namespace Modules.Utilities
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_StartOnEnable"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Port"));
 
+            var enableDiscovery = serializedObject.FindProperty("m_EnableDiscovery");
             if (!isServer.boolValue)
             {
-                var enableDiscovery = serializedObject.FindProperty("m_EnableDiscovery");
                 EditorGUILayout.PropertyField(enableDiscovery);
                 // Only show Host field if discovery is disabled
                 if (!enableDiscovery.boolValue)
@@ -483,6 +514,11 @@ namespace Modules.Utilities
 
             EditorGUILayout.Space();
             EditorGUILayout.LabelField("Auto Discovery (UDP)", EditorStyles.boldLabel);
+            // <<< Discovery can be enabled/disabled for server too
+            if (isServer.boolValue)
+            {
+                 EditorGUILayout.PropertyField(enableDiscovery);
+            }
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryPort"));
             EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
             
@@ -491,12 +527,15 @@ namespace Modules.Utilities
             // --- Status Box ---
             if (Application.isPlaying)
             {
+                var isRunningProp = serializedObject.FindProperty("m_IsRunning");
+                var isConnectedProp = serializedObject.FindProperty("m_IsConnected");
+
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.LabelField("Status", EditorStyles.boldLabel);
-                EditorGUILayout.Toggle("Is Running", tcpConnector.IsRunning);
+                EditorGUILayout.Toggle("Is Running", isRunningProp.boolValue);
                 if (!isServer.boolValue)
                 {
-                    EditorGUILayout.Toggle("Is Connected", tcpConnector.IsConnected);
+                    EditorGUILayout.Toggle("Is Connected", isConnectedProp.boolValue);
                 }
 
                 if (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0)
@@ -509,7 +548,7 @@ namespace Modules.Utilities
                 // --- Actions Box ---
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.LabelField("Actions", EditorStyles.boldLabel);
-                if (!tcpConnector.IsRunning)
+                if (!isRunningProp.boolValue)
                 {
                     GUI.backgroundColor = Color.cyan;
                     if (GUILayout.Button("Start Connection")) { tcpConnector.StartConnection().Forget(); }
