@@ -59,7 +59,6 @@ namespace Modules.Utilities
         private const int PACKET_HEADER_SIZE = 19;
         private Dictionary<int, List<byte[]>> receivedChunks = new Dictionary<int, List<byte[]>>();
         private List<PacketRequest> packetSendQueue = new List<PacketRequest>();
-        private List<PacketConfirm> packetWaitConfirmList = new List<PacketConfirm>();
 
         #endregion
 
@@ -164,6 +163,8 @@ namespace Modules.Utilities
 
             while (!_token.IsCancellationRequested)
             {
+
+                Log("Sending Ping...");
 
                 try
                 {
@@ -342,59 +343,15 @@ namespace Modules.Utilities
                         case PacketType.SEND_DATA:
                             //receiver side
 
-
-
-                            var isExist = packetWaitConfirmList
-                                    .FindIndex(x => x.messageId == packetResponse.messageId &&
-                                    x.index == packetResponse.index &&
-                                    x.id == packetResponse.senderId) != -1;
-
-                            if (packetResponse.requestConfirm)
-                            {
-
-                                //send back to confirm
-                                var confirmDataSend = new PacketConfirm()
-                                {
-                                    messageId = packetResponse.messageId,
-                                    index = packetResponse.index,
-                                    id = packetResponse.senderId
-                                };
-
-                                if (!isExist)
-                                {
-                                    packetWaitConfirmList.Add(confirmDataSend);
-
-                                }
-
-                                SendDataConfirm(confirmDataSend);
-
-                            }
-
-
-
-
                             if (packetResponse.isCompleted)
                             {
                                 //add response to list
-                                //check id if not exist then Invoke
-                                if (!isExist)
-                                    m_OnDataReceived?.Invoke(packetResponse);
+                                m_OnDataReceived?.Invoke(packetResponse);
 
                             }
 
                             break;
-                        case PacketType.SEND_DATA_CONFIRM:
-                            //sender side
-                            //remove request from queue
-                            var confirmData = UnityConverter.FromBytes<PacketConfirm>(packetResponse.data);
 
-                            var index = packetSendQueue.FindIndex(x => x.messageId == confirmData.messageId && x.index == confirmData.index && x.senderId == confirmData.id);
-
-                            if (index != -1)
-                            {
-                                packetSendQueue.RemoveAt(index);
-                            }
-                            break;
 
                     }
 
@@ -570,27 +527,7 @@ namespace Modules.Utilities
             }
         }
 
-        private void SendDataConfirm(PacketConfirm _confirmData, CancellationToken _token = default)
-        {
-            var messageId = GetRandomId();
-            var action = 0;
-            var packetType = PacketType.SEND_DATA_CONFIRM;
-            var dataType = DataType.NONE;
-            try
-            {
-                var confirmData = UnityConverter.ToBytes(_confirmData);
-                AddPacketToQueue(messageId, packetType, dataType, (ushort)action, confirmData, false);
 
-            }
-            catch (Exception ex)
-            {
-                Debug.LogError($"Error converting confirm data: {ex.Message}");
-            }
-
-
-
-
-        }
         private void AddPacketToQueue(int messageId, PacketType _packetType, DataType _dataType, ushort _action, byte[] _data, bool _requestConfirm)
         {
 
@@ -712,7 +649,6 @@ namespace Modules.Utilities
                     isCompleted = true,
                     data = completePacket,
                     remoteEndPoint = _result.RemoteEndPoint,
-                    requestConfirm = requestConfirm,
                     createdAt = DateTime.UtcNow.Ticks
 
                 };
@@ -729,7 +665,6 @@ namespace Modules.Utilities
                 index = chunkIndex,
                 data = null,
                 remoteEndPoint = _result.RemoteEndPoint,
-                requestConfirm = requestConfirm,
                 createdAt = DateTime.UtcNow.Ticks
 
             };
@@ -787,7 +722,6 @@ namespace Modules.Utilities
             m_ClientInfoList.Clear();
             m_ServerInfo.Clear();
             packetSendQueue.Clear();
-            packetWaitConfirmList.Clear();
             receivedChunks.Clear();
 
             Log("UDP client closed");
@@ -815,14 +749,13 @@ namespace Modules.Utilities
                 m_ClientInfoList.Clear();
                 m_ServerInfo.Clear();
                 packetSendQueue.Clear();
-                packetWaitConfirmList.Clear();
                 receivedChunks.Clear();
                 m_Id = GetRandomId();
 
                 if (m_IsServer)
                 {
 
-
+                    
                     udpClient = new UdpClient();
                     udpClient.ExclusiveAddressUse = true;
                     udpClient.DontFragment = true;
@@ -835,6 +768,7 @@ namespace Modules.Utilities
                     IPEndPoint remoteEP = new IPEndPoint(IPAddress.Parse(ipV4), m_Port);
                     udpClient.Client.Bind(remoteEP);
 
+
                     //get local ip
                     Log($"UDP server started on {ipV4} : {m_Port}");
                     m_IsRunning = true;
@@ -845,15 +779,38 @@ namespace Modules.Utilities
                 else
                 {
                     //connect to server
-                    var serverEndPoint = new IPEndPoint(IPAddress.Parse(m_Host), m_Port);
-                    udpClient = new UdpClient();
+
+
+                    
+                    IPEndPoint serverEndPoint;
+                    if (IPAddress.TryParse(m_Host, out var ipAddress) && !string.IsNullOrEmpty(m_Host))
+                    {
+                        serverEndPoint = new IPEndPoint(ipAddress, m_Port);
+                        Log($"UDP client connecting to {serverEndPoint.Address}:{serverEndPoint.Port}");
+                        udpClient = new UdpClient();
+                        udpClient.DontFragment = true;
+                        udpClient.Connect(serverEndPoint);
+                    }
+
+                      udpClient = new UdpClient();
+                    udpClient.ExclusiveAddressUse = true;
                     udpClient.DontFragment = true;
 
-                    udpClient.Connect(serverEndPoint);
+                    udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.Broadcast, true);
+                    udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
 
-                    Log($"UDP client connecting to {m_Host}:{m_Port}");
+                    var ipV4 = NetworkUtility.GetLocalIPv4();
 
+                    IPEndPoint remoteEP = new IPEndPoint(IPAddress.Parse(ipV4), m_Port);
+                    udpClient.Client.Bind(remoteEP);
+
+
+                    //get local ip
+                    Log($"UDP server started on {ipV4} : {m_Port}");
                     m_IsRunning = true;
+
+
+
 
 
 
@@ -1009,14 +966,6 @@ namespace Modules.Utilities
             }
         }
 
-        [System.Serializable]
-        public class PacketConfirm
-        {
-            public int messageId;
-            public ushort index;
-            public int id;
-        }
-
 
         [System.Serializable]
         public class PacketResponse
@@ -1030,7 +979,6 @@ namespace Modules.Utilities
             public bool isCompleted;
             public byte[] data;
             public IPEndPoint remoteEndPoint;
-            public bool requestConfirm;
             public long createdAt;
 
         }
@@ -1056,7 +1004,6 @@ namespace Modules.Utilities
         {
             PING = 0,
             SEND_DATA = 1,
-            SEND_DATA_CONFIRM = 3,
 
         }
         public enum SendPacketStatus
