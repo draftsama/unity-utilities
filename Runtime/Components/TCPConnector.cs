@@ -35,6 +35,7 @@ namespace Modules.Utilities
 
         [Header("Auto Discovery (UDP Broadcast)")]
         [SerializeField] public bool m_EnableDiscovery = true;
+        [SerializeField] public int m_DiscoveryInterval = 2000; // milliseconds
         [SerializeField] public int m_DiscoveryPort = 7778;
         [SerializeField] public string m_DiscoveryMessage = "DiscoverServer";
 
@@ -170,7 +171,7 @@ namespace Modules.Utilities
             {
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
                 _tcpListener.Start();
-                Log($"Server listening on TCP port {m_Port}.");
+                Log($"listening on TCP port {m_Port}.");
 
                 while (!token.IsCancellationRequested)
                 {
@@ -228,7 +229,7 @@ namespace Modules.Utilities
                 while (!token.IsCancellationRequested)
                 {
                     await udpClient.SendAsync(messageBytes, messageBytes.Length, broadcastAddress);
-                    await UniTask.Delay(TimeSpan.FromSeconds(2), cancellationToken: token);
+                    await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
                 }
             }
             catch (OperationCanceledException) { }
@@ -248,7 +249,7 @@ namespace Modules.Utilities
                 string serverIp = null;
                 if (m_EnableDiscovery)
                 {
-                    Log("Searching for server...");
+                    Log($"Searching for server on UDP port {m_DiscoveryPort} ...");
                     serverIp = await ListenForServerAsync(token);
                 }
                 else
