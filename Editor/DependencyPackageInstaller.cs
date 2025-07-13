@@ -40,6 +40,7 @@ namespace Modules.Utilities.Editor
         {
             // packageName, gitUrl
             new PackageInfo { name = "com.unity.addressables", gitUrl = "" , defineSymbols = new string[] { "PACKAGE_ADDRESSABLES_INSTALLED" } },
+            new PackageInfo { name = "com.unity.nuget.newtonsoft-json",gitUrl = ""},
             new PackageInfo { name = "com.cysharp.unitask", gitUrl = "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"},
         };
 
