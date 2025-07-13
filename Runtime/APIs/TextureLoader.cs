@@ -17,13 +17,17 @@ public class TextureLoader : MonoBehaviour
 
         try
         {
-            using (var request = UnityWebRequestTexture.GetTexture(path)){
+            using (var request = UnityWebRequestTexture.GetTexture(path))
+            {
                 await request.SendWebRequest();
                 if (request.isDone)
                 {
                     m_Texture = DownloadHandlerTexture.GetContent(request);
+                    m_Texture.name = System.IO.Path.GetFileName(path);
                     _IsFinished = true;
-                }else{
+                }
+                else
+                {
                     throw new System.Exception("Failed to load texture");
                 }
             }
@@ -46,9 +50,11 @@ public class TextureLoader : MonoBehaviour
 
     //static list of loaders
     public static List<TextureLoader> m_Loaders = new List<TextureLoader>();
+    public static Transform m_Parent = null;
 
 
-    public static async UniTask<Texture2D> GetTextureAsync(string path){
+    public static async UniTask<Texture2D> GetTextureAsync(string path)
+    {
 
         //find in list
         var loader = m_Loaders.Find(x => x.m_Path == path);
@@ -63,13 +69,21 @@ public class TextureLoader : MonoBehaviour
 
         //create new loader
         var uuid = System.Guid.NewGuid().ToString();
-        var newLoader = new GameObject("TextureLoader_"+uuid).AddComponent<TextureLoader>();
+        var newLoader = new GameObject("TextureLoader_" + uuid).AddComponent<TextureLoader>();
         newLoader.m_Path = path;
-        
+
+        if (m_Parent == null)
+        {
+            var parentGo = new GameObject("TextureLoaders");
+            m_Parent = parentGo.transform;
+
+        }
+        newLoader.transform.SetParent(m_Parent);
+
         m_Loaders.Add(newLoader);
 
         return await newLoader.LoadTextureAsync(path);
-        
+
     }
 
     public static void RemoveLoader(string path){
