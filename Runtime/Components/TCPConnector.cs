@@ -8,7 +8,9 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
+#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
 using Newtonsoft.Json;
+#endif
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -413,7 +415,12 @@ namespace Modules.Utilities
             byte[] serializedData;
             try
             {
+#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
                 serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));   
+#else
+                // Fallback to Unity's JsonUtility if Newtonsoft.Json is not available
+                serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
+#endif
             }
             catch (Exception ex)
             {

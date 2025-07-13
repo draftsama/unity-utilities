@@ -33,6 +33,7 @@ namespace Modules.Utilities.Editor
     {
         static int currentPackageIndex = 0;
         static AddRequest request;
+        static bool hasAlreadyAskedInThisSession = false;
 
         //  "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
         //"com.unity.addressables"
@@ -40,7 +41,7 @@ namespace Modules.Utilities.Editor
         {
             // packageName, gitUrl
             new PackageInfo { name = "com.unity.addressables", gitUrl = "" , defineSymbols = new string[] { "PACKAGE_ADDRESSABLES_INSTALLED" } },
-            new PackageInfo { name = "com.unity.nuget.newtonsoft-json",gitUrl = ""},
+            new PackageInfo { name = "com.unity.nuget.newtonsoft-json",gitUrl = "", defineSymbols = new string[] { "PACKAGE_NEWTONSOFT_JSON_INSTALLED" } },
             new PackageInfo { name = "com.cysharp.unitask", gitUrl = "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"},
         };
 
@@ -157,7 +158,12 @@ namespace Modules.Utilities.Editor
         [InitializeOnLoadMethod]
         static void DependencyRequire()
         {
-
+            // Don't ask again in the same session
+            if (hasAlreadyAskedInThisSession) return;
+            
+            bool hasAnyMissingPackage = false;
+            int checkedPackages = 0;
+            
             for (int i = 0; i < packagesToInstall.Count; i++)
             {
                 string packageName = packagesToInstall[i].name;
@@ -165,14 +171,11 @@ namespace Modules.Utilities.Editor
 
                 IsPackageInstalled(packagesToInstall[i], (isInstalled, pkgInfo) =>
                 {
+                    checkedPackages++;
+                    
                     if (!isInstalled)
                     {
-                        // Debug.Log($"Package {pkgInfo.name} is not installed.");
-                        if (EditorUtility.DisplayDialog("Unity Utilities", "Require Dependency Packages", "Install", "Cancel"))
-                        {
-                            InstallDependencyPackages();
-
-                        }
+                        hasAnyMissingPackage = true;
                     }
                     else
                     {
@@ -182,11 +185,19 @@ namespace Modules.Utilities.Editor
                             AddDefineSymbols(pkgInfo.defineSymbols);
                     }
 
-
-
-
+                    // Check if all packages have been checked
+                    if (checkedPackages >= packagesToInstall.Count)
+                    {
+                        if (hasAnyMissingPackage)
+                        {
+                            hasAlreadyAskedInThisSession = true; // Mark as asked
+                            if (EditorUtility.DisplayDialog("Unity Utilities", "Some dependency packages are missing. Do you want to install them?", "Install", "Cancel"))
+                            {
+                                InstallDependencyPackages();
+                            }
+                        }
+                    }
                 });
-
             }
 
             // Debug.Log("DependencyRequire");

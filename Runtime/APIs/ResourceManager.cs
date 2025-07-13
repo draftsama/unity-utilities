@@ -7,7 +7,9 @@ using UnityEngine;
 using Cysharp.Threading.Tasks;
 using Cysharp.Threading.Tasks.Linq;
 using UnityEngine.Networking;
+#if PACKAGE_ADDRESSABLES_INSTALLED
 using UnityEngine.AddressableAssets;
+#endif
 
 namespace Modules.Utilities
 {
@@ -214,7 +216,7 @@ namespace Modules.Utilities
                 }
                 else if (_Instance.m_ResourceStoreType == ResourceStoreType.Addressable)
                 {
-
+#if PACKAGE_ADDRESSABLES_INSTALLED
                     Debug.Log($"GetResourceAsync: {resourceType} - {_name}");
                     switch (resourceType)
                     {
@@ -248,9 +250,10 @@ namespace Modules.Utilities
                             }
                             break;
                     }
-
-
-
+#else
+                    Debug.LogError("Addressables package is not installed. Please install it first.");
+                    return null;
+#endif
                 }
 
             }
