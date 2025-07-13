@@ -58,6 +58,7 @@ namespace Modules.Utilities
         [SerializeField] private UnityEvent<ConnectorInfo> m_OnServerConnected = new UnityEvent<ConnectorInfo>();
         [SerializeField] private UnityEvent<ConnectorInfo> m_OnServerDisconnected = new UnityEvent<ConnectorInfo>();
         [SerializeField] private UnityEvent<PacketResponse> m_OnDataReceived = new UnityEvent<PacketResponse>();
+        [SerializeField] private UnityEvent<ErrorInfo> m_OnError = new UnityEvent<ErrorInfo>();
 
         private CancellationTokenSource _cts;
 
@@ -182,7 +183,11 @@ namespace Modules.Utilities
                 }
             }
             catch (OperationCanceledException) { Log("Server start operation was canceled."); }
-            catch (Exception ex) { Log($"Server Error: {ex.GetType().Name} - {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                Log($"Server Error: {ex.GetType().Name} - {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Connection, "Server failed to start or accept connections", ex);
+            }
             finally
             {
                 m_IsRunning = false;
@@ -208,7 +213,11 @@ namespace Modules.Utilities
 
             var stream = client.GetStream();
             try { await ReceiveDataLoopAsync(stream, clientInfo, token); }
-            catch (Exception) { /* Handled in finally */ }
+            catch (Exception ex) 
+            { 
+                Log($"Client handling error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.DataTransmission, "Error handling client data", ex, clientInfo);
+            }
             finally
             {
                 Log($"Client disconnected: {clientInfo.ipAddress}:{clientInfo.port}");
@@ -235,7 +244,11 @@ namespace Modules.Utilities
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Log($"UDP Broadcast Error: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                Log($"UDP Broadcast Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Discovery, "UDP broadcast failed", ex);
+            }
             finally { Log("Stopping discovery broadcast."); }
         }
 
@@ -304,7 +317,11 @@ namespace Modules.Utilities
                 }
             }
             catch (OperationCanceledException) { Log("Connection attempt canceled by token."); }
-            catch (Exception ex) { Log($"Failed to connect or connection lost: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                Log($"Failed to connect or connection lost: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Connection, "Client connection failed", ex);
+            }
             finally
             {
                 if (m_IsConnected)
@@ -336,7 +353,11 @@ namespace Modules.Utilities
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) { Log($"UDP Listen Error: {ex.Message}"); }
+            catch (Exception ex) 
+            { 
+                Log($"UDP Listen Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Discovery, "UDP listen failed", ex);
+            }
             return null;
         }
 
@@ -349,39 +370,97 @@ namespace Modules.Utilities
             var lengthBuffer = new byte[4];
             while (!token.IsCancellationRequested && stream.CanRead)
             {
-                int bytesRead = await stream.ReadAsync(lengthBuffer, 0, lengthBuffer.Length, token);
-                if (bytesRead < 4) break; // Connection closed
-
-                int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
-                if (messageLength <= 0 || messageLength > 1024 * 1024 * 4) // <<< Sanity check for message size (e.g., max 4MB)
+                try
                 {
-                    Log($"Invalid message length received: {messageLength}. Disconnecting.");
+                    int bytesRead = await stream.ReadAsync(lengthBuffer, 0, lengthBuffer.Length, token);
+                    if (bytesRead < 4) break; // Connection closed
+
+                    int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
+                    if (messageLength <= 0 || messageLength > 1024 * 1024 * 4) // <<< Sanity check for message size (e.g., max 4MB)
+                    {
+                        Log($"Invalid message length received: {messageLength}. Disconnecting.");
+                        ReportError(ErrorInfo.ErrorType.Protocol, $"Invalid message length: {messageLength}", null, connectorInfo);
+                        break;
+                    }
+                    
+                    var dataBuffer = new byte[messageLength];
+                    string operationId = Guid.NewGuid().ToString();
+                    
+                    // Create initial packet response with receiving status
+                    var packetResponse = new PacketResponse
+                    {
+                        status = PacketResponse.ReceiveStatus.Receiving,
+                        totalBytes = messageLength,
+                        processedBytes = 0,
+                        remoteEndPoint = connectorInfo.remoteEndPoint,
+                        operationId = operationId
+                    };
+
+                    int totalBytesRead = 0;
+                    var lastProgressReport = System.DateTime.Now;
+                    const int progressReportIntervalMs = 100; // Report progress every 100ms max
+
+                    while (totalBytesRead < messageLength)
+                    {
+                        bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, messageLength - totalBytesRead, token);
+                        if (bytesRead == 0) 
+                        {
+                            ReportError(ErrorInfo.ErrorType.DataTransmission, "Connection closed prematurely during data receive", null, connectorInfo, operationId);
+                            throw new InvalidOperationException("Connection closed prematurely.");
+                        }
+                        totalBytesRead += bytesRead;
+                        
+                        // Update progress in packet response
+                        packetResponse.processedBytes = totalBytesRead;
+                        
+                        // Throttle progress reports to avoid UI spam
+                        var now = System.DateTime.Now;
+                        if ((now - lastProgressReport).TotalMilliseconds >= progressReportIntervalMs || 
+                            totalBytesRead >= messageLength)
+                        {
+                            lastProgressReport = now;
+                            await UniTask.SwitchToMainThread();
+                            m_OnDataReceived?.Invoke(packetResponse);
+                        }
+                        
+                        await UniTask.Yield();
+                    }
+
+                    // Parse the complete packet and update status
+                    var finalPacketResponse = ReadPacket(dataBuffer, connectorInfo.remoteEndPoint);
+                    if (finalPacketResponse != null)
+                    {
+                        // Copy progress information to final response
+                        finalPacketResponse.status = PacketResponse.ReceiveStatus.Received;
+                        finalPacketResponse.totalBytes = messageLength;
+                        finalPacketResponse.processedBytes = totalBytesRead;
+                        finalPacketResponse.operationId = operationId;
+                        
+                        await UniTask.SwitchToMainThread();
+                        m_OnDataReceived?.Invoke(finalPacketResponse);
+                    }
+                }
+                catch (OperationCanceledException)
+                {
+                    // Expected when cancellation is requested
                     break;
                 }
-                var dataBuffer = new byte[messageLength];
-
-                int totalBytesRead = 0;
-                while (totalBytesRead < messageLength)
+                catch (Exception ex)
                 {
-                    bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, messageLength - totalBytesRead, token);
-                    if (bytesRead == 0) throw new InvalidOperationException("Connection closed prematurely.");
-                    totalBytesRead += bytesRead;
-                }
-
-                PacketResponse response = ReadPacket(dataBuffer, connectorInfo.remoteEndPoint);
-                if (response != null)
-                {
-                    await UniTask.SwitchToMainThread();
-                    m_OnDataReceived?.Invoke(response);
+                    Log($"Receive Data Loop Error: {ex.Message}");
+                    ReportError(ErrorInfo.ErrorType.DataTransmission, "Data receive loop failed", ex, connectorInfo);
+                    break; // Exit the loop on error
                 }
             }
         }
 
-        public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
+        public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default, IProgress<DataProgressInfo> progress = null)
         {
             if (!m_IsRunning) return;
 
             byte[] message = CreatePacket(action, data);
+            string operationId = Guid.NewGuid().ToString();
+            
             try
             {
                 if (m_IsServer)
@@ -390,24 +469,58 @@ namespace Modules.Utilities
                     List<TcpClient> clientsToSend;
                     lock (m_Clients) { clientsToSend = m_Clients.Keys.ToList(); }
 
-                    var sendTasks = clientsToSend.Select(client =>
-                        client.GetStream().WriteAsync(message, 0, message.Length, token).AsUniTask().AttachExternalCancellation(token)
-                    ).ToList();
+                    var sendTasks = clientsToSend.Select(async client =>
+                    {
+                        var clientInfo = m_Clients[client];
+                        await SendDataWithProgressAsync(client.GetStream(), message, clientInfo, operationId, token, progress);
+                    }).ToList();
+                    
                     await UniTask.WhenAll(sendTasks);
                 }
                 else if (m_IsConnected && _tcpClient != null)
                 {
-                    await _tcpClient.GetStream().WriteAsync(message, 0, message.Length, token);
+                    await SendDataWithProgressAsync(_tcpClient.GetStream(), message, m_ServerInfo, operationId, token, progress);
                 }
             }
             catch (Exception ex)
             {
                 Log($"Send Data Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.DataTransmission, "Data send failed", ex);
                 // A failed write usually means connection is dead. The receive loop will handle the disconnect.
             }
         }
 
-        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default)
+        private async UniTask SendDataWithProgressAsync(NetworkStream stream, byte[] message, ConnectorInfo connectorInfo, string operationId, CancellationToken token, IProgress<DataProgressInfo> progress = null)
+        {
+            var progressInfo = new DataProgressInfo
+            {
+                operationType = DataProgressInfo.OperationType.Send,
+                totalBytes = message.Length,
+                processedBytes = 0,
+                connectorInfo = connectorInfo,
+                operationId = operationId
+            };
+
+            const int chunkSize = 8192; // 8KB chunks for progress reporting
+            int offset = 0;
+
+            while (offset < message.Length)
+            {
+                int bytesToSend = Math.Min(chunkSize, message.Length - offset);
+                await stream.WriteAsync(message, offset, bytesToSend, token);
+                offset += bytesToSend;
+                
+                // Update progress
+                progressInfo.processedBytes = offset;
+                
+                // Report progress via IProgress parameter (if provided)
+                progress?.Report(progressInfo);
+                
+                await UniTask.Yield();
+            }
+        }
+
+        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default, IProgress<DataProgressInfo> progress = null)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
             if (!m_IsRunning) return;
@@ -425,10 +538,11 @@ namespace Modules.Utilities
             catch (Exception ex)
             {
                 Log($"Serialization Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Serialization, "Data serialization failed", ex);
                 return;
             }
 
-            await SendDataAsync(action, serializedData, token);
+            await SendDataAsync(action, serializedData, token, progress);
         }
 
         private byte[] CreatePacket(ushort action, byte[] data)
@@ -472,7 +586,10 @@ namespace Modules.Utilities
                 senderId = senderId,
                 action = action,
                 data = payload,
-                remoteEndPoint = remoteEndPoint
+                remoteEndPoint = remoteEndPoint,
+                status = PacketResponse.ReceiveStatus.None, // Will be set by caller
+                totalBytes = data.Length,
+                processedBytes = data.Length
             };
         }
         #endregion
@@ -480,7 +597,70 @@ namespace Modules.Utilities
         #region Nested Classes & Enums
 
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
-        public class PacketResponse { public int messageId; public int senderId; public ushort action; public byte[] data; public IPEndPoint remoteEndPoint; }
+        
+        [Serializable]
+        public class PacketResponse 
+        { 
+            public enum ReceiveStatus { None, Receiving, Received }
+            
+            public int messageId; 
+            public int senderId; 
+            public ushort action; 
+            public byte[] data; 
+            public IPEndPoint remoteEndPoint;
+            
+            // Progress tracking fields
+            public ReceiveStatus status = ReceiveStatus.None;
+            public int totalBytes;
+            public int processedBytes;
+            public float progressPercentage => totalBytes > 0 ? (float)processedBytes / totalBytes : 0f;
+            public bool isCompleted => status == ReceiveStatus.Received;
+            public string operationId;
+        }
+        
+        [Serializable]
+        public class DataProgressInfo
+        {
+            public enum OperationType { Send, Receive }
+            public OperationType operationType;
+            public int totalBytes;
+            public int processedBytes;
+            public float progressPercentage => totalBytes > 0 ? (float)processedBytes / totalBytes : 0f;
+            public bool isCompleted => processedBytes >= totalBytes;
+            public ConnectorInfo connectorInfo;
+            public string operationId; // Unique identifier for tracking specific operations
+        }
+
+        [Serializable]
+        public class ErrorInfo
+        {
+            public enum ErrorType 
+            { 
+                Connection,        // Connection related errors
+                DataTransmission,  // Send/Receive errors
+                Protocol,          // Protocol/packet format errors
+                Discovery,         // UDP discovery errors
+                Serialization,     // JSON serialization errors
+                General            // General/Unknown errors
+            }
+
+            public ErrorType errorType;
+            public string message;
+            public string exception;
+            public ConnectorInfo connectorInfo;
+            public System.DateTime timestamp;
+            public string operationId; // Link to specific operation if applicable
+
+            public ErrorInfo(ErrorType type, string msg, Exception ex = null, ConnectorInfo? connector = null, string opId = null)
+            {
+                errorType = type;
+                message = msg;
+                exception = ex?.ToString() ?? "";
+                connectorInfo = connector ?? new ConnectorInfo();
+                timestamp = System.DateTime.Now;
+                operationId = opId ?? "";
+            }
+        }
 
         #endregion
 
@@ -490,6 +670,32 @@ namespace Modules.Utilities
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnClientDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnClientDisconnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerConnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerConnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerDisconnected, token);
+        #endregion
+
+        #region Error Reporting
+
+        private void ReportError(ErrorInfo.ErrorType errorType, string message, Exception exception = null, ConnectorInfo? connectorInfo = null, string operationId = null)
+        {
+            var errorInfo = new ErrorInfo(errorType, message, exception, connectorInfo, operationId);
+            
+            if (m_IsDebug)
+            {
+                var prefix = m_IsServer ? "Server" : "Client";
+                Debug.LogError($"[TCP-{prefix}] {errorType}: {message}");
+                if (exception != null)
+                {
+                    Debug.LogException(exception);
+                }
+            }
+            
+            // Invoke error event on main thread
+            UniTask.Create(async () =>
+            {
+                await UniTask.SwitchToMainThread();
+                m_OnError?.Invoke(errorInfo);
+            }).Forget();
+        }
+
         #endregion
     }
 }
