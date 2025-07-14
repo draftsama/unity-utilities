@@ -16,6 +16,7 @@ namespace Modules.Utilities
     public class ResourceManager : MonoBehaviour
     {
         [SerializeField] public ResourceStoreType m_ResourceStoreType;
+        [SerializeField] private bool m_DontDestroyOnLoad = true;
         private static ResourceManager _Instance;
 
 
@@ -29,6 +30,7 @@ namespace Modules.Utilities
                 return;
             }
 
+
             m_ResourceResponseList?.Clear();
             m_ResourceResponseList = new List<ResourceResponse>();
 
@@ -41,8 +43,8 @@ namespace Modules.Utilities
 
 
             _Instance = this;
-
-            DontDestroyOnLoad(gameObject);
+            if (m_DontDestroyOnLoad)
+                DontDestroyOnLoad(gameObject);
         }
 
 
