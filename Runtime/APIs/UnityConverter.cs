@@ -185,51 +185,114 @@ namespace Modules.Utilities
 
 
         public static byte[] ToBytes<T>(T obj)
-    {
-        if (typeof(T).IsValueType)
         {
-            int size = Marshal.SizeOf(typeof(T));
-            byte[] arr = new byte[size];
-            IntPtr ptr = Marshal.AllocHGlobal(size);
-            Marshal.StructureToPtr(obj, ptr, true);
-            Marshal.Copy(ptr, arr, 0, size);
-            Marshal.FreeHGlobal(ptr);
-            return arr;
-        }
-        else
-        {
-            using (MemoryStream ms = new MemoryStream())
+            if (typeof(T).IsValueType)
             {
-                var serializer = new DataContractSerializer(typeof(T));
-                serializer.WriteObject(ms, obj);
-                return ms.ToArray();
+                int size = Marshal.SizeOf(typeof(T));
+                byte[] arr = new byte[size];
+                IntPtr ptr = Marshal.AllocHGlobal(size);
+                Marshal.StructureToPtr(obj, ptr, true);
+                Marshal.Copy(ptr, arr, 0, size);
+                Marshal.FreeHGlobal(ptr);
+                return arr;
+            }
+            else
+            {
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    var serializer = new DataContractSerializer(typeof(T));
+                    serializer.WriteObject(ms, obj);
+                    return ms.ToArray();
+                }
             }
         }
-    }
 
-    public static T FromBytes<T>(byte[] data)
-    {
-        if (typeof(T).IsValueType)
+        public static T FromBytes<T>(byte[] data)
         {
-            int size = Marshal.SizeOf(typeof(T));
-            if (data.Length != size)
-                throw new ArgumentException("Byte array size does not match type size");
-
-            IntPtr ptr = Marshal.AllocHGlobal(size);
-            Marshal.Copy(data, 0, ptr, size);
-            T obj = Marshal.PtrToStructure<T>(ptr);
-            Marshal.FreeHGlobal(ptr);
-            return obj;
-        }
-        else
-        {
-            using (MemoryStream ms = new MemoryStream(data))
+            if (typeof(T).IsValueType)
             {
-                var serializer = new DataContractSerializer(typeof(T));
-                return (T)serializer.ReadObject(ms);
+                int size = Marshal.SizeOf(typeof(T));
+                if (data.Length != size)
+                    throw new ArgumentException("Byte array size does not match type size");
+
+                IntPtr ptr = Marshal.AllocHGlobal(size);
+                Marshal.Copy(data, 0, ptr, size);
+                T obj = Marshal.PtrToStructure<T>(ptr);
+                Marshal.FreeHGlobal(ptr);
+                return obj;
+            }
+            else
+            {
+                using (MemoryStream ms = new MemoryStream(data))
+                {
+                    var serializer = new DataContractSerializer(typeof(T));
+                    return (T)serializer.ReadObject(ms);
+                }
             }
         }
-    }
+
+        public static byte[] GetBytes(Texture2D texture)
+        {
+            if (texture == null)
+            {
+                Debug.LogError("Texture is null");
+                return null;
+            }
+
+            // Check if the texture is readable
+            if (!texture.isReadable)
+            {
+                Debug.LogError("Texture is not readable. Please set 'Read/Write Enabled' in the texture import settings.");
+                return null;
+            }
+
+            // Get the raw texture data
+            byte[] rawData = texture.GetRawTextureData();
+
+            //header bytes member width, height, format
+            byte[] header = new byte[12];
+            System.BitConverter.GetBytes(texture.width).CopyTo(header, 0);
+            System.BitConverter.GetBytes(texture.height).CopyTo(header, 4);
+            System.BitConverter.GetBytes((int)texture.format).CopyTo(header, 8);
+            // Combine header and raw data
+            byte[] combinedData = new byte[header.Length + rawData.Length];
+            header.CopyTo(combinedData, 0);
+            rawData.CopyTo(combinedData, header.Length);
+
+            return combinedData;
+        }
+
+        public static Texture2D GetTexture2D(byte[] data)
+        {
+            if (data == null || data.Length < 12)
+            {
+                Debug.LogError("Invalid data for Texture2D creation.");
+                return null;
+            }
+
+            // Extract header information
+            int width = BitConverter.ToInt32(data, 0);
+            int height = BitConverter.ToInt32(data, 4);
+            if (width <= 0 || height <= 0)
+            {
+                Debug.LogError("Invalid texture dimensions.");
+                return null;
+            }
+            TextureFormat format = (TextureFormat)BitConverter.ToInt32(data, 8);
+
+            // Create a new Texture2D
+            var texture = new Texture2D(width, height, format, false);
+
+            // Get the raw texture data from the byte array
+            byte[] rawData = new byte[data.Length - 12];
+            Array.Copy(data, 12, rawData, 0, rawData.Length);
+
+            // Load the raw texture data into the texture
+            texture.LoadRawTextureData(rawData);
+            texture.Apply();
+
+            return texture;
+        }
 
 
 

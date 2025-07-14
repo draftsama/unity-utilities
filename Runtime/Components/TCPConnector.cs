@@ -454,12 +454,11 @@ namespace Modules.Utilities
             }
         }
 
-        public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default, IProgress<DataProgressInfo> progress = null)
+        public async UniTask SendDataAsync(ushort action, byte[] data, IProgress<float> progress = null, CancellationToken token = default)
         {
             if (!m_IsRunning) return;
 
             byte[] message = CreatePacket(action, data);
-            string operationId = Guid.NewGuid().ToString();
             
             try
             {
@@ -471,15 +470,14 @@ namespace Modules.Utilities
 
                     var sendTasks = clientsToSend.Select(async client =>
                     {
-                        var clientInfo = m_Clients[client];
-                        await SendDataWithProgressAsync(client.GetStream(), message, clientInfo, operationId, token, progress);
+                        await SendDataWithProgressAsync(client.GetStream(), message, token, progress);
                     }).ToList();
                     
                     await UniTask.WhenAll(sendTasks);
                 }
                 else if (m_IsConnected && _tcpClient != null)
                 {
-                    await SendDataWithProgressAsync(_tcpClient.GetStream(), message, m_ServerInfo, operationId, token, progress);
+                    await SendDataWithProgressAsync(_tcpClient.GetStream(), message, token, progress);
                 }
             }
             catch (Exception ex)
@@ -490,17 +488,8 @@ namespace Modules.Utilities
             }
         }
 
-        private async UniTask SendDataWithProgressAsync(NetworkStream stream, byte[] message, ConnectorInfo connectorInfo, string operationId, CancellationToken token, IProgress<DataProgressInfo> progress = null)
+        private async UniTask SendDataWithProgressAsync(NetworkStream stream, byte[] message, CancellationToken token, IProgress<float> progress = null)
         {
-            var progressInfo = new DataProgressInfo
-            {
-                operationType = DataProgressInfo.OperationType.Send,
-                totalBytes = message.Length,
-                processedBytes = 0,
-                connectorInfo = connectorInfo,
-                operationId = operationId
-            };
-
             const int chunkSize = 8192; // 8KB chunks for progress reporting
             int offset = 0;
 
@@ -510,17 +499,15 @@ namespace Modules.Utilities
                 await stream.WriteAsync(message, offset, bytesToSend, token);
                 offset += bytesToSend;
                 
-                // Update progress
-                progressInfo.processedBytes = offset;
-                
-                // Report progress via IProgress parameter (if provided)
-                progress?.Report(progressInfo);
+                // Report progress as percentage (0.0 to 1.0)
+                float progressPercentage = (float)offset / message.Length;
+                progress?.Report(progressPercentage);
                 
                 await UniTask.Yield();
             }
         }
 
-        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default, IProgress<DataProgressInfo> progress = null)
+        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default, IProgress<float> progress = null)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
             if (!m_IsRunning) return;
@@ -542,7 +529,7 @@ namespace Modules.Utilities
                 return;
             }
 
-            await SendDataAsync(action, serializedData, token, progress);
+            await SendDataAsync(action, serializedData, progress, token);
         }
 
         private byte[] CreatePacket(ushort action, byte[] data)
@@ -618,19 +605,6 @@ namespace Modules.Utilities
             public string operationId;
         }
         
-        [Serializable]
-        public class DataProgressInfo
-        {
-            public enum OperationType { Send, Receive }
-            public OperationType operationType;
-            public int totalBytes;
-            public int processedBytes;
-            public float progressPercentage => totalBytes > 0 ? (float)processedBytes / totalBytes : 0f;
-            public bool isCompleted => processedBytes >= totalBytes;
-            public ConnectorInfo connectorInfo;
-            public string operationId; // Unique identifier for tracking specific operations
-        }
-
         [Serializable]
         public class ErrorInfo
         {
