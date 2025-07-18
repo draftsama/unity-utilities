@@ -33,6 +33,7 @@ namespace Modules.Utilities
 
         [SerializeField][ReadOnlyField] private bool m_IsPrepared = false;
         [SerializeField][ReadOnlyField] public float m_Progress = 0f;
+        [SerializeField] public bool m_KeepLastframe = false;
 
         [SerializeField] public VideoOutputType m_OutputType = VideoOutputType.RawImage;
 
@@ -164,7 +165,24 @@ namespace Modules.Utilities
         }
 
 
+        public async UniTask<bool> Prepare(CancellationToken _token)
+        {
+            if (!_VideoPlayer.isPrepared || !m_IsPrepared)
+            {
+                SetupURL(m_FileName, m_PathType, m_FolderName);
+                if (string.IsNullOrEmpty(_VideoPlayer.url))
+                {
+                    Debug.Log("Video URL is empty, please check the file path.");
+                    return false;
+                }
 
+                _VideoPlayer.Prepare();
+                await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
+                m_IsPrepared = true;
+            }
+            return true;
+
+        }
 
         public async UniTask PrepareFirstFrame()
         {
@@ -310,7 +328,7 @@ namespace Modules.Utilities
                 _VideoPlayer.playOnAwake = false;
                 _VideoPlayer.renderMode = VideoRenderMode.MaterialOverride;
             }
-            if(Application.isPlaying) ApplyAlpha(0);
+            if (Application.isPlaying) ApplyAlpha(0);
         }
 
         //------------------------------------ Public Method ----------------------------------
@@ -349,20 +367,8 @@ namespace Modules.Utilities
             try
             {
 
+                await Prepare(token);
 
-
-                if (!_VideoPlayer.isPrepared || !m_IsPrepared)
-                {
-                    SetupURL(m_FileName, m_PathType, m_FolderName);
-                    if (string.IsNullOrEmpty(_VideoPlayer.url))
-                    {
-                        Debug.Log("Video URL is empty, please check the file path.");
-                        return;
-                    }
-                    _VideoPlayer.Prepare();
-                    await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: token);
-                    m_IsPrepared = true;
-                }
 
                 Debug.Log("Play Video : " + _VideoPlayer.url);
                 m_IsPlaying = true;
@@ -403,16 +409,32 @@ namespace Modules.Utilities
                         var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseOutQuad, 1f, 0f,
                                 fadeOutProgress);
                         //fade out
-
-                        ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
-                        _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
-
-                        if (fadeOutProgress >= 1f)
+                        if (m_KeepLastframe)
                         {
-                            Debug.Log("Video End :" + _VideoPlayer.url);
-                            _OnEndEventHandler.Invoke();
-                            break;
+                            //keep last frame
+                            if (fadeOutProgress >= 1f)
+                            {
+                                Seek(_VideoPlayer.frameCount - 1);
+                                Debug.Log("Video End :" + _VideoPlayer.url);
+
+                                _OnEndEventHandler.Invoke();
+                                break;
+                            }
+
                         }
+                        else
+                        {
+                            ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
+                            _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
+                            if (fadeOutProgress >= 1f)
+                            {
+                                Debug.Log("Video End :" + _VideoPlayer.url);
+                                _OnEndEventHandler.Invoke();
+                                break;
+                            }
+                        }
+
+
                     }
                     else
                     {
@@ -451,8 +473,11 @@ namespace Modules.Utilities
                 _Stoping = false;
                 m_IsPlaying = false;
                 m_IsPrepared = false;
-                if (_VideoPlayer != null) _VideoPlayer.Stop();
-                ApplyAlpha(0);
+                if (!m_KeepLastframe)
+                {
+                    if (_VideoPlayer != null) _VideoPlayer.Stop();
+                    ApplyAlpha(0);
+                }
             }
 
 
@@ -541,7 +566,7 @@ namespace Modules.Utilities
             _VideoPlayer.time = _progress * _VideoPlayer.length;
         }
 
-       
+
 
 
         public IUniTaskAsyncEnumerable<AsyncUnit> OnEndAsyncEnumerable(CancellationToken _token)
@@ -569,6 +594,7 @@ namespace Modules.Utilities
         private SerializedProperty _MeshFilter;
         private SerializedProperty _MeshRenderer;
         private SerializedProperty _Material;
+
 
         private VideoController instance;
 
