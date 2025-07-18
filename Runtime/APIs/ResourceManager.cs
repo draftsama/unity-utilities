@@ -255,7 +255,6 @@ namespace Modules.Utilities
 
 
                     DirectoryInfo directoryInfo = new DirectoryInfo(GetResourceFolderPath());
-                    Debug.Log(directoryInfo.FullName);
 
                     var fileInfo = directoryInfo
                         .GetFiles("*" + extension, SearchOption.AllDirectories)
