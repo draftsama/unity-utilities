@@ -23,3 +23,7 @@
 - Fixed a bug in TCPConnector where SendDataAsync was not handling progress reporting correctly.
 ### Added
 - Added overload for SendDataAsync in TCPConnector to simplify data sending.
+
+## [1.0.6] - 2025-05-10
+### Fixed
+- Fixed a bug in ResourceTextureLoader

@@ -99,8 +99,10 @@ public class ResourceTextureLoader : ResourceLoaderBase
         {
 
             case ContentSizeMode.NativeSize:
-                if (aspectRatioFitter != null)
-                    Destroy(aspectRatioFitter);
+                if (aspectRatioFitter == null)
+                    aspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
+                aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+
                 rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _texture.width);
                 rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _texture.height);
                 break;
@@ -118,8 +120,9 @@ public class ResourceTextureLoader : ResourceLoaderBase
                 aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
                 break;
             case ContentSizeMode.None:
-                if (aspectRatioFitter != null)
-                    Destroy(aspectRatioFitter);
+                if (aspectRatioFitter == null)
+                    aspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
+
                 aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
                 break;
 
