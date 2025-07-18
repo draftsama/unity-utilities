@@ -474,14 +474,14 @@ namespace Modules.Utilities
 
                     var sendTasks = clientsToSend.Select(async client =>
                     {
-                        await SendDataWithProgressAsync(client.GetStream(), message, token, progress);
+                        await SendDataWithProgressAsync(client.GetStream(), message, progress, token);
                     }).ToList();
                     
                     await UniTask.WhenAll(sendTasks);
                 }
                 else if (m_IsConnected && _tcpClient != null)
                 {
-                    await SendDataWithProgressAsync(_tcpClient.GetStream(), message, token, progress);
+                    await SendDataWithProgressAsync(_tcpClient.GetStream(), message, progress, token);
                 }
             }
             catch (Exception ex)
@@ -492,7 +492,7 @@ namespace Modules.Utilities
             }
         }
 
-        private async UniTask SendDataWithProgressAsync(NetworkStream stream, byte[] message, CancellationToken token, IProgress<float> progress = null)
+        private async UniTask SendDataWithProgressAsync(NetworkStream stream, byte[] message,  IProgress<float> progress = null,CancellationToken token = default)
         {
             const int chunkSize = 8192; // 8KB chunks for progress reporting
             int offset = 0;
@@ -511,7 +511,11 @@ namespace Modules.Utilities
             }
         }
 
-        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default, IProgress<float> progress = null)
+        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default)
+        {
+            await SendDataAsync(action, data, null, token);
+        }
+        public async UniTask SendDataAsync<T>(ushort action, T data,IProgress<float> progress, CancellationToken token = default)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
             if (!m_IsRunning) return;
@@ -520,7 +524,7 @@ namespace Modules.Utilities
             try
             {
 #if PACKAGE_NEWTONSOFT_JSON_INSTALLED
-                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));   
+                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
 #else
                 // Fallback to Unity's JsonUtility if Newtonsoft.Json is not available
                 serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
