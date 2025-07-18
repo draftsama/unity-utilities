@@ -372,7 +372,7 @@ namespace Modules.Utilities.Editor
 
                 if (GUILayout.Button("Get All Audio Name From Resource"))
                 {
-                    var dir = new DirectoryInfo(ResourceManager.GetFolderResourcePath());
+                    var dir = new DirectoryInfo(ResourceManager.GetResourceFolderPath());
 
                     string[] extensions = ResourceManager.GetSearchPattern(ResourceManager.ResourceResponse.ResourceType.AudioClip);
 

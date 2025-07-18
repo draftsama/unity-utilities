@@ -53,7 +53,7 @@ namespace Modules.Utilities
             {
                 if (m_IndicatorViewList[i].m_Indicator == indicator)
                 {
-                    if (m_IndicatorViewList[i].gameObject != null)
+                    if (m_IndicatorViewList[i] != null && m_IndicatorViewList[i].gameObject != null)
                     {
                         Destroy(m_IndicatorViewList[i].gameObject);
                     }

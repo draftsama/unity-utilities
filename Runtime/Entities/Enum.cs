@@ -12,13 +12,18 @@ namespace Modules.Utilities
     {
         None, NativeSize, WidthControlHeight, HeightControlWidth
     }
-    
+
+    public enum ResourceContentType
+    {
+       None, CanvasUI, Sprite, Mesh
+    }
+
     public enum VideoOutputType
     {
         RawImage,
         Renderer,
     }
-    
+
     //TODO : Add more video output types as needed
     public enum PlaneVideoControl
     {
@@ -27,7 +32,7 @@ namespace Modules.Utilities
         Screen,
 
     }
-    
+
     public enum VideoStartMode
     {
         None,
@@ -40,7 +45,7 @@ namespace Modules.Utilities
     {
         ExternalResources,
         Addressable,
-        
+
 
     }
 

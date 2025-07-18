@@ -26,6 +26,10 @@ public class ResourceSpriteLoader : ResourceLoaderBase
 
     public override void ApplyTexture(Texture2D _texture)
     {
+        if (_texture == null)
+        {
+            return;
+        }
 
         _texture.wrapMode = m_TextureWrapMode;
         _texture.filterMode = m_FilterMode;

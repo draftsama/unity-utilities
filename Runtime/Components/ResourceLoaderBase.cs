@@ -6,6 +6,12 @@ using System;
 using System.Text.RegularExpressions;
 using System.Linq;
 using System.Threading.Tasks;
+using Modules.Utilities;
+using Mono.Cecil;
+using UnityEngine.UI;
+
+
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -13,6 +19,8 @@ using UnityEditor;
 
 public abstract class ResourceLoaderBase : MonoBehaviour
 {
+
+
     [SerializeField] protected string m_FileName;
 
     [SerializeField] protected Texture2D _EditorSource;
@@ -51,6 +59,7 @@ public class ResourceLoaderBaseEditor : Editor
 
     protected Texture2D _Texture;
 
+
     protected SerializedProperty _TextureTypeValueProperty;
     protected SerializedProperty _AlphaIsTransparency;
 
@@ -61,12 +70,32 @@ public class ResourceLoaderBaseEditor : Editor
     protected SerializedProperty _FilterMode;
     protected SerializedProperty _FileNameProperty;
     TextureImporterType _TextureType;
+
+
+   protected  ResourceContentType _ResourceContentType = ResourceContentType.None;
+
+
     private void OnEnable()
     {
-        _ResourceFolder = Path.Combine(Environment.CurrentDirectory, "Resources");
+
+
         _CurrentNameInput = string.Empty;
         _InputNameID = GUIUtility.keyboardControl;
 
+        _ResourceFolder = ResourceManager.GetResourceFolderPath();
+
+
+        var instance = target as ResourceLoaderBase;
+
+        if (instance.gameObject.GetComponent<Renderer>() != null)
+        {
+            _ResourceContentType = ResourceContentType.Mesh;
+        }
+        else if (instance.gameObject.GetComponent<Image>() != null || instance.gameObject.GetComponent<RawImage>() != null)
+        {
+            _ResourceContentType = ResourceContentType.CanvasUI;
+        }
+       
 
         _TextureTypeValueProperty = serializedObject.FindProperty("m_TextureTypeValue");
         _AlphaIsTransparency = serializedObject.FindProperty("m_AlphaIsTransparency");
@@ -74,7 +103,7 @@ public class ResourceLoaderBaseEditor : Editor
         _GenerateMipMaps = serializedObject.FindProperty("m_GenerateMipMaps");
         _FilterMode = serializedObject.FindProperty("m_FilterMode");
 
-       _FileNameProperty= serializedObject.FindProperty("m_FileName");
+        _FileNameProperty = serializedObject.FindProperty("m_FileName");
 
         var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
         var fileAssetPath = Path.Combine("Assets", relativeFolder, _FileNameProperty.stringValue);
@@ -96,8 +125,17 @@ public class ResourceLoaderBaseEditor : Editor
 
         EditorGUI.BeginChangeCheck();
 
+        //if _ResourceSettingAssetsProperty is null 
+
+        if (ResourceManager.GetInstance().m_ResourceSettingAssets == null)
+        {
+            EditorGUILayout.HelpBox("ResourceSettingAssets is not set.", MessageType.Error);
+            return;
+        }
+
+
         //display Texture2D
-       
+
         if (_Texture != null)
         {
             GUILayout.Label("Preview", GUILayout.ExpandWidth(true));
@@ -143,7 +181,7 @@ public class ResourceLoaderBaseEditor : Editor
             EditorGUILayout.EndVertical();
         }
 
-       
+
 
         _TextureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
         _TextureType = (TextureImporterType)EditorGUILayout.EnumPopup("Texture Type", _TextureType);
@@ -194,8 +232,9 @@ public class ResourceLoaderBaseEditor : Editor
 
         await Task.Delay(100);
 
-
-        var relativeFolder = Path.Combine("ResourcesEditor", "Editor");
+        var folderName = new DirectoryInfo(ResourceManager.GetResourceSettingAssets().m_ExternalResourcesPath).Name;
+        Debug.Log($"folderName: {folderName}");
+        var relativeFolder = Path.Combine("ResourcesEditor", "Editor",folderName);
         var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
 
 
