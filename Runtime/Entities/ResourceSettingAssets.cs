@@ -10,7 +10,7 @@ namespace Modules.Utilities
     public class ResourceSettingAssets : ScriptableObject
     {
         public ResourceStoreType m_ResourceStoreType;
-        public string m_ExternalResourcesPath = "";
+        public string m_ExternalResourcesFolderName = "";
     }
 
 

@@ -513,12 +513,13 @@ namespace Modules.Utilities
 
         public static string GetResourceFolderPath()
         {
-            var externalResourcesPath = GetInstance().m_ResourceSettingAssets.m_ExternalResourcesPath;
+            var folderName = GetInstance().m_ResourceSettingAssets.m_ExternalResourcesFolderName;
+            string externalResourcesPath = Path.Combine(Environment.CurrentDirectory, folderName);
             if (!Directory.Exists(externalResourcesPath))
             {
                 //default to Resources folder if not set
                 externalResourcesPath = Path.Combine(Environment.CurrentDirectory, "Resources");
-                GetInstance().m_ResourceSettingAssets.m_ExternalResourcesPath = externalResourcesPath;
+                GetInstance().m_ResourceSettingAssets.m_ExternalResourcesFolderName = "Resources";
                 Debug.LogWarning($"External Resources Path not found, using default path: {externalResourcesPath}");
             }
 

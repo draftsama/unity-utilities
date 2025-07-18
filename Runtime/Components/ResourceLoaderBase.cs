@@ -232,7 +232,7 @@ public class ResourceLoaderBaseEditor : Editor
 
         await Task.Delay(100);
 
-        var folderName = new DirectoryInfo(ResourceManager.GetResourceSettingAssets().m_ExternalResourcesPath).Name;
+        var folderName = ResourceManager.GetResourceSettingAssets().m_ExternalResourcesFolderName;
         Debug.Log($"folderName: {folderName}");
         var relativeFolder = Path.Combine("ResourcesEditor", "Editor",folderName);
         var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
