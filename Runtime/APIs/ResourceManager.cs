@@ -515,7 +515,7 @@ namespace Modules.Utilities
         {
             var folderName = GetInstance().m_ResourceSettingAssets.m_ExternalResourcesFolderName;
             string externalResourcesPath = Path.Combine(Environment.CurrentDirectory, folderName);
-            if (!Directory.Exists(externalResourcesPath))
+            if (string.IsNullOrEmpty(folderName) || !Directory.Exists(externalResourcesPath))
             {
                 //default to Resources folder if not set
                 externalResourcesPath = Path.Combine(Environment.CurrentDirectory, "Resources");

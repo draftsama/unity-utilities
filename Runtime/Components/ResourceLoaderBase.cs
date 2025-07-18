@@ -84,7 +84,6 @@ public class ResourceLoaderBaseEditor : Editor
 
         _ResourceFolder = ResourceManager.GetResourceFolderPath();
 
-
         var instance = target as ResourceLoaderBase;
 
         if (instance.gameObject.GetComponent<Renderer>() != null)
@@ -204,13 +203,25 @@ public class ResourceLoaderBaseEditor : Editor
 
             Regex regexPattern = new Regex(_CurrentNameInput, RegexOptions.IgnoreCase);
 
-
-            _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                                .Where(file => new string[] { ".png", ".jpg", ".jpeg" }.Contains(Path.GetExtension(file)) && regexPattern.IsMatch(Path.GetFileName(file)))
-                                .Take(10)
-                                .ToArray();
+            if (Directory.Exists(_ResourceFolder))
+            {
 
 
+
+                _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
+                                    .Where(file => new string[] { ".png", ".jpg", ".jpeg" }.Contains(Path.GetExtension(file)) && regexPattern.IsMatch(Path.GetFileName(file)))
+                                    .Take(10)
+                                    .ToArray();
+
+
+            }
+            else
+            {
+                
+                //HelpBox if folder not found
+                EditorGUILayout.HelpBox("Resource folder not found: " + _ResourceFolder, MessageType.Warning);
+                _FilePathsFilter = new string[0];
+            }
 
         }
         if (GUI.changed)

@@ -180,17 +180,18 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
         serializedObject.Update();
 
         var instance = target as ResourceTextureLoader;
-        var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
-        var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
+
         var aspectRatio = serializedObject.FindProperty("m_ContentSizeMode");
         //helper message
 
-        EditorGUILayout.HelpBox("the Material can not share with other object", MessageType.Info);
         EditorGUILayout.PropertyField(aspectRatio);
 
 
         if (_ResourceContentType == ResourceContentType.Mesh)
         {
+            var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
+            var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
+            EditorGUILayout.HelpBox("the Material can not share with other object", MessageType.Info);
 
             //get all materials in this object
             var renderers = instance.GetComponentsInChildren<Renderer>();
@@ -281,9 +282,9 @@ public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
         }
 
         if (GUI.changed)
-            {
-                EditorUtility.SetDirty(target);
-            }
+        {
+            EditorUtility.SetDirty(target);
+        }
         serializedObject.ApplyModifiedProperties();
     }
 }
