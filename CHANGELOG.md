@@ -18,3 +18,8 @@
 ### Added
 - Added check and require install dependencies package.
 
+## [1.0.5] - 2025-05-05
+### Fixed
+- Fixed a bug in TCPConnector where SendDataAsync was not handling progress reporting correctly.
+### Added
+- Added overload for SendDataAsync in TCPConnector to simplify data sending.

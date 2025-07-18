@@ -453,8 +453,12 @@ namespace Modules.Utilities
                 }
             }
         }
+        public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
+        {
+            await SendDataAsync(action, data, null, token);
+        }
 
-        public async UniTask SendDataAsync(ushort action, byte[] data, IProgress<float> progress = null, CancellationToken token = default)
+        public async UniTask SendDataAsync(ushort action, byte[] data, IProgress<float> progress , CancellationToken token = default)
         {
             if (!m_IsRunning) return;
 
