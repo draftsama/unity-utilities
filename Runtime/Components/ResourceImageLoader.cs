@@ -44,6 +44,8 @@ namespace Modules.Utilities
 
         private AspectRatioFitter _AspectRatioFitter;
 
+         
+
         public void ApplyImage(Texture2D _texture)
         {
             _Source = _texture;
@@ -97,6 +99,8 @@ namespace Modules.Utilities
         }
         private async void Awake()
         {
+            Debug.LogWarning($"[{gameObject.name}] ResourceImageLoader is deprecated, use ResourceTextureLoader instead.");
+            ResourceManager.GetInstance();
             _RectTransform = GetComponent<RectTransform>();
             _AspectRatioFitter = GetComponent<AspectRatioFitter>();
 
@@ -188,13 +192,14 @@ public class ResourceImageLoaderEditor : Editor
     private void OnEnable()
     {
         _Instance = target as ResourceImageLoader;
+
         _FileNameProperty = serializedObject.FindProperty("m_FileName");
         _TypeProperty = serializedObject.FindProperty("m_Type");
         _ImageTypeProperty = serializedObject.FindProperty("m_ImageType");
         _BorderProperty = serializedObject.FindProperty("m_Border");
         _AutoSizeModeProperty = serializedObject.FindProperty("m_AutoSizeMode");
 
-        _ResourceFolder = Path.Combine(Environment.CurrentDirectory, "Resources");
+        _ResourceFolder = ResourceManager.GetResourceFolderPath();
 
         _CurrentNameInput = string.Empty;
         _InputNameID = GUIUtility.GetControlID(FocusType.Keyboard);
@@ -203,6 +208,11 @@ public class ResourceImageLoaderEditor : Editor
     public override void OnInspectorGUI()
     {
         serializedObject.Update();
+
+
+        //helper notify use ResourceTextureLoader instead
+        EditorGUILayout.HelpBox("ResourceImageLoader is deprecated, use ResourceTextureLoader instead.", MessageType.Warning);
+
 
         EditorGUI.BeginChangeCheck();
 
