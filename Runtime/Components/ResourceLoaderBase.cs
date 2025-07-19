@@ -71,7 +71,7 @@ public class ResourceLoaderBaseEditor : Editor
     TextureImporterType _TextureType;
 
 
-   protected  ResourceContentType _ResourceContentType = ResourceContentType.None;
+   protected  OutputType _ResourceContentType = OutputType.None;
 
 
     private void OnEnable()
@@ -85,16 +85,8 @@ public class ResourceLoaderBaseEditor : Editor
 
         var instance = target as ResourceLoaderBase;
 
-        if (instance.gameObject.GetComponent<Renderer>() != null)
-        {
-            _ResourceContentType = ResourceContentType.Mesh;
-        }
-        else if (instance.gameObject.GetComponent<Image>() != null || instance.gameObject.GetComponent<RawImage>() != null)
-        {
-            _ResourceContentType = ResourceContentType.CanvasUI;
-        }
-       
-
+      
+    
         _TextureTypeValueProperty = serializedObject.FindProperty("m_TextureTypeValue");
         _AlphaIsTransparency = serializedObject.FindProperty("m_AlphaIsTransparency");
         _TextureWrapMode = serializedObject.FindProperty("m_TextureWrapMode");

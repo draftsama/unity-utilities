@@ -13,9 +13,9 @@ namespace Modules.Utilities
         None, NativeSize, WidthControlHeight, HeightControlWidth
     }
 
-    public enum ResourceContentType
+    public enum OutputType
     {
-       None, CanvasUI, Sprite, Mesh
+       None,Image, RawImage, SpriteRenderer, Material
     }
 
     public enum VideoOutputType

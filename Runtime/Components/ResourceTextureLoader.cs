@@ -1,29 +1,46 @@
 using System.Collections;
-using System.Collections.Generic;
 using UnityEngine;
 using Modules.Utilities;
 using System.Linq;
 using UnityEngine.UI;
 
-
-
-#if UNITY_EDITOR
-using UnityEditor;
-#endif
-public class ResourceTextureLoader : ResourceLoaderBase
+public class ResourceTextureLoader : MonoBehaviour
 {
 
+    [SerializeField] public string m_FileName;
+    [SerializeField] public OutputType m_OutputType = OutputType.None;
 
-    [SerializeField][HideInInspector] private int _CurrentMaterialIndex = 0;
-    [SerializeField][HideInInspector] private int _CurrentTexturePropertyIndex = 0;
-    [SerializeField] private ContentSizeMode m_ContentSizeMode = ContentSizeMode.None;
+    [SerializeField] public Texture2D m_EditorSource;
 
+    [SerializeField] public int m_TextureTypeValue = 0;
+    [SerializeField] public bool m_AlphaIsTransparency = false;
+    [SerializeField] public bool m_GenerateMipMaps = false;
+    [SerializeField] public TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
+    [SerializeField] public FilterMode m_FilterMode = FilterMode.Bilinear;
+    [SerializeField][HideInInspector] public int _CurrentMaterialIndex = 0;
+    [SerializeField][HideInInspector] public int _CurrentTexturePropertyIndex = 0;
+    [SerializeField] public ContentSizeMode m_ContentSizeMode = ContentSizeMode.None;
+
+
+    [SerializeField] public RawImage m_RawImage;
+    [SerializeField] public Image m_Image;
+    [SerializeField] public AspectRatioFitter m_AspectRatioFitter;
+    [SerializeField] public SpriteRenderer m_SpriteRenderer;
+
+    private RectTransform _RectTransform;
+
+
+
+    public void SetEditorSource(Texture2D _texture)
+    {
+        m_EditorSource = _texture;
+    }
 
     async void Start()
     {
 
         if (string.IsNullOrEmpty(m_FileName)) return;
-
+        _RectTransform = GetComponent<RectTransform>();
         var texture = await ResourceManager.GetTextureAsync(m_FileName);
 
         ApplyTexture(texture);
@@ -33,14 +50,15 @@ public class ResourceTextureLoader : ResourceLoaderBase
     {
 #if UNITY_EDITOR
 
-        if (_EditorSource != null)
+        if (m_EditorSource != null)
         {
-            ApplyTexture(_EditorSource);
+            ApplyTexture(m_EditorSource);
         }
 #endif
     }
-    public void ApplyTextureToMesh(Renderer[] _renderers, Texture2D _texture)
+    public void ApplyTextureToMesh(Texture2D _texture)
     {
+       var renderers = GetComponentsInChildren<Renderer>();
 
         //  Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
         if (m_ContentSizeMode == ContentSizeMode.WidthControlHeight)
@@ -60,7 +78,7 @@ public class ResourceTextureLoader : ResourceLoaderBase
         }
 
 
-        var materials = _renderers.SelectMany(x => x.sharedMaterials).ToList();
+        var materials = renderers.SelectMany(x => x.sharedMaterials).ToList();
 
         if (materials.Count > 0)
         {
@@ -76,61 +94,8 @@ public class ResourceTextureLoader : ResourceLoaderBase
         }
     }
 
-    public void ApplyTextureToCanvas(RawImage _rawImage, Image _image, Texture2D _texture)
-    {
-        if (_rawImage != null)
-        {
-            _rawImage.texture = _texture;
 
-
-
-        }
-        if (_image != null)
-        {
-            _image.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), Vector2.zero);
-
-        }
-
-        var rectTransform = GetComponent<RectTransform>();
-        var aspectRatioFitter = GetComponent<AspectRatioFitter>();
-
-        var ratio = (float)_texture.width / (float)_texture.height;
-        switch (m_ContentSizeMode)
-        {
-
-            case ContentSizeMode.NativeSize:
-                if (aspectRatioFitter == null)
-                    aspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
-                aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
-
-                rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _texture.width);
-                rectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _texture.height);
-                break;
-            case ContentSizeMode.WidthControlHeight:
-                if (aspectRatioFitter == null)
-                    aspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
-                aspectRatioFitter.aspectRatio = ratio;
-                aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
-
-                break;
-            case ContentSizeMode.HeightControlWidth:
-                if (aspectRatioFitter == null)
-                    aspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
-                aspectRatioFitter.aspectRatio = ratio;
-                aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
-                break;
-            case ContentSizeMode.None:
-                if (aspectRatioFitter == null)
-                    aspectRatioFitter = gameObject.AddComponent<AspectRatioFitter>();
-
-                aspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
-                break;
-
-        }
-    }
-
-
-    public override void ApplyTexture(Texture2D _texture)
+    public void ApplyTexture(Texture2D _texture)
     {
         if (_texture == null) return;
 
@@ -139,157 +104,83 @@ public class ResourceTextureLoader : ResourceLoaderBase
         _texture.Apply();
 
 
-        var renderers = GetComponentsInChildren<Renderer>();
-        var image = GetComponent<Image>();
-        var rawImage = GetComponent<RawImage>();
 
-
-
-
-        if (renderers.Length > 0)
+        switch (m_OutputType)
         {
-            ApplyTextureToMesh(renderers, _texture);
-
-            return;
+            case OutputType.Image:
+                if (m_Image == null)
+                {
+                    m_Image = gameObject.AddComponent<Image>();
+                }
+                m_Image.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), Vector2.zero);
+                ApplyCanvasSize(_texture);
+                break;
+            case OutputType.RawImage:
+                if (m_RawImage == null)
+                {
+                    m_RawImage = gameObject.AddComponent<RawImage>();
+                }
+                m_RawImage.texture = _texture;
+                ApplyCanvasSize(_texture);
+                break;
+            case OutputType.SpriteRenderer:
+                if (m_SpriteRenderer == null)
+                {
+                    m_SpriteRenderer = gameObject.AddComponent<SpriteRenderer>();
+                }
+                m_SpriteRenderer.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), Vector2.zero);
+                break;
+            case OutputType.Material:
+                ApplyTextureToMesh(_texture);
+                break;
         }
-
-        if (rawImage != null || image != null)
-        {
-            ApplyTextureToCanvas(rawImage, image, _texture);
-            return;
-        }
-
-
-
 
 
 
     }
 
-
-}
-
-
-
-
-#if UNITY_EDITOR
-[CustomEditor(typeof(ResourceTextureLoader))]
-public class ResourceTextureLoaderEditor : ResourceLoaderBaseEditor
-{
-
-    public override void OnInspectorGUI()
+    void ApplyCanvasSize(Texture2D _texture)
     {
-        base.OnInspectorGUI();
-        serializedObject.Update();
 
-        var instance = target as ResourceTextureLoader;
-
-        var aspectRatio = serializedObject.FindProperty("m_ContentSizeMode");
-        //helper message
-
-        EditorGUILayout.PropertyField(aspectRatio);
-
-
-        if (_ResourceContentType == ResourceContentType.Mesh)
+        if (_RectTransform == null)
         {
-            var currentMaterialIndex = serializedObject.FindProperty("_CurrentMaterialIndex");
-            var currentTexturePropertyIndex = serializedObject.FindProperty("_CurrentTexturePropertyIndex");
-            EditorGUILayout.HelpBox("the Material can not share with other object", MessageType.Info);
-
-            //get all materials in this object
-            var renderers = instance.GetComponentsInChildren<Renderer>();
-
-            //generate gameobject name and materials name all 
-            //ex: "Cube - Material1" "Cube - Material2"
-
-            try
-            {
-                var materials = renderers.SelectMany(x => x.sharedMaterials).ToList();
-                //get material key
-
-                var popupMaterialsName = renderers.SelectMany(x => x.sharedMaterials.Select(y => x.name + " - " + y.name)).ToList();
-
-
-                var index = currentMaterialIndex.intValue;
-                var texturePropertyIndex = currentTexturePropertyIndex.intValue;
-
-                index = Mathf.Clamp(index, 0, materials.Count - 1);
-
-
-                if (popupMaterialsName.Count > 1)
-                {
-
-                    index = EditorGUILayout.Popup("Material", index, popupMaterialsName.ToArray());
-                }
-                else
-                {
-                    index = 0;
-                    EditorGUILayout.LabelField("Material", popupMaterialsName[index]);
-
-                }
-
-
-#if UNITY_2022_1_OR_NEWER
-                var propNames = materials[index].GetPropertyNames(MaterialPropertyType.Texture);
-
-                if (propNames.Length > 0)
-                {
-                    texturePropertyIndex = Mathf.Clamp(texturePropertyIndex, 0, propNames.Length - 1);
-
-                    texturePropertyIndex = EditorGUILayout.Popup("Texture Property", texturePropertyIndex, propNames.ToArray());
-                    currentTexturePropertyIndex.intValue = texturePropertyIndex;
-                }
-
-#else
-            var propNames = materials[index].GetTexturePropertyNames().ToList();
-            if (propNames.Count > 0)
-            {
-                texturePropertyIndex = Mathf.Clamp(texturePropertyIndex, 0, propNames.Count - 1);
-
-                texturePropertyIndex = EditorGUILayout.Popup("Texture Property", texturePropertyIndex, propNames.ToArray());
-                currentTexturePropertyIndex.intValue = texturePropertyIndex;
-            }
-           
-#endif
-
-
-
-
-
-                currentMaterialIndex.intValue = index;
-
-
-                GUI.contentColor = Color.yellow;
-                GUI.backgroundColor = Color.gray;
-                if (GUILayout.Button("Clear Texture"))
-                {
-                    instance.ApplyTexture(null);
-                }
-                if (GUILayout.Button("Clear All Texture"))
-                {
-                    foreach (var p in propNames)
-                    {
-                        materials[index].SetTexture(p, null);
-                    }
-                }
-                GUI.contentColor = Color.white;
-                GUI.backgroundColor = Color.white;
-
-            }
-            catch (System.Exception)
-            {
-                EditorGUILayout.HelpBox("Material not found", MessageType.Error);
-
-            }
-
+            _RectTransform = GetComponent<RectTransform>();
         }
 
-        if (GUI.changed)
+        if (m_AspectRatioFitter == null)
+            return;
+
+        var ratio = (float)_texture.width / (float)_texture.height;
+        switch (m_ContentSizeMode)
         {
-            EditorUtility.SetDirty(target);
+
+            case ContentSizeMode.NativeSize:
+                m_AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+
+                _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _texture.width);
+                _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _texture.height);
+                break;
+            case ContentSizeMode.WidthControlHeight:
+
+                m_AspectRatioFitter.aspectRatio = ratio;
+                m_AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+
+                break;
+            case ContentSizeMode.HeightControlWidth:
+                m_AspectRatioFitter.aspectRatio = ratio;
+                m_AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+                break;
+            case ContentSizeMode.None:
+
+                m_AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+                break;
+
         }
-        serializedObject.ApplyModifiedProperties();
     }
+
+
 }
 
-#endif
+
+
+
