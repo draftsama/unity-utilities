@@ -42,7 +42,7 @@ namespace Modules.Utilities.Editor
             // packageName, gitUrl
             new PackageInfo { name = "com.unity.addressables", gitUrl = "" , defineSymbols = new string[] { "PACKAGE_ADDRESSABLES_INSTALLED" } },
             new PackageInfo { name = "com.unity.nuget.newtonsoft-json",gitUrl = "", defineSymbols = new string[] { "PACKAGE_NEWTONSOFT_JSON_INSTALLED" } },
-            new PackageInfo { name = "com.cysharp.unitask", gitUrl = "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"},
+            // new PackageInfo { name = "com.cysharp.unitask", gitUrl = "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"},
         };
 
 
@@ -155,7 +155,6 @@ namespace Modules.Utilities.Editor
                 InstallNextPackage();
             }
         }
-        [InitializeOnLoadMethod]
         static void DependencyRequire()
         {
             // Don't ask again in the same session
