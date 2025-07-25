@@ -39,12 +39,13 @@ namespace Modules.Utilities
         [Header("Data Transmission")]
         [SerializeField, Range(0, 10), Tooltip("Maximum number of retry attempts when data sending fails")]
         public int m_MaxRetryCount = 5;
-        [SerializeField, Range(0f, 5f), Tooltip("Delay in seconds between retry attempts")]
-        public float m_RetryDelaySeconds = 0.1f;
+        [SerializeField, Range(0, 5000), Tooltip("Delay in milliseconds between retry attempts")]
+        public int m_RetryDelay = 100;
 
         [Header("Auto Discovery (UDP Broadcast)")]
         [SerializeField] public bool m_EnableDiscovery = true;
-        [SerializeField] public int m_DiscoveryInterval = 2000; // milliseconds
+
+        [SerializeField, Range(0, 5000)] public int m_DiscoveryInterval = 1000; // milliseconds
         [SerializeField] public int m_DiscoveryPort = 7778;
         [SerializeField] public string m_DiscoveryMessage = "DiscoverServer";
 
@@ -135,10 +136,10 @@ namespace Modules.Utilities
                 m_MaxRetryCount = 0;
             }
 
-            if (m_RetryDelaySeconds < 0)
+            if (m_RetryDelay < 0)
             {
-                Debug.LogWarning($"[TCPConnector] RetryDelaySeconds cannot be negative. Setting to 0.");
-                m_RetryDelaySeconds = 0;
+                Debug.LogWarning($"[TCPConnector] RetryDelay cannot be negative. Setting to 0.");
+                m_RetryDelay = 0;
             }
         }
 
@@ -719,8 +720,8 @@ namespace Modules.Utilities
                     }
                     else
                     {
-                        Log($"Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelaySeconds}s: {ex.Message}");
-                        await UniTask.Delay(TimeSpan.FromSeconds(m_RetryDelaySeconds), cancellationToken: token);
+                        Log($"Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: {ex.Message}");
+                        await UniTask.Delay(m_RetryDelay, cancellationToken: token);
                     }
                 }
             }
@@ -971,7 +972,6 @@ namespace Modules.Utilities
         private bool eventsExpanded = false;
         private bool settingsExpanded = true;
         private bool dataTransmissionExpanded = false;
-        private bool discoveryExpanded = false;
 
         public override void OnInspectorGUI()
         {
@@ -1006,15 +1006,23 @@ namespace Modules.Utilities
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_StartOnEnable"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Port"));
 
-                if (!isServer.boolValue)
+
+                EditorGUILayout.PropertyField(enableDiscovery);
+                // Only show Host field if discovery is disabled
+                if (!enableDiscovery.boolValue)
                 {
-                    EditorGUILayout.PropertyField(enableDiscovery);
-                    // Only show Host field if discovery is disabled
-                    if (!enableDiscovery.boolValue)
-                    {
-                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Host"));
-                    }
+                    if (!isServer.boolValue)
+                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Host"));
                 }
+                else
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryPort"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryInterval"));
+                }
+
+
+
             }
             EditorGUI.indentLevel--;
 
@@ -1029,31 +1037,13 @@ namespace Modules.Utilities
             if (dataTransmissionExpanded)
             {
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRetryCount"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelaySeconds"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelay"));
             }
             EditorGUI.indentLevel--;
 
             EditorGUILayout.EndVertical();
 
-            EditorGUILayout.Space();
-            EditorGUILayout.BeginVertical("box");
-            EditorGUI.indentLevel++;
 
-            discoveryExpanded = EditorGUILayout.Foldout(discoveryExpanded, "Auto Discovery (UDP)", true);
-
-            if (discoveryExpanded)
-            {
-                // <<< Discovery can be enabled/disabled for server too
-                if (isServer.boolValue)
-                {
-                    EditorGUILayout.PropertyField(enableDiscovery);
-                }
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryPort"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
-            }
-            EditorGUI.indentLevel--;
-
-            EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space();
 
