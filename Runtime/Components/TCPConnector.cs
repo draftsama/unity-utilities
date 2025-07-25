@@ -758,6 +758,7 @@ namespace Modules.Utilities
 
                 // Ensure all data is sent
                 await stream.FlushAsync(token);
+                Log($"Data sent successfully: {message.Length} bytes");
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
                                              ex.SocketErrorCode == SocketError.ConnectionAborted ||
