@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Sockets;
@@ -34,6 +35,12 @@ namespace Modules.Utilities
         [Header("Behavior")]
         [SerializeField] public bool m_StartOnEnable = true;
         [SerializeField] public bool m_IsDebug = true;
+
+        [Header("Data Transmission")]
+        [SerializeField, Range(0, 10), Tooltip("Maximum number of retry attempts when data sending fails")]
+        public int m_MaxRetryCount = 5;
+        [SerializeField, Range(0f, 5f), Tooltip("Delay in seconds between retry attempts")]
+        public float m_RetryDelaySeconds = 0.1f;
 
         [Header("Auto Discovery (UDP Broadcast)")]
         [SerializeField] public bool m_EnableDiscovery = true;
@@ -72,9 +79,68 @@ namespace Modules.Utilities
         public bool IsRunning => m_IsRunning;
         public List<ConnectorInfo> ClientInfoList => m_Clients.Values.ToList();
         public ConnectorInfo ServerInfo => m_ServerInfo;
+
+        /// <summary>
+        /// Checks if the connection is healthy for data transmission
+        /// </summary>
+        /// <returns>True if connection is ready for sending data</returns>
+        private bool IsConnectionHealthy()
+        {
+            if (!m_IsRunning) return false;
+
+            if (m_IsServer)
+            {
+                lock (m_Clients)
+                {
+                    return m_Clients.Keys.Any(client => client != null && client.Connected);
+                }
+            }
+            else
+            {
+                return m_IsConnected && _tcpClient != null && _tcpClient.Connected;
+            }
+        }
+
+        /// <summary>
+        /// Checks if an exception is an expected connection closure (not an error to report)
+        /// </summary>
+        /// <param name="ex">The exception to check</param>
+        /// <returns>True if this is an expected connection closure</returns>
+        private static bool IsExpectedConnectionClosure(Exception ex)
+        {
+            return ex switch
+            {
+                OperationCanceledException => true,
+                ObjectDisposedException => true,
+                SocketException socketEx => socketEx.SocketErrorCode == SocketError.OperationAborted ||
+                                          socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
+                                          socketEx.SocketErrorCode == SocketError.ConnectionReset,
+                IOException ioEx when ioEx.InnerException is SocketException innerSocketEx =>
+                    innerSocketEx.SocketErrorCode == SocketError.OperationAborted ||
+                    innerSocketEx.SocketErrorCode == SocketError.ConnectionAborted ||
+                    innerSocketEx.SocketErrorCode == SocketError.ConnectionReset,
+                _ => false
+            };
+        }
         #endregion
 
         #region Unity Methods
+
+        private void Awake()
+        {
+            // Validate retry configuration
+            if (m_MaxRetryCount < 0)
+            {
+                Debug.LogWarning($"[TCPConnector] MaxRetryCount cannot be negative. Setting to 0.");
+                m_MaxRetryCount = 0;
+            }
+
+            if (m_RetryDelaySeconds < 0)
+            {
+                Debug.LogWarning($"[TCPConnector] RetryDelaySeconds cannot be negative. Setting to 0.");
+                m_RetryDelaySeconds = 0;
+            }
+        }
 
         private void OnEnable()
         {
@@ -182,9 +248,22 @@ namespace Modules.Utilities
                     HandleClientAsync(connectedClient, token).Forget();
                 }
             }
-            catch (OperationCanceledException) { Log("Server start operation was canceled."); }
-            catch (Exception ex) 
-            { 
+            catch (OperationCanceledException)
+            {
+                Log("Server operation was canceled.");
+            }
+            catch (ObjectDisposedException)
+            {
+                // TcpListener was disposed - this is expected during shutdown
+                Log("Server listener disposed.");
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted)
+            {
+                // Socket operation was aborted - this is expected during shutdown
+                Log("Server socket operation aborted.");
+            }
+            catch (Exception ex)
+            {
                 Log($"Server Error: {ex.GetType().Name} - {ex.Message}");
                 ReportError(ErrorInfo.ErrorType.Connection, "Server failed to start or accept connections", ex);
             }
@@ -212,11 +291,34 @@ namespace Modules.Utilities
             m_OnClientConnected?.Invoke(clientInfo);
 
             var stream = client.GetStream();
-            try { await ReceiveDataLoopAsync(stream, clientInfo, token); }
-            catch (Exception ex) 
-            { 
-                Log($"Client handling error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.DataTransmission, "Error handling client data", ex, clientInfo);
+            try
+            {
+                await ReceiveDataLoopAsync(stream, clientInfo, token);
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
+                                            ex.SocketErrorCode == SocketError.ConnectionAborted ||
+                                            ex.SocketErrorCode == SocketError.ConnectionReset)
+            {
+                // Connection was closed gracefully or aborted - don't log as error
+                Log($"Client connection closed: {clientInfo.ipAddress}:{clientInfo.port}");
+            }
+            catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
+                                       (socketEx.SocketErrorCode == SocketError.OperationAborted ||
+                                        socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
+                                        socketEx.SocketErrorCode == SocketError.ConnectionReset))
+            {
+                // Connection was closed gracefully or aborted - don't log as error
+                Log($"Client connection closed: {clientInfo.ipAddress}:{clientInfo.port}");
+            }
+            catch (ObjectDisposedException)
+            {
+                // Stream was disposed - this is expected during shutdown
+                Log($"Client stream disposed: {clientInfo.ipAddress}:{clientInfo.port}");
+            }
+            catch (Exception ex)
+            {
+                Log($"Unexpected client handling error: {ex.GetType().Name} - {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.DataTransmission, "Unexpected error handling client data", ex, clientInfo);
             }
             finally
             {
@@ -244,8 +346,8 @@ namespace Modules.Utilities
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 Log($"UDP Broadcast Error: {ex.Message}");
                 ReportError(ErrorInfo.ErrorType.Discovery, "UDP broadcast failed", ex);
             }
@@ -316,11 +418,34 @@ namespace Modules.Utilities
                     await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
                 }
             }
-            catch (OperationCanceledException) { Log("Connection attempt canceled by token."); }
-            catch (Exception ex) 
-            { 
-                Log($"Failed to connect or connection lost: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Connection, "Client connection failed", ex);
+            catch (OperationCanceledException)
+            {
+                Log("Connection attempt canceled.");
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
+                                            ex.SocketErrorCode == SocketError.ConnectionAborted ||
+                                            ex.SocketErrorCode == SocketError.ConnectionReset)
+            {
+                // Connection was closed gracefully or aborted - don't log as error during shutdown
+                Log("Connection closed during client operation.");
+            }
+            catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
+                                       (socketEx.SocketErrorCode == SocketError.OperationAborted ||
+                                        socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
+                                        socketEx.SocketErrorCode == SocketError.ConnectionReset))
+            {
+                // Connection was closed gracefully or aborted - don't log as error during shutdown
+                Log("Connection closed during client operation.");
+            }
+            catch (ObjectDisposedException)
+            {
+                // TcpClient was disposed - this is expected during shutdown
+                Log("Client disposed during operation.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Unexpected client error: {ex.GetType().Name} - {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Connection, "Unexpected client connection error", ex);
             }
             finally
             {
@@ -353,8 +478,8 @@ namespace Modules.Utilities
                 }
             }
             catch (OperationCanceledException) { }
-            catch (Exception ex) 
-            { 
+            catch (Exception ex)
+            {
                 Log($"UDP Listen Error: {ex.Message}");
                 ReportError(ErrorInfo.ErrorType.Discovery, "UDP listen failed", ex);
             }
@@ -382,10 +507,10 @@ namespace Modules.Utilities
                         ReportError(ErrorInfo.ErrorType.Protocol, $"Invalid message length: {messageLength}", null, connectorInfo);
                         break;
                     }
-                    
+
                     var dataBuffer = new byte[messageLength];
                     string operationId = Guid.NewGuid().ToString();
-                    
+
                     // Create initial packet response with receiving status
                     var packetResponse = new PacketResponse
                     {
@@ -403,26 +528,27 @@ namespace Modules.Utilities
                     while (totalBytesRead < messageLength)
                     {
                         bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, messageLength - totalBytesRead, token);
-                        if (bytesRead == 0) 
+                        if (bytesRead == 0)
                         {
                             ReportError(ErrorInfo.ErrorType.DataTransmission, "Connection closed prematurely during data receive", null, connectorInfo, operationId);
                             throw new InvalidOperationException("Connection closed prematurely.");
                         }
                         totalBytesRead += bytesRead;
-                        
+
                         // Update progress in packet response
                         packetResponse.processedBytes = totalBytesRead;
-                        
+
                         // Throttle progress reports to avoid UI spam
                         var now = System.DateTime.Now;
-                        if ((now - lastProgressReport).TotalMilliseconds >= progressReportIntervalMs || 
+                        if ((now - lastProgressReport).TotalMilliseconds >= progressReportIntervalMs ||
                             totalBytesRead >= messageLength)
                         {
                             lastProgressReport = now;
                             await UniTask.SwitchToMainThread();
+                            // Log($"Received {totalBytesRead}/{messageLength} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
                             m_OnDataReceived?.Invoke(packetResponse);
                         }
-                        
+
                         await UniTask.Yield();
                     }
 
@@ -435,8 +561,9 @@ namespace Modules.Utilities
                         finalPacketResponse.totalBytes = messageLength;
                         finalPacketResponse.processedBytes = totalBytesRead;
                         finalPacketResponse.operationId = operationId;
-                        
+
                         await UniTask.SwitchToMainThread();
+                        Log($"Received complete packet: {finalPacketResponse.action} from {connectorInfo.ipAddress}:{connectorInfo.port}");
                         m_OnDataReceived?.Invoke(finalPacketResponse);
                     }
                 }
@@ -445,10 +572,34 @@ namespace Modules.Utilities
                     // Expected when cancellation is requested
                     break;
                 }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
+                                                 ex.SocketErrorCode == SocketError.ConnectionAborted ||
+                                                 ex.SocketErrorCode == SocketError.ConnectionReset)
+                {
+                    // Connection was closed gracefully or aborted - this is expected during shutdown
+                    Log($"Connection closed: {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    break;
+                }
+                catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
+                                           (socketEx.SocketErrorCode == SocketError.OperationAborted ||
+                                            socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
+                                            socketEx.SocketErrorCode == SocketError.ConnectionReset))
+                {
+                    // Connection was closed gracefully or aborted - this is expected during shutdown
+                    Log($"Connection closed: {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    break;
+                }
+                catch (ObjectDisposedException)
+                {
+                    // Stream was disposed - this is expected during shutdown
+                    Log($"Stream disposed for: {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    break;
+                }
                 catch (Exception ex)
                 {
-                    Log($"Receive Data Loop Error: {ex.Message}");
-                    ReportError(ErrorInfo.ErrorType.DataTransmission, "Data receive loop failed", ex, connectorInfo);
+                    // Only log unexpected errors
+                    Log($"Unexpected receive error: {ex.GetType().Name} - {ex.Message}");
+                    ReportError(ErrorInfo.ErrorType.DataTransmission, "Unexpected data receive error", ex, connectorInfo);
                     break; // Exit the loop on error
                 }
             }
@@ -458,56 +609,179 @@ namespace Modules.Utilities
             await SendDataAsync(action, data, null, token);
         }
 
-        public async UniTask SendDataAsync(ushort action, byte[] data, IProgress<float> progress , CancellationToken token = default)
+        /// <summary>
+        /// Sends data with automatic retry logic. Will attempt to send up to MaxRetryCount times
+        /// with RetryDelaySeconds delay between attempts if sending fails.
+        /// 
+        /// For servers: Attempts to send to all connected clients. If some clients fail, 
+        /// it will retry only if ALL clients failed. Partial failures are logged but not retried.
+        /// 
+        /// For clients: Retries connection-level failures up to the retry limit.
+        /// </summary>
+        /// <param name="action">Action identifier</param>
+        /// <param name="data">Data to send</param>
+        /// <param name="progress">Optional progress reporter (0.0 to 1.0)</param>
+        /// <param name="token">Cancellation token</param>
+        public async UniTask SendDataAsync(ushort action, byte[] data, IProgress<float> progress, CancellationToken token = default)
         {
             if (!m_IsRunning) return;
 
             byte[] message = CreatePacket(action, data);
-            
-            try
-            {
-                if (m_IsServer)
-                {
-                    // Create a copy of the list to avoid issues if a client disconnects during the send
-                    List<TcpClient> clientsToSend;
-                    lock (m_Clients) { clientsToSend = m_Clients.Keys.ToList(); }
+            int retryCount = 0;
+            bool success = false;
 
-                    var sendTasks = clientsToSend.Select(async client =>
-                    {
-                        await SendDataWithProgressAsync(client.GetStream(), message, progress, token);
-                    }).ToList();
-                    
-                    await UniTask.WhenAll(sendTasks);
-                }
-                else if (m_IsConnected && _tcpClient != null)
-                {
-                    await SendDataWithProgressAsync(_tcpClient.GetStream(), message, progress, token);
-                }
-            }
-            catch (Exception ex)
+            while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
             {
-                Log($"Send Data Error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.DataTransmission, "Data send failed", ex);
-                // A failed write usually means connection is dead. The receive loop will handle the disconnect.
+                try
+                {
+                    // Check if we should even attempt to send
+                    if (!IsConnectionHealthy())
+                    {
+                        throw new InvalidOperationException("Connection is not healthy for data transmission");
+                    }
+
+                    if (m_IsServer)
+                    {
+                        // Create a copy of the list to avoid issues if a client disconnects during the send
+                        List<TcpClient> clientsToSend;
+                        lock (m_Clients) { clientsToSend = m_Clients.Keys.ToList().Where(c => c.Connected).ToList(); }
+
+                        if (clientsToSend.Count == 0)
+                        {
+                            Log("No connected clients to send data to");
+                            return; // No clients to send to, but this isn't an error worth retrying
+                        }
+
+                        // Send to all clients, but handle individual client failures gracefully
+                        var sendTasks = clientsToSend.Select(async client =>
+                        {
+                            try
+                            {
+                                await SendDataToStreamAsync(client.GetStream(), message, progress, token);
+                                return true; // Success
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"Failed to send data to client {client.Client.RemoteEndPoint}: {ex.Message}");
+                                return false; // Failed for this client
+                            }
+                        }).ToList();
+
+                        var results = await UniTask.WhenAll(sendTasks);
+
+                        // Check if at least one client received the data successfully
+                        int successfulSends = results.Count(r => r);
+                        if (successfulSends == 0)
+                        {
+                            throw new InvalidOperationException($"Failed to send data to any of {clientsToSend.Count} connected clients");
+                        }
+                        else if (successfulSends < results.Length)
+                        {
+                            Log($"Data sent successfully to {successfulSends}/{results.Length} clients");
+                        }
+                    }
+                    else if (m_IsConnected && _tcpClient != null && _tcpClient.Connected)
+                    {
+                        await SendDataToStreamAsync(_tcpClient.GetStream(), message, progress, token);
+                    }
+                    else
+                    {
+                        throw new InvalidOperationException("Client is not connected");
+                    }
+
+                    success = true; // If we reach here, send was successful
+                    if (retryCount > 0)
+                    {
+                        Log($"Data sent successfully after {retryCount} retries");
+                    }
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
+                                                           ex.Message.Contains("Stream disposed"))
+                {
+                    // Connection was closed during shutdown - don't retry, just exit gracefully
+                    Log($"Send operation aborted due to connection closure");
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    // Operation was cancelled - don't log as error
+                    Log($"Send operation cancelled");
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount > m_MaxRetryCount)
+                    {
+                        Log($"Send Data Failed after {m_MaxRetryCount} retries: {ex.Message}");
+                        ReportError(ErrorInfo.ErrorType.DataTransmission, $"Data send failed after {m_MaxRetryCount} retries", ex);
+                        break;
+                    }
+                    else
+                    {
+                        Log($"Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelaySeconds}s: {ex.Message}");
+                        await UniTask.Delay(TimeSpan.FromSeconds(m_RetryDelaySeconds), cancellationToken: token);
+                    }
+                }
             }
         }
 
-        private async UniTask SendDataWithProgressAsync(NetworkStream stream, byte[] message,  IProgress<float> progress = null,CancellationToken token = default)
+        /// <summary>
+        /// Sends data to a specific NetworkStream with progress reporting.
+        /// This method handles the actual data transmission with chunking for progress updates.
+        /// </summary>
+        private async UniTask SendDataToStreamAsync(NetworkStream stream, byte[] message, IProgress<float> progress = null, CancellationToken token = default)
         {
+            if (stream == null || !stream.CanWrite)
+            {
+                throw new InvalidOperationException("Stream is not available for writing");
+            }
+
             const int chunkSize = 8192; // 8KB chunks for progress reporting
             int offset = 0;
 
-            while (offset < message.Length)
+            try
             {
-                int bytesToSend = Math.Min(chunkSize, message.Length - offset);
-                await stream.WriteAsync(message, offset, bytesToSend, token);
-                offset += bytesToSend;
-                
-                // Report progress as percentage (0.0 to 1.0)
-                float progressPercentage = (float)offset / message.Length;
-                progress?.Report(progressPercentage);
-                
-                await UniTask.Yield();
+                while (offset < message.Length && !token.IsCancellationRequested)
+                {
+                    int bytesToSend = Math.Min(chunkSize, message.Length - offset);
+                    await stream.WriteAsync(message, offset, bytesToSend, token);
+                    offset += bytesToSend;
+
+                    // Report progress as percentage (0.0 to 1.0)
+                    float progressPercentage = (float)offset / message.Length;
+                    progress?.Report(progressPercentage);
+
+                    await UniTask.Yield();
+                }
+
+                // Ensure all data is sent
+                await stream.FlushAsync(token);
+            }
+            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
+                                             ex.SocketErrorCode == SocketError.ConnectionAborted ||
+                                             ex.SocketErrorCode == SocketError.ConnectionReset)
+            {
+                // Connection was closed - don't log as error during shutdown
+                throw new InvalidOperationException("Connection closed during send operation", ex);
+            }
+            catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
+                                       (socketEx.SocketErrorCode == SocketError.OperationAborted ||
+                                        socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
+                                        socketEx.SocketErrorCode == SocketError.ConnectionReset))
+            {
+                // Connection was closed - don't log as error during shutdown
+                throw new InvalidOperationException("Connection closed during send operation", ex);
+            }
+            catch (ObjectDisposedException ex)
+            {
+                // Stream was disposed - this is expected during shutdown
+                throw new InvalidOperationException("Stream disposed during send operation", ex);
+            }
+            catch (Exception ex)
+            {
+                Log($"Stream write error at offset {offset}/{message.Length}: {ex.GetType().Name} - {ex.Message}");
+                throw; // Re-throw to be handled by retry logic
             }
         }
 
@@ -515,7 +789,7 @@ namespace Modules.Utilities
         {
             await SendDataAsync(action, data, null, token);
         }
-        public async UniTask SendDataAsync<T>(ushort action, T data,IProgress<float> progress, CancellationToken token = default)
+        public async UniTask SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
             if (!m_IsRunning) return;
@@ -592,18 +866,18 @@ namespace Modules.Utilities
         #region Nested Classes & Enums
 
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
-        
+
         [Serializable]
-        public class PacketResponse 
-        { 
+        public class PacketResponse
+        {
             public enum ReceiveStatus { None, Receiving, Received }
-            
-            public int messageId; 
-            public int senderId; 
-            public ushort action; 
-            public byte[] data; 
+
+            public int messageId;
+            public int senderId;
+            public ushort action;
+            public byte[] data;
             public IPEndPoint remoteEndPoint;
-            
+
             // Progress tracking fields
             public ReceiveStatus status = ReceiveStatus.None;
             public int totalBytes;
@@ -612,12 +886,12 @@ namespace Modules.Utilities
             public bool isCompleted => status == ReceiveStatus.Received;
             public string operationId;
         }
-        
+
         [Serializable]
         public class ErrorInfo
         {
-            public enum ErrorType 
-            { 
+            public enum ErrorType
+            {
                 Connection,        // Connection related errors
                 DataTransmission,  // Send/Receive errors
                 Protocol,          // Protocol/packet format errors
@@ -659,7 +933,7 @@ namespace Modules.Utilities
         private void ReportError(ErrorInfo.ErrorType errorType, string message, Exception exception = null, ConnectorInfo? connectorInfo = null, string operationId = null)
         {
             var errorInfo = new ErrorInfo(errorType, message, exception, connectorInfo, operationId);
-            
+
             if (m_IsDebug)
             {
                 var prefix = m_IsServer ? "Server" : "Client";
@@ -669,7 +943,7 @@ namespace Modules.Utilities
                     Debug.LogException(exception);
                 }
             }
-            
+
             // Invoke error event on main thread
             UniTask.Create(async () =>
             {
@@ -689,6 +963,16 @@ namespace Modules.Utilities
     [CustomEditor(typeof(TCPConnector))]
     public class TCPConnectorEditor : UnityEditor.Editor
     {
+        // Test message variables
+        private string testMessage = "Hello World!";
+        private ushort testAction = 1;
+
+        // Foldout states
+        private bool eventsExpanded = false;
+        private bool settingsExpanded = true;
+        private bool dataTransmissionExpanded = false;
+        private bool discoveryExpanded = false;
+
         public override void OnInspectorGUI()
         {
 
@@ -710,31 +994,66 @@ namespace Modules.Utilities
             EditorGUILayout.Space();
 
             // --- Draw properties based on mode ---
-            EditorGUILayout.LabelField("Settings", EditorStyles.boldLabel);
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_IsDebug"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_StartOnEnable"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Port"));
-
             var enableDiscovery = serializedObject.FindProperty("m_EnableDiscovery");
-            if (!isServer.boolValue)
+
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
+            settingsExpanded = EditorGUILayout.Foldout(settingsExpanded, "Settings", true);
+
+            if (settingsExpanded)
             {
-                EditorGUILayout.PropertyField(enableDiscovery);
-                // Only show Host field if discovery is disabled
-                if (!enableDiscovery.boolValue)
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_IsDebug"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_StartOnEnable"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Port"));
+
+                if (!isServer.boolValue)
                 {
-                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Host"));
+                    EditorGUILayout.PropertyField(enableDiscovery);
+                    // Only show Host field if discovery is disabled
+                    if (!enableDiscovery.boolValue)
+                    {
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Host"));
+                    }
                 }
             }
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space();
-            EditorGUILayout.LabelField("Auto Discovery (UDP)", EditorStyles.boldLabel);
-            // <<< Discovery can be enabled/disabled for server too
-            if (isServer.boolValue)
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
+
+            dataTransmissionExpanded = EditorGUILayout.Foldout(dataTransmissionExpanded, "Data Transmission", true);
+
+            if (dataTransmissionExpanded)
             {
-                EditorGUILayout.PropertyField(enableDiscovery);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRetryCount"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelaySeconds"));
             }
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryPort"));
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
+
+            EditorGUILayout.Space();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
+
+            discoveryExpanded = EditorGUILayout.Foldout(discoveryExpanded, "Auto Discovery (UDP)", true);
+
+            if (discoveryExpanded)
+            {
+                // <<< Discovery can be enabled/disabled for server too
+                if (isServer.boolValue)
+                {
+                    EditorGUILayout.PropertyField(enableDiscovery);
+                }
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryPort"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
+            }
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space();
 
@@ -755,8 +1074,62 @@ namespace Modules.Utilities
                 if (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0)
                 {
                     EditorGUILayout.LabelField($"Connected Clients: {tcpConnector.ClientInfoList.Count}");
+
+                    // Show client details
+                    EditorGUILayout.Space();
+                    EditorGUILayout.LabelField("Client Details:", EditorStyles.miniLabel);
+                    foreach (var client in tcpConnector.ClientInfoList)
+                    {
+                        EditorGUILayout.LabelField($"• {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
+                    }
                 }
                 EditorGUILayout.EndVertical();
+
+                // --- Test Message Box (only show when connected) ---
+                bool canSendMessage = (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0) ||
+                                     (!isServer.boolValue && tcpConnector.IsConnected);
+
+                if (canSendMessage)
+                {
+                    EditorGUILayout.Space();
+                    EditorGUILayout.BeginVertical("box");
+                    EditorGUILayout.LabelField("Test Message", EditorStyles.boldLabel);
+
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField("Action ID:", GUILayout.Width(70));
+                    testAction = (ushort)EditorGUILayout.IntField(testAction, GUILayout.Width(60));
+                    EditorGUILayout.EndHorizontal();
+
+                    EditorGUILayout.BeginHorizontal();
+                    EditorGUILayout.LabelField("Message:", GUILayout.Width(70));
+                    testMessage = EditorGUILayout.TextField(testMessage);
+                    EditorGUILayout.EndHorizontal();
+
+                    EditorGUILayout.Space();
+
+                    EditorGUILayout.BeginHorizontal();
+                    GUI.backgroundColor = Color.yellow;
+                    if (GUILayout.Button("Send Text Message"))
+                    {
+                        tcpConnector.SendDataAsync(testAction, testMessage).Forget();
+                        Debug.Log($"[TCPConnector] Sent test message: Action={testAction}, Message='{testMessage}'");
+                    }
+
+                    if (GUILayout.Button("Send Raw Bytes"))
+                    {
+                        byte[] rawData = System.Text.Encoding.UTF8.GetBytes(testMessage);
+                        tcpConnector.SendDataAsync(testAction, rawData).Forget();
+                        Debug.Log($"[TCPConnector] Sent raw bytes: Action={testAction}, Bytes={rawData.Length}");
+                    }
+                    GUI.backgroundColor = Color.white;
+                    EditorGUILayout.EndHorizontal();
+
+                    EditorGUILayout.Space();
+
+
+                    EditorGUILayout.EndVertical();
+                }
+
                 EditorGUILayout.Space();
 
                 // --- Actions Box ---
@@ -779,18 +1152,27 @@ namespace Modules.Utilities
             EditorGUILayout.Space();
             // --- Events Box ---
             EditorGUILayout.BeginVertical("box");
-            EditorGUILayout.LabelField("Events", EditorStyles.boldLabel);
-            if (isServer.boolValue)
+            EditorGUI.indentLevel++;
+
+            eventsExpanded = EditorGUILayout.Foldout(eventsExpanded, "Events", true);
+
+            if (eventsExpanded)
             {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientConnected"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientDisconnected"));
+                if (isServer.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientConnected"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientDisconnected"));
+                }
+                else
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerConnected"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerDisconnected"));
+                }
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnDataReceived"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnError"));
             }
-            else
-            {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerConnected"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerDisconnected"));
-            }
-            EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnDataReceived"));
+            EditorGUI.indentLevel--;
+
             EditorGUILayout.EndVertical();
 
             serializedObject.ApplyModifiedProperties();
