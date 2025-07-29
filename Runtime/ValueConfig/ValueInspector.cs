@@ -7,6 +7,7 @@ namespace Modules.Utilities
     public class ValueInspector
     {
         [SerializeField] public string title;
+        [SerializeField] public bool requireRestart;
         [SerializeField] public Variable variable;
 
     }

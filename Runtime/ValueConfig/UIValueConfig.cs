@@ -36,12 +36,13 @@ public class UIValueConfig : Singleton<UIValueConfig>
 
     List<UIVariable> m_VariableList = new List<UIVariable>();
 
+
     bool m_IsOpen = false;
 
     private int tapCount = 0;
     private float lastTap = -1;
 
-    
+
     public UnityEvent OnSaved = new UnityEvent();
 
 
@@ -53,7 +54,7 @@ public class UIValueConfig : Singleton<UIValueConfig>
     void Start()
     {
         var token = this.GetCancellationTokenOnDestroy();
-m_HeaderText.text = $"Value Config (App v{Application.version})";
+        m_HeaderText.text = $"Value Config (App v{Application.version})";
         UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
         {
             if (!m_IsOpen && Input.GetKeyDown(m_OpenKey))
@@ -95,17 +96,32 @@ m_HeaderText.text = $"Value Config (App v{Application.version})";
 
         m_SaveButton.OnClickAsAsyncEnumerable().ForEachAsync(_ =>
         {
+            Debug.Log("Save Config");
             // Save all the values
+            bool isRequireRestart = false;
             foreach (var item in m_VariableList)
             {
-                item.ApplyValue();
+                if (item.IsModify())
+                {
+                    isRequireRestart = true;
+                    item.ApplyValue();
+                }
             }
+
+
 
             m_ContentCanvasGroup.LerpAlphaAsync(300, 0f, _token: token).ContinueWith(() =>
             {
                 OnSaved?.Invoke();
                 m_IsOpen = false;
+
             }).Forget();
+            
+             if (isRequireRestart)
+            {
+                Application.Quit();
+                Debug.Log("Application will restart");
+            }
         }, token);
 
 
@@ -216,12 +232,14 @@ public class UIValueConfigEditor : Editor
         {
             var element = m_DataProperty.GetArrayElementAtIndex(i);
             var title = element.FindPropertyRelative("title");
+            var requireRestart = element.FindPropertyRelative("requireRestart");
             var variable = element.FindPropertyRelative("variable");
             GUI.color = Color.gray3;
             EditorGUILayout.BeginVertical("box");
             GUI.color = Color.white;
 
             EditorGUILayout.PropertyField(title);
+            EditorGUILayout.PropertyField(requireRestart);
             EditorGUILayout.PropertyField(variable);
 
             var keyProp = variable.FindPropertyRelative("key");
@@ -286,6 +304,7 @@ public class UIValueConfigEditor : Editor
             {
                 var element = m_DataProperty.GetArrayElementAtIndex(i);
                 var variable = element.FindPropertyRelative("variable");
+
                 var keyProp = variable.FindPropertyRelative("key");
                 if (keyProp != null)
                     existingKeys.Add(keyProp.stringValue);
