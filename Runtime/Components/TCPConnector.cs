@@ -36,6 +36,14 @@ namespace Modules.Utilities
         [SerializeField] public bool m_StartOnEnable = true;
         [SerializeField] public bool m_IsDebug = true;
 
+        [Header("Performance")]
+        [SerializeField, Range(1000, 10000), Tooltip("Buffer size for network operations")]
+        public int m_BufferSize = 8192;
+        [SerializeField, Range(1, 100), Tooltip("Maximum concurrent connections for server")]
+        public int m_MaxConcurrentConnections = 50;
+        [SerializeField, Tooltip("Enable TCP keep-alive to detect dead connections")]
+        public bool m_EnableKeepAlive = true;
+
         [Header("Data Transmission")]
         [SerializeField, Range(0, 10), Tooltip("Maximum number of retry attempts when data sending fails")]
         public int m_MaxRetryCount = 5;
@@ -70,6 +78,10 @@ namespace Modules.Utilities
 
         private CancellationTokenSource _cts;
 
+        // --- Performance Optimizations ---
+        private readonly Queue<byte[]> _bufferPool = new Queue<byte[]>();
+        private readonly object _bufferPoolLock = new object();
+
         // --- Packet Structure ---
         private const int PACKET_HEADER_SIZE = 10; // 4-id, 4-sender, 2-type
 
@@ -93,35 +105,74 @@ namespace Modules.Utilities
             {
                 lock (m_Clients)
                 {
-                    return m_Clients.Keys.Any(client => client != null && client.Connected);
+                    return m_Clients.Keys.Any(client => client != null && IsClientConnected(client));
                 }
             }
             else
             {
-                return m_IsConnected && _tcpClient != null && _tcpClient.Connected;
+                return m_IsConnected && _tcpClient != null && IsClientConnected(_tcpClient);
             }
         }
 
         /// <summary>
-        /// Checks if an exception is an expected connection closure (not an error to report)
+        /// Checks if a TCP client is truly connected (not just the Connected property)
         /// </summary>
-        /// <param name="ex">The exception to check</param>
-        /// <returns>True if this is an expected connection closure</returns>
-        private static bool IsExpectedConnectionClosure(Exception ex)
+        private bool IsClientConnected(TcpClient client)
         {
-            return ex switch
+            try
             {
-                OperationCanceledException => true,
-                ObjectDisposedException => true,
-                SocketException socketEx => socketEx.SocketErrorCode == SocketError.OperationAborted ||
-                                          socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
-                                          socketEx.SocketErrorCode == SocketError.ConnectionReset,
-                IOException ioEx when ioEx.InnerException is SocketException innerSocketEx =>
-                    innerSocketEx.SocketErrorCode == SocketError.OperationAborted ||
-                    innerSocketEx.SocketErrorCode == SocketError.ConnectionAborted ||
-                    innerSocketEx.SocketErrorCode == SocketError.ConnectionReset,
-                _ => false
-            };
+                if (client?.Client == null) return false;
+                
+                // Use Socket.Poll to check if connection is still alive
+                var socket = client.Client;
+                bool part1 = socket.Poll(1000, SelectMode.SelectRead);
+                bool part2 = (socket.Available == 0);
+                
+                // If poll returns true and no data available, connection is closed
+                return !(part1 && part2) && socket.Connected;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Gets a buffer from the pool or creates a new one
+        /// </summary>
+        private byte[] GetBuffer(int minSize)
+        {
+            lock (_bufferPoolLock)
+            {
+                while (_bufferPool.Count > 0)
+                {
+                    var buffer = _bufferPool.Dequeue();
+                    if (buffer.Length >= minSize)
+                    {
+                        return buffer;
+                    }
+                }
+            }
+            
+            // Create new buffer if none available or too small
+            return new byte[Math.Max(minSize, m_BufferSize)];
+        }
+
+        /// <summary>
+        /// Returns a buffer to the pool for reuse
+        /// </summary>
+        private void ReturnBuffer(byte[] buffer)
+        {
+            if (buffer == null || buffer.Length < m_BufferSize) return;
+            
+            lock (_bufferPoolLock)
+            {
+                // Limit pool size to prevent memory bloat
+                if (_bufferPool.Count < 10)
+                {
+                    _bufferPool.Enqueue(buffer);
+                }
+            }
         }
         #endregion
 
@@ -240,12 +291,16 @@ namespace Modules.Utilities
             try
             {
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
-                _tcpListener.Start();
-                Log($"listening on TCP port {m_Port}.");
+                _tcpListener.Start(m_MaxConcurrentConnections); // Limit backlog
+                Log($"listening on TCP port {m_Port} (max {m_MaxConcurrentConnections} concurrent connections).");
 
                 while (!token.IsCancellationRequested)
                 {
                     TcpClient connectedClient = await _tcpListener.AcceptTcpClientAsync().AsUniTask().AttachExternalCancellation(token);
+                    
+                    // Configure TCP settings for performance
+                    ConfigureTcpClient(connectedClient);
+                    
                     HandleClientAsync(connectedClient, token).Forget();
                 }
             }
@@ -355,6 +410,45 @@ namespace Modules.Utilities
             finally { Log("Stopping discovery broadcast."); }
         }
 
+        /// <summary>
+        /// Configures TCP client settings for optimal performance
+        /// </summary>
+        private void ConfigureTcpClient(TcpClient tcpClient)
+        {
+            try
+            {
+                var socket = tcpClient.Client;
+                
+                // Enable TCP Keep-Alive to detect dead connections
+                if (m_EnableKeepAlive)
+                {
+                    socket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.KeepAlive, true);
+                    // Set keep-alive parameters (2 hours idle, 1 second interval, 9 probes)
+                    var keepAliveValues = new byte[12];
+                    BitConverter.GetBytes(1).CopyTo(keepAliveValues, 0); // Enable
+                    BitConverter.GetBytes(7200000).CopyTo(keepAliveValues, 4); // 2 hours in ms
+                    BitConverter.GetBytes(1000).CopyTo(keepAliveValues, 8); // 1 second in ms
+                    socket.IOControl(IOControlCode.KeepAliveValues, keepAliveValues, null);
+                }
+                
+                // Optimize buffer sizes
+                socket.ReceiveBufferSize = m_BufferSize;
+                socket.SendBufferSize = m_BufferSize;
+                
+                // Disable Nagle's algorithm for low latency (trade bandwidth for speed)
+                socket.NoDelay = true;
+                
+                // Set linger option to close immediately
+                socket.LingerState = new LingerOption(false, 0);
+                
+                Log($"TCP client configured: KeepAlive={m_EnableKeepAlive}, BufferSize={m_BufferSize}, NoDelay=true");
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to configure TCP client: {ex.Message}");
+            }
+        }
+
         #endregion
 
         #region Client Methods
@@ -398,10 +492,18 @@ namespace Modules.Utilities
             try
             {
                 _tcpClient = new TcpClient();
+                
+                // Configure client before connecting
+                _tcpClient.ReceiveBufferSize = m_BufferSize;
+                _tcpClient.SendBufferSize = m_BufferSize;
+                
                 await _tcpClient.ConnectAsync(m_Host, m_Port).AsUniTask().AttachExternalCancellation(token);
 
                 if (_tcpClient.Connected)
                 {
+                    // Configure TCP settings after connection
+                    ConfigureTcpClient(_tcpClient);
+                    
                     m_IsConnected = true; // Set connected status
                     var serverEndPoint = (IPEndPoint)_tcpClient.Client.RemoteEndPoint;
                     m_ServerInfo = new ConnectorInfo
@@ -502,70 +604,85 @@ namespace Modules.Utilities
                     if (bytesRead < 4) break; // Connection closed
 
                     int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
-                    if (messageLength <= 0 || messageLength > 1024 * 1024 * 4) // <<< Sanity check for message size (e.g., max 4MB)
+                    if (messageLength <= 0 || messageLength > 1024 * 1024 * 16) // Increased max to 16MB
                     {
                         Log($"Invalid message length received: {messageLength}. Disconnecting.");
                         ReportError(ErrorInfo.ErrorType.Protocol, $"Invalid message length: {messageLength}", null, connectorInfo);
                         break;
                     }
 
-                    var dataBuffer = new byte[messageLength];
+                    // Use buffer pool for large messages
+                    var dataBuffer = GetBuffer(messageLength);
                     string operationId = Guid.NewGuid().ToString();
 
-                    // Create initial packet response with receiving status
-                    var packetResponse = new PacketResponse
+                    try
                     {
-                        status = PacketResponse.ReceiveStatus.Receiving,
-                        totalBytes = messageLength,
-                        processedBytes = 0,
-                        remoteEndPoint = connectorInfo.remoteEndPoint,
-                        operationId = operationId
-                    };
-
-                    int totalBytesRead = 0;
-                    var lastProgressReport = System.DateTime.Now;
-                    const int progressReportIntervalMs = 100; // Report progress every 100ms max
-
-                    while (totalBytesRead < messageLength)
-                    {
-                        bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, messageLength - totalBytesRead, token);
-                        if (bytesRead == 0)
+                        // Create initial packet response with receiving status
+                        var packetResponse = new PacketResponse
                         {
-                            ReportError(ErrorInfo.ErrorType.DataTransmission, "Connection closed prematurely during data receive", null, connectorInfo, operationId);
-                            throw new InvalidOperationException("Connection closed prematurely.");
+                            status = PacketResponse.ReceiveStatus.Receiving,
+                            totalBytes = messageLength,
+                            processedBytes = 0,
+                            remoteEndPoint = connectorInfo.remoteEndPoint,
+                            operationId = operationId
+                        };
+
+                        int totalBytesRead = 0;
+                        var lastProgressReport = System.DateTime.Now;
+                        const int progressReportIntervalMs = 100; // Report progress every 100ms max
+
+                        while (totalBytesRead < messageLength)
+                        {
+                            int remainingBytes = messageLength - totalBytesRead;
+                            int bufferSize = Math.Min(m_BufferSize, remainingBytes);
+                            
+                            bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, bufferSize, token);
+                            if (bytesRead == 0)
+                            {
+                                ReportError(ErrorInfo.ErrorType.DataTransmission, "Connection closed prematurely during data receive", null, connectorInfo, operationId);
+                                throw new InvalidOperationException("Connection closed prematurely.");
+                            }
+                            totalBytesRead += bytesRead;
+
+                            // Update progress in packet response
+                            packetResponse.processedBytes = totalBytesRead;
+
+                            // Throttle progress reports to avoid UI spam
+                            var now = System.DateTime.Now;
+                            if ((now - lastProgressReport).TotalMilliseconds >= progressReportIntervalMs ||
+                                totalBytesRead >= messageLength)
+                            {
+                                lastProgressReport = now;
+                                await UniTask.SwitchToMainThread();
+                                m_OnDataReceived?.Invoke(packetResponse);
+                            }
+
+                            // Only yield for large messages to reduce overhead
+                            if (messageLength > m_BufferSize)
+                            {
+                                await UniTask.Yield();
+                            }
                         }
-                        totalBytesRead += bytesRead;
 
-                        // Update progress in packet response
-                        packetResponse.processedBytes = totalBytesRead;
-
-                        // Throttle progress reports to avoid UI spam
-                        var now = System.DateTime.Now;
-                        if ((now - lastProgressReport).TotalMilliseconds >= progressReportIntervalMs ||
-                            totalBytesRead >= messageLength)
+                        // Parse the complete packet and update status
+                        var finalPacketResponse = ReadPacket(dataBuffer, messageLength, connectorInfo.remoteEndPoint);
+                        if (finalPacketResponse != null)
                         {
-                            lastProgressReport = now;
+                            // Copy progress information to final response
+                            finalPacketResponse.status = PacketResponse.ReceiveStatus.Received;
+                            finalPacketResponse.totalBytes = messageLength;
+                            finalPacketResponse.processedBytes = totalBytesRead;
+                            finalPacketResponse.operationId = operationId;
+
                             await UniTask.SwitchToMainThread();
-                            // Log($"Received {totalBytesRead}/{messageLength} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
-                            m_OnDataReceived?.Invoke(packetResponse);
+                            Log($"Received complete packet: {finalPacketResponse.action} from {connectorInfo.ipAddress}:{connectorInfo.port} ({messageLength} bytes)");
+                            m_OnDataReceived?.Invoke(finalPacketResponse);
                         }
-
-                        await UniTask.Yield();
                     }
-
-                    // Parse the complete packet and update status
-                    var finalPacketResponse = ReadPacket(dataBuffer, connectorInfo.remoteEndPoint);
-                    if (finalPacketResponse != null)
+                    finally
                     {
-                        // Copy progress information to final response
-                        finalPacketResponse.status = PacketResponse.ReceiveStatus.Received;
-                        finalPacketResponse.totalBytes = messageLength;
-                        finalPacketResponse.processedBytes = totalBytesRead;
-                        finalPacketResponse.operationId = operationId;
-
-                        await UniTask.SwitchToMainThread();
-                        Log($"Received complete packet: {finalPacketResponse.action} from {connectorInfo.ipAddress}:{connectorInfo.port}");
-                        m_OnDataReceived?.Invoke(finalPacketResponse);
+                        // Return buffer to pool
+                        ReturnBuffer(dataBuffer);
                     }
                 }
                 catch (OperationCanceledException)
@@ -600,24 +717,22 @@ namespace Modules.Utilities
                 {
                     // Only log unexpected errors
                     Log($"Unexpected receive error: {ex.GetType().Name} - {ex.Message}");
-                    ReportError(ErrorInfo.ErrorType.DataTransmission, "Unexpected data receive error", ex, connectorInfo);
-                    break; // Exit the loop on error
+                    ReportError(ErrorInfo.ErrorType.DataTransmission, $"Data receive failed: {ex.Message}", ex, connectorInfo);
+                    break;
                 }
             }
         }
         public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
         {
-            await SendDataAsync(action, data, null, token);
+            await SendDataAsync(action, data, (IProgress<float>)null, token);
         }
 
         /// <summary>
         /// Sends data with automatic retry logic. Will attempt to send up to MaxRetryCount times
         /// with RetryDelaySeconds delay between attempts if sending fails.
         /// 
-        /// For servers: Attempts to send to all connected clients. If some clients fail, 
-        /// it will retry only if ALL clients failed. Partial failures are logged but not retried.
-        /// 
-        /// For clients: Retries connection-level failures up to the retry limit.
+        /// For servers: Sends to all connected clients.
+        /// For clients: Sends to server only.
         /// </summary>
         /// <param name="action">Action identifier</param>
         /// <param name="data">Data to send</param>
@@ -643,51 +758,19 @@ namespace Modules.Utilities
 
                     if (m_IsServer)
                     {
-                        // Create a copy of the list to avoid issues if a client disconnects during the send
-                        List<TcpClient> clientsToSend;
-                        lock (m_Clients) { clientsToSend = m_Clients.Keys.ToList().Where(c => c.Connected).ToList(); }
-
-                        if (clientsToSend.Count == 0)
-                        {
-                            Log("No connected clients to send data to");
-                            return; // No clients to send to, but this isn't an error worth retrying
-                        }
-
-                        // Send to all clients, but handle individual client failures gracefully
-                        var sendTasks = clientsToSend.Select(async client =>
-                        {
-                            try
-                            {
-                                await SendDataToStreamAsync(client.GetStream(), message, progress, token);
-                                return true; // Success
-                            }
-                            catch (Exception ex)
-                            {
-                                Log($"Failed to send data to client {client.Client.RemoteEndPoint}: {ex.Message}");
-                                return false; // Failed for this client
-                            }
-                        }).ToList();
-
-                        var results = await UniTask.WhenAll(sendTasks);
-
-                        // Check if at least one client received the data successfully
-                        int successfulSends = results.Count(r => r);
-                        if (successfulSends == 0)
-                        {
-                            throw new InvalidOperationException($"Failed to send data to any of {clientsToSend.Count} connected clients");
-                        }
-                        else if (successfulSends < results.Length)
-                        {
-                            Log($"Data sent successfully to {successfulSends}/{results.Length} clients");
-                        }
-                    }
-                    else if (m_IsConnected && _tcpClient != null && _tcpClient.Connected)
-                    {
-                        await SendDataToStreamAsync(_tcpClient.GetStream(), message, progress, token);
+                        await SendAsServerAsync(message, progress, token);
                     }
                     else
                     {
-                        throw new InvalidOperationException("Client is not connected");
+                        // Client always sends to server
+                        if (m_IsConnected && _tcpClient != null && _tcpClient.Connected)
+                        {
+                            await SendDataToStreamAsync(_tcpClient.GetStream(), message, progress, token);
+                        }
+                        else
+                        {
+                            throw new InvalidOperationException("Client is not connected");
+                        }
                     }
 
                     success = true; // If we reach here, send was successful
@@ -728,6 +811,86 @@ namespace Modules.Utilities
         }
 
         /// <summary>
+        /// Handles server-side message sending to all connected clients
+        /// </summary>
+        private async UniTask SendAsServerAsync(byte[] message, IProgress<float> progress, CancellationToken token)
+        {
+            await SendAsServerAsync(message, null, progress, token);
+        }
+
+        /// <summary>
+        /// Handles server-side message sending to specific clients or all clients
+        /// </summary>
+        /// <param name="message">Message to send</param>
+        /// <param name="targetClientIds">Target client IDs. If null, sends to all clients</param>
+        /// <param name="progress">Progress reporter</param>
+        /// <param name="token">Cancellation token</param>
+        private async UniTask SendAsServerAsync(byte[] message, int[] targetClientIds, IProgress<float> progress, CancellationToken token)
+        {
+            List<TcpClient> clientsToSend;
+            
+            lock (m_Clients) 
+            { 
+                if (targetClientIds == null || targetClientIds.Length == 0)
+                {
+                    // Send to all connected clients
+                    clientsToSend = m_Clients.Keys.Where(c => c.Connected).ToList();
+                }
+                else
+                {
+                    // Send to specific clients
+                    clientsToSend = m_Clients.Where(kvp => 
+                        kvp.Key.Connected && 
+                        targetClientIds.Contains(kvp.Value.id))
+                        .Select(kvp => kvp.Key)
+                        .ToList();
+                }
+            }
+
+            if (clientsToSend.Count == 0)
+            {
+                string targetInfo = targetClientIds == null ? "all clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                Log($"No connected clients to send data to ({targetInfo})");
+                return;
+            }
+
+            // Send to selected clients
+            var sendTasks = clientsToSend.Select(async client =>
+            {
+                try
+                {
+                    await SendDataToStreamAsync(client.GetStream(), message, progress, token);
+                    return true; // Success
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to send data to client {client.Client.RemoteEndPoint}: {ex.Message}");
+                    return false; // Failed for this client
+                }
+            }).ToList();
+
+            var results = await UniTask.WhenAll(sendTasks);
+
+            // Check if at least one client received the data successfully
+            int successfulSends = results.Count(r => r);
+            if (successfulSends == 0)
+            {
+                string targetInfo = targetClientIds == null ? $"{clientsToSend.Count} connected clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                throw new InvalidOperationException($"Failed to send data to any of {targetInfo}");
+            }
+            else if (successfulSends < results.Length)
+            {
+                string targetInfo = targetClientIds == null ? "clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                Log($"Data sent successfully to {successfulSends}/{results.Length} {targetInfo}");
+            }
+            else
+            {
+                string targetInfo = targetClientIds == null ? "all clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                Log($"Data sent successfully to {successfulSends} {targetInfo}");
+            }
+        }
+
+        /// <summary>
         /// Sends data to a specific NetworkStream with progress reporting.
         /// This method handles the actual data transmission with chunking for progress updates.
         /// </summary>
@@ -738,7 +901,8 @@ namespace Modules.Utilities
                 throw new InvalidOperationException("Stream is not available for writing");
             }
 
-            const int chunkSize = 8192; // 8KB chunks for progress reporting
+            // Use configured buffer size for optimal performance
+            int chunkSize = Math.Min(m_BufferSize, message.Length);
             int offset = 0;
 
             try
@@ -753,12 +917,16 @@ namespace Modules.Utilities
                     float progressPercentage = (float)offset / message.Length;
                     progress?.Report(progressPercentage);
 
-                    await UniTask.Yield();
+                    // Only yield on larger messages to reduce overhead
+                    if (message.Length > m_BufferSize)
+                    {
+                        await UniTask.Yield();
+                    }
                 }
 
                 // Ensure all data is sent
                 await stream.FlushAsync(token);
-                Log($"Data sent successfully: {message.Length} bytes");
+                Log($"Data sent successfully: {message.Length} bytes (chunks: {chunkSize})");
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
                                              ex.SocketErrorCode == SocketError.ConnectionAborted ||
@@ -789,8 +957,9 @@ namespace Modules.Utilities
 
         public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default)
         {
-            await SendDataAsync(action, data, null, token);
+            await SendDataAsync(action, data, (IProgress<float>)null, token);
         }
+        
         public async UniTask SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
@@ -816,6 +985,146 @@ namespace Modules.Utilities
             await SendDataAsync(action, serializedData, progress, token);
         }
 
+        /// <summary>
+        /// Server-only: Sends data to specific clients by their IDs
+        /// This method is only effective when called from a server instance
+        /// </summary>
+        /// <param name="action">Action identifier</param>
+        /// <param name="data">Data to send</param>
+        /// <param name="targetClientIds">Target client IDs</param>
+        /// <param name="token">Cancellation token</param>
+        public async UniTask SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, CancellationToken token = default)
+        {
+            await SendDataToClientsAsync(action, data, targetClientIds, null, token);
+        }
+
+        /// <summary>
+        /// Server-only: Sends data to specific clients by their IDs with progress reporting
+        /// This method is only effective when called from a server instance
+        /// </summary>
+        /// <param name="action">Action identifier</param>
+        /// <param name="data">Data to send</param>
+        /// <param name="targetClientIds">Target client IDs</param>
+        /// <param name="progress">Optional progress reporter (0.0 to 1.0)</param>
+        /// <param name="token">Cancellation token</param>
+        public async UniTask SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
+        {
+            if (!m_IsRunning) return;
+
+            // Only servers can target specific clients
+            if (!m_IsServer)
+            {
+                Log("SendDataToClientsAsync is only available for servers");
+                return;
+            }
+
+            if (targetClientIds == null || targetClientIds.Length == 0)
+            {
+                Log("No target client IDs specified - use SendDataAsync for broadcasting to all clients");
+                return;
+            }
+
+            // Server-side targeting logic
+            byte[] message = CreatePacket(action, data);
+            int retryCount = 0;
+            bool success = false;
+
+            while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
+            {
+                try
+                {
+                    if (!IsConnectionHealthy())
+                    {
+                        throw new InvalidOperationException("Connection is not healthy for data transmission");
+                    }
+
+                    await SendAsServerAsync(message, targetClientIds, progress, token);
+                    success = true;
+
+                    if (retryCount > 0)
+                    {
+                        Log($"Data sent successfully to targeted clients after {retryCount} retries");
+                    }
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
+                                                           ex.Message.Contains("Stream disposed"))
+                {
+                    Log($"Send operation aborted due to connection closure");
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    Log($"Send operation cancelled");
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount > m_MaxRetryCount)
+                    {
+                        Log($"Send Data to targeted clients failed after {m_MaxRetryCount} retries: {ex.Message}");
+                        ReportError(ErrorInfo.ErrorType.DataTransmission, $"Targeted data send failed after {m_MaxRetryCount} retries", ex);
+                        break;
+                    }
+                    else
+                    {
+                        Log($"Send Data to targeted clients failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: {ex.Message}");
+                        await UniTask.Delay(m_RetryDelay, cancellationToken: token);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Server-only: Sends serialized object to specific clients by their IDs
+        /// This method is only effective when called from a server instance
+        /// </summary>
+        public async UniTask SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, CancellationToken token = default)
+        {
+            await SendDataToClientsAsync(action, data, targetClientIds, null, token);
+        }
+
+        /// <summary>
+        /// Server-only: Sends serialized object to specific clients by their IDs with progress reporting
+        /// This method is only effective when called from a server instance
+        /// </summary>
+        public async UniTask SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
+            if (!m_IsRunning) return;
+
+            // Only servers can target specific clients
+            if (!m_IsServer)
+            {
+                Log("SendDataToClientsAsync is only available for servers");
+                return;
+            }
+
+            if (targetClientIds == null || targetClientIds.Length == 0)
+            {
+                Log("No target client IDs specified - use SendDataAsync for broadcasting to all clients");
+                return;
+            }
+
+            byte[] serializedData;
+            try
+            {
+#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
+                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
+#else
+                serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
+#endif
+            }
+            catch (Exception ex)
+            {
+                Log($"Serialization Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Serialization, "Data serialization failed", ex);
+                return;
+            }
+
+            await SendDataToClientsAsync(action, serializedData, targetClientIds, progress, token);
+        }
+
         private byte[] CreatePacket(ushort action, byte[] data)
         {
             data ??= Array.Empty<byte>();
@@ -826,7 +1135,6 @@ namespace Modules.Utilities
 
             Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, packet, offset, 4); offset += 4;
             Buffer.BlockCopy(BitConverter.GetBytes(myId), 0, packet, offset, 4); offset += 4;
-
             Buffer.BlockCopy(BitConverter.GetBytes(action), 0, packet, offset, 2);
 
             Buffer.BlockCopy(data, 0, packet, PACKET_HEADER_SIZE, data.Length);
@@ -840,16 +1148,20 @@ namespace Modules.Utilities
             return finalMessage;
         }
 
-        private PacketResponse ReadPacket(byte[] data, IPEndPoint remoteEndPoint)
+        private PacketResponse ReadPacket(byte[] data, int dataLength, IPEndPoint remoteEndPoint)
         {
-            if (data == null || data.Length < PACKET_HEADER_SIZE) return null;
+            if (data == null || dataLength < PACKET_HEADER_SIZE) return null;
             int offset = 0;
             int messageId = BitConverter.ToInt32(data, offset); offset += 4;
             int senderId = BitConverter.ToInt32(data, offset); offset += 4;
             var action = BitConverter.ToUInt16(data, offset);
 
-            var payload = new byte[data.Length - PACKET_HEADER_SIZE];
-            Buffer.BlockCopy(data, PACKET_HEADER_SIZE, payload, 0, payload.Length);
+            int payloadLength = dataLength - PACKET_HEADER_SIZE;
+            var payload = new byte[payloadLength];
+            if (payloadLength > 0)
+            {
+                Buffer.BlockCopy(data, PACKET_HEADER_SIZE, payload, 0, payloadLength);
+            }
 
             return new PacketResponse
             {
@@ -859,8 +1171,8 @@ namespace Modules.Utilities
                 data = payload,
                 remoteEndPoint = remoteEndPoint,
                 status = PacketResponse.ReceiveStatus.None, // Will be set by caller
-                totalBytes = data.Length,
-                processedBytes = data.Length
+                totalBytes = dataLength,
+                processedBytes = dataLength
             };
         }
         #endregion
@@ -968,6 +1280,7 @@ namespace Modules.Utilities
         // Test message variables
         private string testMessage = "Hello World!";
         private ushort testAction = 1;
+        private string targetClientIdsText = ""; // For comma-separated client IDs
 
         // Foldout states
         private bool eventsExpanded = false;
@@ -1115,8 +1428,52 @@ namespace Modules.Utilities
                     GUI.backgroundColor = Color.white;
                     EditorGUILayout.EndHorizontal();
 
-                    EditorGUILayout.Space();
+                    // Server-only targeting section
+                    if (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0)
+                    {
+                        EditorGUILayout.Space();
+                        EditorGUILayout.LabelField("Target Specific Clients (Server Only)", EditorStyles.boldLabel);
+                        
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField("Client IDs:", GUILayout.Width(70));
+                        targetClientIdsText = EditorGUILayout.TextField(targetClientIdsText, GUILayout.ExpandWidth(true));
+                        EditorGUILayout.EndHorizontal();
+                        
+                        EditorGUILayout.LabelField("Available clients:", EditorStyles.miniLabel);
+                        foreach (var client in tcpConnector.ClientInfoList)
+                        {
+                            EditorGUILayout.LabelField($"• ID: {client.id} ({client.ipAddress}:{client.port})", EditorStyles.miniLabel);
+                        }
 
+                        EditorGUILayout.BeginHorizontal();
+                        GUI.backgroundColor = Color.magenta;
+                        if (GUILayout.Button("Send to Targeted Clients"))
+                        {
+                            try
+                            {
+                                int[] targetIds = targetClientIdsText.Split(',')
+                                    .Where(s => !string.IsNullOrWhiteSpace(s))
+                                    .Select(s => int.Parse(s.Trim()))
+                                    .ToArray();
+                                
+                                if (targetIds.Length > 0)
+                                {
+                                    tcpConnector.SendDataToClientsAsync(testAction, testMessage, targetIds).Forget();
+                                    Debug.Log($"[TCPConnector] Sent targeted message: Action={testAction}, Targets=[{string.Join(", ", targetIds)}], Message='{testMessage}'");
+                                }
+                                else
+                                {
+                                    Debug.LogWarning("[TCPConnector] No valid client IDs specified");
+                                }
+                            }
+                            catch (System.Exception ex)
+                            {
+                                Debug.LogError($"[TCPConnector] Failed to parse client IDs: {ex.Message}");
+                            }
+                        }
+                        GUI.backgroundColor = Color.white;
+                        EditorGUILayout.EndHorizontal();
+                    }
 
                     EditorGUILayout.EndVertical();
                 }
