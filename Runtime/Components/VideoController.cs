@@ -546,29 +546,30 @@ namespace Modules.Utilities
             }
             var ratio = (float)_texture.width / (float)_texture.height;
 
-            switch (_ContentSizeMode)
-            {
+            if (_AspectRatioFitter != null)
+                switch (_ContentSizeMode)
+                {
 
-                case ContentSizeMode.NativeSize:
-                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+                    case ContentSizeMode.NativeSize:
+                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
 
-                    _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _texture.width);
-                    _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _texture.height);
-                    break;
-                case ContentSizeMode.WidthControlHeight:
-                    _AspectRatioFitter.aspectRatio = ratio;
-                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
-                    break;
-                case ContentSizeMode.HeightControlWidth:
-                    _AspectRatioFitter.aspectRatio = ratio;
-                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
-                    break;
-                case ContentSizeMode.None:
+                        _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _texture.width);
+                        _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _texture.height);
+                        break;
+                    case ContentSizeMode.WidthControlHeight:
+                        _AspectRatioFitter.aspectRatio = ratio;
+                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+                        break;
+                    case ContentSizeMode.HeightControlWidth:
+                        _AspectRatioFitter.aspectRatio = ratio;
+                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+                        break;
+                    case ContentSizeMode.None:
 
-                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
-                    break;
+                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+                        break;
 
-            }
+                }
 
 
             if (_RawImage != null)
