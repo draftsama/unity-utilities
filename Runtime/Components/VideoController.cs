@@ -534,7 +534,7 @@ namespace Modules.Utilities
 
         private void ApplyTexture(Texture _texture)
         {
-
+            if (_texture == null) return;
             if (_RectTransform == null)
             {
                 _RectTransform = GetComponent<RectTransform>();
