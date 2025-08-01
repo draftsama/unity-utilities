@@ -204,10 +204,12 @@ namespace Modules.Utilities
             await UniTask.NextFrame();
             _VideoPlayer.SetDirectAudioVolume(0, 0);
             _VideoPlayer.Play();
-
+        
             await UniTask.WaitUntil(() => _VideoPlayer.isPlaying,
                 cancellationToken: this.GetCancellationTokenOnDestroy());
             _VideoPlayer.frame = 1;
+            await UniTask.WaitUntil(() => _VideoPlayer.texture != null,
+             cancellationToken: this.GetCancellationTokenOnDestroy());
             ApplyTexture(_VideoPlayer.texture);
             ApplyAlpha(1);
             _VideoPlayer.Pause();
