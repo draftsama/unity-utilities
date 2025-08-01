@@ -2,7 +2,10 @@
     "name": "unity-utilities-editor",
     "rootNamespace": "",
     "references": [
-        "GUID:7cd2f9ee45cd24df59e20bad02a13c40"
+        "GUID:7cd2f9ee45cd24df59e20bad02a13c40",
+        "GUID:f51ebe6a0ceec4240a699833d6309b23",
+        "GUID:5c01796d064528144a599661eaab93a6",
+        "GUID:4129704b5a1a13841ba16f230bf24a57"
     ],
     "includePlatforms": [
         "Editor"

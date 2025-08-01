@@ -38,6 +38,7 @@ namespace Modules.Utilities
 
         [SerializeField][HideInInspector] private RawImage _RawImage;
         [SerializeField][HideInInspector] private CanvasGroup _CanvasGroup;
+        [SerializeField][HideInInspector] private AspectRatioFitter _AspectRatioFitter;
         [SerializeField][HideInInspector] private bool _PlayWithParentShow = false;
         [SerializeField][HideInInspector] private CanvasGroup _ParentCanvasGroup;
         [SerializeField][HideInInspector] private float _CanvasGroupThreshold = 0.1f;
@@ -47,10 +48,13 @@ namespace Modules.Utilities
         [SerializeField][HideInInspector] private MeshRenderer _MeshRenderer;
         [SerializeField][HideInInspector] private Material _Material;
 
+        [SerializeField][HideInInspector] private ContentSizeMode _ContentSizeMode = ContentSizeMode.None;
+
+
         private VideoPlayer _VideoPlayer;
         private UnityEvent _OnEndEventHandler = new UnityEvent();
 
-        private bool _Stoping = false;
+        private bool _Stopping = false;
         private bool _IgnoreFadeOut = false;
 
 
@@ -59,15 +63,20 @@ namespace Modules.Utilities
 
         CancellationTokenSource _CancellationTokenSource = new CancellationTokenSource();
 
+        RectTransform _RectTransform;
+        Transform _Transform;
+
         private bool _IsResume = false;
+
+        private float _FadeInProgress = 0f;
+        private float _FadeOutProgress = 0f;
         private void OnDisable()
         {
             if (_VideoPlayer != null)
             {
                 _IsResume = m_IsPlaying;
-                _VideoPlayer.Stop();
+                _VideoPlayer.Pause();
                 _VideoPlayer.targetTexture?.Release();
-                m_IsPrepared = false;
                 _VideoPlayer.targetTexture = null;
             }
 
@@ -83,7 +92,7 @@ namespace Modules.Utilities
             Init();
             if (_IsResume)
             {
-                PlayAsync().Forget();
+                PlayAsync(_resume: true).Forget();
             }
             else if (m_StartMode != VideoStartMode.None)
             {
@@ -163,7 +172,7 @@ namespace Modules.Utilities
         }
 
 
-        public async UniTask<bool> Prepare(CancellationToken _token)
+        public async UniTask<bool> Prepare(CancellationToken _token = default)
         {
             if (!_VideoPlayer.isPrepared || !m_IsPrepared)
             {
@@ -177,6 +186,7 @@ namespace Modules.Utilities
                 _VideoPlayer.Prepare();
                 await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
                 m_IsPrepared = true;
+
             }
             return true;
 
@@ -184,9 +194,11 @@ namespace Modules.Utilities
 
         public async UniTask PrepareFirstFrame()
         {
-            if (!SetupURL(m_FileName, m_PathType, m_FolderName))
+            await Prepare();
+            if (_VideoPlayer == null || !_VideoPlayer.isPrepared)
+            {
                 return;
-
+            }
 
             _VideoPlayer.Stop();
             await UniTask.NextFrame();
@@ -256,6 +268,8 @@ namespace Modules.Utilities
         {
             if (_VideoPlayer == null) _VideoPlayer = GetComponent<VideoPlayer>();
 
+            _RectTransform = GetComponent<RectTransform>();
+            _Transform = transform;
 
             if (m_OutputType == VideoOutputType.RawImage)
             {
@@ -326,13 +340,14 @@ namespace Modules.Utilities
                 _VideoPlayer.playOnAwake = false;
                 _VideoPlayer.renderMode = VideoRenderMode.MaterialOverride;
             }
+
             if (Application.isPlaying) ApplyAlpha(0);
         }
 
         //------------------------------------ Public Method ----------------------------------
 
         public async UniTask PlayAsync(int _frame = 0, bool _ignoreFadeIn = false, bool _ignoreFadeOut = false,
-            bool _forcePlay = false, CancellationToken _token = default)
+            bool _forcePlay = false, bool _resume = false, CancellationToken _token = default)
         {
             if (_VideoPlayer == null)
                 _VideoPlayer = GetComponent<VideoPlayer>();
@@ -340,28 +355,33 @@ namespace Modules.Utilities
             if (_VideoPlayer.isPlaying && !_forcePlay)
                 return;
 
-
-            _VideoPlayer.Stop();
-
-            //after cancel token be must wait for next frame
-
-            _CancellationTokenSource?.Cancel();
-            _CancellationTokenSource = new CancellationTokenSource();
-            await UniTask.NextFrame();
-
-            if (_token != default)
+            if (!_resume)
             {
-                _CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_token);
+                _VideoPlayer.Stop();
+                _Stopping = false;
+                _FadeInProgress = 0f;
+                _FadeOutProgress = 0f;
+                _CancellationTokenSource?.Cancel();
+                _CancellationTokenSource = new CancellationTokenSource();
+
+                //after cancel token be must wait for next frame
+                await UniTask.NextFrame();
+
+                if (_token != default)
+                {
+                    _CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_token);
+                }
             }
+
+
+
+
             var token = _CancellationTokenSource.Token;
 
-            _Stoping = false;
 
 
-            m_Progress = 0f;
             _IgnoreFadeOut = _ignoreFadeOut;
-            float fadeInProgress = 0f;
-            float fadeOutProgress = 0f;
+
             try
             {
 
@@ -375,42 +395,43 @@ namespace Modules.Utilities
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: token);
 
+                m_Progress = _frame / (float)_VideoPlayer.frameCount;
 
-                ApplyTexture(_VideoPlayer.texture);
 
 
                 while (!token.IsCancellationRequested)
                 {
+
                     if (_VideoPlayer == null)
                         break;
 
                     m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
 
 
-                    if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stoping)
+                    if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stopping)
                     {
-                        fadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
+                        _FadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
 
-                        fadeInProgress = Mathf.Clamp01(fadeInProgress);
-                        var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseInQuad, 0f, 1f, fadeInProgress);
+                        _FadeInProgress = Mathf.Clamp01(_FadeInProgress);
+                        var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseInQuad, 0f, 1f, _FadeInProgress);
 
                         //fade in
                         ApplyAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 1);
                     }
                     else if (!m_Loop && _VideoPlayer.time >=
-                             _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) || _Stoping)
+                             _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) || _Stopping)
                     {
 
-                        fadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
-                        fadeOutProgress = Mathf.Clamp01(fadeOutProgress);
+                        _FadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
+                        _FadeOutProgress = Mathf.Clamp01(_FadeOutProgress);
                         var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseOutQuad, 1f, 0f,
-                                fadeOutProgress);
+                                _FadeOutProgress);
                         //fade out
                         if (m_KeepLastframe)
                         {
                             //keep last frame
-                            if (fadeOutProgress >= 1f)
+                            if (_FadeOutProgress >= 1f)
                             {
                                 Seek(_VideoPlayer.frameCount - 1);
                                 Debug.Log("Video End :" + _VideoPlayer.url);
@@ -424,7 +445,7 @@ namespace Modules.Utilities
                         {
                             ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
                             _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
-                            if (fadeOutProgress >= 1f)
+                            if (_FadeOutProgress >= 1f)
                             {
                                 Debug.Log("Video End :" + _VideoPlayer.url);
                                 _OnEndEventHandler.Invoke();
@@ -453,6 +474,7 @@ namespace Modules.Utilities
 
                     }
 
+                    ApplyTexture(_VideoPlayer.texture);
 
                     await UniTask.Yield(PlayerLoopTiming.Update);
                 }
@@ -468,7 +490,7 @@ namespace Modules.Utilities
             }
             finally
             {
-                _Stoping = false;
+                _Stopping = false;
                 m_IsPlaying = false;
                 m_IsPrepared = false;
                 if (!m_KeepLastframe)
@@ -479,13 +501,7 @@ namespace Modules.Utilities
             }
 
 
-            // _Stoping = false;
-            // if(_VideoPlayer != null)_VideoPlayer.Stop();
-            // if(_CanvasGroup != null)_CanvasGroup.SetAlpha(0);
-            // // Debug.Log("Video End.");
 
-            // _OnEndEventHandler.Invoke();
-            // _OnEnd?.Invoke(Unit.Default);
         }
 
 
@@ -503,16 +519,58 @@ namespace Modules.Utilities
 
         public void Stop(bool _ignoreFadeOut = false)
         {
-            if (!_VideoPlayer || !_VideoPlayer.isPlaying)
+            if (!_VideoPlayer || !_VideoPlayer.isPlaying || !m_IsPlaying)
+            {
+                ApplyAlpha(0);
+                m_IsPlaying = false;
+                m_IsPrepared = false;
                 return;
+            }
 
             //  Debug.Log($"Stop Video :{m_FileName} ");
             _IgnoreFadeOut = _ignoreFadeOut;
-            _Stoping = true;
+            _Stopping = true;
         }
 
         private void ApplyTexture(Texture _texture)
         {
+
+            if (_RectTransform == null)
+            {
+                _RectTransform = GetComponent<RectTransform>();
+            }
+
+            if (_Transform == null)
+            {
+                _Transform = transform;
+            }
+            var ratio = (float)_texture.width / (float)_texture.height;
+
+            switch (_ContentSizeMode)
+            {
+
+                case ContentSizeMode.NativeSize:
+                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+
+                    _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, _texture.width);
+                    _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, _texture.height);
+                    break;
+                case ContentSizeMode.WidthControlHeight:
+                    _AspectRatioFitter.aspectRatio = ratio;
+                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+                    break;
+                case ContentSizeMode.HeightControlWidth:
+                    _AspectRatioFitter.aspectRatio = ratio;
+                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+                    break;
+                case ContentSizeMode.None:
+
+                    _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+                    break;
+
+            }
+
+
             if (_RawImage != null)
             {
                 _RawImage.texture = _texture;
@@ -550,6 +608,7 @@ namespace Modules.Utilities
                 _VideoPlayer.Play();
 
             _VideoPlayer.frame = _frame;
+            m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
         }
 
         public void Seek(float _progress)
@@ -562,6 +621,18 @@ namespace Modules.Utilities
 
             _progress = Mathf.Clamp(_progress, 0, 1);
             _VideoPlayer.time = _progress * _VideoPlayer.length;
+            m_Progress = _progress;
+        }
+
+        public int GetCurrentFrame()
+        {
+            if (!_VideoPlayer.isPrepared)
+            {
+                Debug.Log("Video Not Prepared.");
+                return 0;
+            }
+
+            return (int)_VideoPlayer.frame;
         }
 
 
