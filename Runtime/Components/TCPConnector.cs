@@ -337,7 +337,18 @@ namespace Modules.Utilities
             {
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
                 _tcpListener.Start(m_MaxConcurrentConnections); // Limit backlog
+                
+                // Create server info for consistent ID mapping
+                m_ServerInfo = new ConnectorInfo
+                {
+                    id = _tcpListener.GetHashCode(),
+                    ipAddress = "0.0.0.0", // Server listens on all interfaces
+                    port = m_Port,
+                    remoteEndPoint = new IPEndPoint(IPAddress.Any, m_Port)
+                };
+                
                 Log($"listening on TCP port {m_Port} (max {m_MaxConcurrentConnections} concurrent connections).");
+                Log($"Server info created: ID={m_ServerInfo.id}, Port={m_ServerInfo.port}");
 
                 while (!token.IsCancellationRequested)
                 {
@@ -752,7 +763,18 @@ namespace Modules.Utilities
             byte[] packet = new byte[PACKET_HEADER_SIZE + data.Length];
             int offset = 0;
 
-            int myId = m_IsServer ? -1 : (_tcpClient?.GetHashCode() ?? _realTimeClient?.Client?.GetHashCode() ?? 0);
+            // For consistent ID mapping between senderId and ConnectorInfo.id:
+            // - Server uses its TcpListener's hash code (consistent server ID)
+            // - Client uses its TcpClient's hash code
+            int myId;
+            if (m_IsServer)
+            {
+                myId = _tcpListener?.GetHashCode() ?? -1;
+            }
+            else
+            {
+                myId = _tcpClient?.GetHashCode() ?? _realTimeClient?.Client?.GetHashCode() ?? 0;
+            }
 
             Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, packet, offset, 4); offset += 4;
             Buffer.BlockCopy(BitConverter.GetBytes(myId), 0, packet, offset, 4); offset += 4;
@@ -1553,6 +1575,13 @@ namespace Modules.Utilities
 
         #region Nested Classes & Enums
 
+        /// <summary>
+        /// Contains connection information for a client or server.
+        /// The 'id' field is consistent with PacketResponse.senderId for proper identification:
+        /// - For Server: id = TcpListener.GetHashCode()
+        /// - For Client: id = TcpClient.GetHashCode()  
+        /// - For Real-time: id = IPEndPoint.GetHashCode()
+        /// </summary>
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
 
         [Serializable]
@@ -1561,6 +1590,11 @@ namespace Modules.Utilities
             public enum ReceiveStatus { None, Receiving, Received }
 
             public int messageId;
+            /// <summary>
+            /// ID of the sender. This value matches ConnectorInfo.id for proper identification:
+            /// - Server packets: senderId = TcpListener.GetHashCode() (matches server's ConnectorInfo.id)
+            /// - Client packets: senderId = TcpClient.GetHashCode() (matches client's ConnectorInfo.id)
+            /// </summary>
             public int senderId;
             public ushort action;
             public byte[] data;
