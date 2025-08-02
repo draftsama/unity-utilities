@@ -36,7 +36,6 @@ namespace Modules.Utilities
         [SerializeField] public bool m_StartOnEnable = true;
         [SerializeField] public bool m_IsDebug = true;
 
-        [Header("Performance")]
         [SerializeField, Range(1000, 10000), Tooltip("Buffer size for network operations")]
         public int m_BufferSize = 8192;
         [SerializeField, Range(1, 100), Tooltip("Maximum concurrent connections for server")]
@@ -52,7 +51,6 @@ namespace Modules.Utilities
         [SerializeField, Range(1, 1000), Tooltip("Maximum real-time packet size in bytes")]
         public int m_MaxRealTimePacketSize = 512;
 
-        [Header("Data Transmission")]
         [SerializeField, Range(0, 10), Tooltip("Maximum number of retry attempts when data sending fails")]
         public int m_MaxRetryCount = 5;
         [SerializeField, Range(0, 5000), Tooltip("Delay in milliseconds between retry attempts")]
@@ -1714,8 +1712,7 @@ namespace Modules.Utilities
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxConcurrentConnections"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableKeepAlive"));
                 
-                EditorGUILayout.Space();
-                EditorGUILayout.LabelField("Data Transmission", EditorStyles.boldLabel);
+                
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRetryCount"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelay"));
             }
