@@ -201,13 +201,13 @@ namespace Modules.Utilities
         {
             var rect = RectTransformToRect(_rectTransform);
             return IsRectInView(rect);
-        } 
-         public static bool IsRectInView(Rect _rect)
+        }
+        public static bool IsRectInView(Rect _rect)
         {
             return _rect.Overlaps(new Rect(0, 0, Screen.width, Screen.height));
         }
 
-        public static  Rect RectTransformToRect(RectTransform _rectTransform)
+        public static Rect RectTransformToRect(RectTransform _rectTransform)
         {
 
             var width = _rectTransform.rect.width;
@@ -217,6 +217,50 @@ namespace Modules.Utilities
             var y = _rectTransform.position.y - (height * _rectTransform.pivot.y);
             return new Rect(x, y, width, height);
         }
+        
+
+
+        
+        /// <summary>
+        /// Generate unique ID with custom character sets
+        /// </summary>
+        /// <param name="length">Length of generated ID</param>
+        /// <param name="includeUppercase">Include uppercase letters (A-Z)</param>
+        /// <param name="includeLowercase">Include lowercase letters (a-z)</param>
+        /// <param name="includeNumbers">Include numbers (0-9)</param>
+        /// <param name="includeSpecialChars">Include special characters</param>
+        /// <param name="customSpecialChars">Custom special characters to use</param>
+        /// <returns>Generated unique ID</returns>
+        public static string GenerateUniqueId(int length = 8, 
+            bool includeUppercase = true, 
+            bool includeLowercase = true, 
+            bool includeNumbers = true, 
+            bool includeSpecialChars = false,
+            string customSpecialChars = "!@#$%^&*")
+        {
+            string chars = "";
+            
+            if (includeUppercase) chars += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+            if (includeLowercase) chars += "abcdefghijklmnopqrstuvwxyz";
+            if (includeNumbers) chars += "0123456789";
+            if (includeSpecialChars) chars += customSpecialChars;
+            
+            if (string.IsNullOrEmpty(chars))
+                chars = "0123456789"; // Fallback to numbers only
+            
+            var result = new System.Text.StringBuilder(length);
+            var random = new System.Random();
+            
+            for (int i = 0; i < length; i++)
+            {
+                result.Append(chars[random.Next(chars.Length)]);
+            }
+            
+            return result.ToString();
+        }
+       
+       
+      
 
 
     }

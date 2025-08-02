@@ -730,11 +730,8 @@ namespace Modules.Utilities
             byte[] serializedData;
             try
             {
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
-                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
-#else
-                serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
-#endif
+                // Use the same intelligent serialization logic as TCP
+                serializedData = SerializeData(data);
             }
             catch (Exception ex)
             {
@@ -1335,12 +1332,8 @@ namespace Modules.Utilities
             byte[] serializedData;
             try
             {
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
-                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
-#else
-                // Fallback to Unity's JsonUtility if Newtonsoft.Json is not available
-                serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
-#endif
+                // Handle primitive types and basic types directly
+                serializedData = SerializeData(data);
             }
             catch (Exception ex)
             {
@@ -1350,6 +1343,42 @@ namespace Modules.Utilities
             }
 
             await SendDataAsync(action, serializedData, progress, token);
+        }
+
+        /// <summary>
+        /// Serializes data based on type - primitives directly, complex objects via JSON
+        /// </summary>
+        private byte[] SerializeData<T>(T data)
+        {
+            try
+            {
+                byte[] bytes = UnityConverter.ToBytes(data);
+                Log($"Serializing {typeof(T).Name}: {data} ({bytes.Length} bytes)");
+                return bytes;
+            }
+            catch (Exception ex)
+            {
+                Log($"Serialization failed for {typeof(T).Name}: {ex.Message}");
+                throw;
+            }
+        }
+
+        /// <summary>
+        /// Serializes complex objects as JSON
+        /// </summary>
+        private byte[] SerializeAsJson<T>(T data)
+        {
+            string jsonString;
+            
+#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
+            jsonString = JsonConvert.SerializeObject(data);
+#else
+            jsonString = JsonUtility.ToJson(data);
+#endif
+            
+            var bytes = Encoding.UTF8.GetBytes(jsonString);
+            Log($"Serializing {typeof(T).Name} as JSON: '{jsonString}' ({bytes.Length} bytes)");
+            return bytes;
         }
 
         /// <summary>
@@ -1507,6 +1536,7 @@ namespace Modules.Utilities
             Buffer.BlockCopy(lengthPrefix, 0, finalMessage, 0, 4);
             Buffer.BlockCopy(packet, 0, finalMessage, 4, packet.Length);
 
+            Log($"Created packet: Action={action}, Data={data?.Length ?? 0} bytes, Packet={packet.Length} bytes, Final={finalMessage.Length} bytes");
             return finalMessage;
         }
 
@@ -1547,12 +1577,31 @@ namespace Modules.Utilities
             public T GetData<T>()
             {
                 if (data == null || data.Length == 0) return default;
+                
+                try
+                {
+                    // Use the intelligent deserialization from UnityConverter
+                    return UnityConverter.FromBytes<T>(data);
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogError($"Failed to deserialize data to {typeof(T).Name}: {ex.Message}");
+                    
+                    // Fallback to JSON deserialization for complex objects
+                    try
+                    {
 #if PACKAGE_NEWTONSOFT_JSON_INSTALLED
-                return JsonConvert.DeserializeObject<T>(Encoding.UTF8.GetString(data));
+                        return JsonConvert.DeserializeObject<T>(UnityConverter.GetString(data));
 #else
-                // Fallback to Unity's JsonUtility if Newtonsoft.Json is not available  
-                return JsonUtility.FromJson<T>(Encoding.UTF8.GetString(data));
+                        return JsonUtility.FromJson<T>(UnityConverter.GetString(data));
 #endif
+                    }
+                    catch (Exception jsonEx)
+                    {
+                        Debug.LogError($"Fallback JSON deserialization also failed: {jsonEx.Message}");
+                        return default;
+                    }
+                }
             }
 
         }
