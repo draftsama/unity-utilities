@@ -44,6 +44,14 @@ namespace Modules.Utilities
         [SerializeField, Tooltip("Enable TCP keep-alive to detect dead connections")]
         public bool m_EnableKeepAlive = true;
 
+        [Header("Real-time Mode")]
+        [SerializeField, Tooltip("Enable real-time mode for low-latency data transmission (unreliable but fast)")]
+        public bool m_EnableRealTimeMode = false;
+        [SerializeField, Range(7000, 9999), Tooltip("Real-time communication port")]
+        public int m_RealTimePort = 7779;
+        [SerializeField, Range(1, 1000), Tooltip("Maximum real-time packet size in bytes")]
+        public int m_MaxRealTimePacketSize = 512;
+
         [Header("Data Transmission")]
         [SerializeField, Range(0, 10), Tooltip("Maximum number of retry attempts when data sending fails")]
         public int m_MaxRetryCount = 5;
@@ -58,6 +66,7 @@ namespace Modules.Utilities
         [SerializeField] public string m_DiscoveryMessage = "DiscoverServer";
 
         // --- Status ---
+        [Header("Status (Read Only)")]
         [SerializeField] private bool m_IsRunning = false;
         [SerializeField] private bool m_IsConnected = false;
 
@@ -66,15 +75,23 @@ namespace Modules.Utilities
         private TcpClient _tcpClient;     // Client
         private readonly Dictionary<TcpClient, ConnectorInfo> m_Clients = new Dictionary<TcpClient, ConnectorInfo>();
 
-        [SerializeField] private ConnectorInfo m_ServerInfo;
+        // --- Real-time Components ---
+        private UdpClient _realTimeServer; // Server real-time listener
+        private UdpClient _realTimeClient; // Client real-time sender
+        private readonly Dictionary<IPEndPoint, ConnectorInfo> m_RealTimeClients = new Dictionary<IPEndPoint, ConnectorInfo>();
+
+        [Header("Connected Server Info")]
+        [SerializeField] public ConnectorInfo m_ServerInfo;
 
         // --- Events ---
-        [SerializeField] private UnityEvent<ConnectorInfo> m_OnClientConnected = new UnityEvent<ConnectorInfo>();
-        [SerializeField] private UnityEvent<ConnectorInfo> m_OnClientDisconnected = new UnityEvent<ConnectorInfo>();
-        [SerializeField] private UnityEvent<ConnectorInfo> m_OnServerConnected = new UnityEvent<ConnectorInfo>();
-        [SerializeField] private UnityEvent<ConnectorInfo> m_OnServerDisconnected = new UnityEvent<ConnectorInfo>();
-        [SerializeField] private UnityEvent<PacketResponse> m_OnDataReceived = new UnityEvent<PacketResponse>();
-        [SerializeField] private UnityEvent<ErrorInfo> m_OnError = new UnityEvent<ErrorInfo>();
+        [Header("Events")]
+        [SerializeField] public UnityEvent<ConnectorInfo> m_OnClientConnected = new UnityEvent<ConnectorInfo>();
+        [SerializeField] public UnityEvent<ConnectorInfo> m_OnClientDisconnected = new UnityEvent<ConnectorInfo>();
+        [SerializeField] public UnityEvent<ConnectorInfo> m_OnServerConnected = new UnityEvent<ConnectorInfo>();
+        [SerializeField] public UnityEvent<ConnectorInfo> m_OnServerDisconnected = new UnityEvent<ConnectorInfo>();
+        [SerializeField] public UnityEvent<PacketResponse> m_OnDataReceived = new UnityEvent<PacketResponse>();
+        [SerializeField] public UnityEvent<PacketResponse> m_OnRealTimeDataReceived = new UnityEvent<PacketResponse>(); // Separate real-time event
+        [SerializeField] public UnityEvent<ErrorInfo> m_OnError = new UnityEvent<ErrorInfo>();
 
         private CancellationTokenSource _cts;
 
@@ -90,7 +107,9 @@ namespace Modules.Utilities
         #region Public Variables
         public bool IsConnected => m_IsConnected;
         public bool IsRunning => m_IsRunning;
+        public bool IsRealTimeEnabled => m_EnableRealTimeMode;
         public List<ConnectorInfo> ClientInfoList => m_Clients.Values.ToList();
+        public List<ConnectorInfo> RealTimeClientInfoList => m_RealTimeClients.Values.ToList();
         public ConnectorInfo ServerInfo => m_ServerInfo;
 
         /// <summary>
@@ -122,12 +141,12 @@ namespace Modules.Utilities
             try
             {
                 if (client?.Client == null) return false;
-                
+
                 // Use Socket.Poll to check if connection is still alive
                 var socket = client.Client;
                 bool part1 = socket.Poll(1000, SelectMode.SelectRead);
                 bool part2 = (socket.Available == 0);
-                
+
                 // If poll returns true and no data available, connection is closed
                 return !(part1 && part2) && socket.Connected;
             }
@@ -153,7 +172,7 @@ namespace Modules.Utilities
                     }
                 }
             }
-            
+
             // Create new buffer if none available or too small
             return new byte[Math.Max(minSize, m_BufferSize)];
         }
@@ -164,7 +183,7 @@ namespace Modules.Utilities
         private void ReturnBuffer(byte[] buffer)
         {
             if (buffer == null || buffer.Length < m_BufferSize) return;
-            
+
             lock (_bufferPoolLock)
             {
                 // Limit pool size to prevent memory bloat
@@ -239,11 +258,25 @@ namespace Modules.Utilities
                 {
                     BroadcastPresenceAsync(_cts.Token).Forget();
                 }
+                
+                // Start real-time server if enabled
+                if (m_EnableRealTimeMode)
+                {
+                    StartRealTimeServerAsync(_cts.Token).Forget();
+                }
+                
                 await StartServerAsync(_cts.Token);
             }
             else
             {
                 m_IsRunning = true; // <<< Set IsRunning true for client here
+                
+                // Start real-time client if enabled
+                if (m_EnableRealTimeMode)
+                {
+                    StartRealTimeClientAsync(_cts.Token).Forget();
+                }
+                
                 // <<< This is the new main client loop that handles reconnects
                 ClientConnectionLoopAsync(_cts.Token).Forget();
             }
@@ -260,6 +293,10 @@ namespace Modules.Utilities
             if (m_IsServer)
             {
                 _tcpListener?.Stop();
+                _realTimeServer?.Close();
+                _realTimeServer?.Dispose();
+                _realTimeServer = null;
+                
                 lock (m_Clients)
                 {
                     foreach (var client in m_Clients.Keys)
@@ -268,11 +305,21 @@ namespace Modules.Utilities
                     }
                     m_Clients.Clear();
                 }
+                
+                lock (m_RealTimeClients)
+                {
+                    m_RealTimeClients.Clear();
+                }
+                
                 Log("Server and all client connections closed.");
             }
             else
             {
                 _tcpClient?.Close();
+                _realTimeClient?.Close();
+                _realTimeClient?.Dispose();
+                _realTimeClient = null;
+                
                 if (m_IsConnected)
                 {
                     m_IsConnected = false;
@@ -297,10 +344,10 @@ namespace Modules.Utilities
                 while (!token.IsCancellationRequested)
                 {
                     TcpClient connectedClient = await _tcpListener.AcceptTcpClientAsync().AsUniTask().AttachExternalCancellation(token);
-                    
+
                     // Configure TCP settings for performance
                     ConfigureTcpClient(connectedClient);
-                    
+
                     HandleClientAsync(connectedClient, token).Forget();
                 }
             }
@@ -418,7 +465,7 @@ namespace Modules.Utilities
             try
             {
                 var socket = tcpClient.Client;
-                
+
                 // Enable TCP Keep-Alive to detect dead connections
                 if (m_EnableKeepAlive)
                 {
@@ -430,23 +477,345 @@ namespace Modules.Utilities
                     BitConverter.GetBytes(1000).CopyTo(keepAliveValues, 8); // 1 second in ms
                     socket.IOControl(IOControlCode.KeepAliveValues, keepAliveValues, null);
                 }
-                
+
                 // Optimize buffer sizes
                 socket.ReceiveBufferSize = m_BufferSize;
                 socket.SendBufferSize = m_BufferSize;
-                
+
                 // Disable Nagle's algorithm for low latency (trade bandwidth for speed)
                 socket.NoDelay = true;
-                
+
                 // Set linger option to close immediately
                 socket.LingerState = new LingerOption(false, 0);
-                
+
                 Log($"TCP client configured: KeepAlive={m_EnableKeepAlive}, BufferSize={m_BufferSize}, NoDelay=true");
             }
             catch (Exception ex)
             {
                 Log($"Failed to configure TCP client: {ex.Message}");
             }
+        }
+
+        #endregion
+
+        #region Real-time Methods
+
+        /// <summary>
+        /// Starts real-time server for low-latency data transmission
+        /// </summary>
+        private async UniTask StartRealTimeServerAsync(CancellationToken token)
+        {
+            try
+            {
+                _realTimeServer = new UdpClient(m_RealTimePort);
+                _realTimeServer.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                
+                Log($"Real-time server listening on port {m_RealTimePort} for real-time data");
+
+                while (!token.IsCancellationRequested)
+                {
+                    var result = await _realTimeServer.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
+                    ProcessRealTimeDataAsync(result.Buffer, result.RemoteEndPoint, token).Forget();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("Real-time server operation was canceled.");
+            }
+            catch (ObjectDisposedException)
+            {
+                Log("Real-time server disposed.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Real-time Server Error: {ex.GetType().Name} - {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Connection, "Real-time server failed", ex);
+            }
+            finally
+            {
+                _realTimeServer?.Close();
+                _realTimeServer?.Dispose();
+                _realTimeServer = null;
+            }
+        }
+
+        /// <summary>
+        /// Starts real-time client for low-latency data transmission
+        /// </summary>
+        private async UniTask StartRealTimeClientAsync(CancellationToken token)
+        {
+            try
+            {
+                // Use a specific local port for real-time client communication
+                int clientRealTimePort = m_RealTimePort + 100; // Offset to avoid conflicts
+                _realTimeClient = new UdpClient(clientRealTimePort);
+                _realTimeClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                
+                Log($"Real-time client bound to port {clientRealTimePort} for communication with {m_Host}:{m_RealTimePort}");
+
+                // Start listening for real-time data from server on the same port
+                StartRealTimeClientReceiveLoopAsync(token).Forget();
+
+                await UniTask.CompletedTask;
+            }
+            catch (Exception ex)
+            {
+                Log($"Real-time Client Error: {ex.GetType().Name} - {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Connection, "Real-time client setup failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Real-time client receive loop to listen for server responses
+        /// </summary>
+        private async UniTask StartRealTimeClientReceiveLoopAsync(CancellationToken token)
+        {
+            try
+            {
+                Log($"Real-time client listening for server responses");
+
+                while (!token.IsCancellationRequested && _realTimeClient != null)
+                {
+                    var result = await _realTimeClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
+                    ProcessRealTimeDataAsync(result.Buffer, result.RemoteEndPoint, token).Forget();
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Log("Real-time client receive loop was canceled.");
+            }
+            catch (ObjectDisposedException)
+            {
+                Log("Real-time client receive disposed.");
+            }
+            catch (Exception ex)
+            {
+                Log($"Real-time Client Receive Error: {ex.GetType().Name} - {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Connection, "Real-time client receive failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Processes incoming real-time data
+        /// </summary>
+        private async UniTask ProcessRealTimeDataAsync(byte[] data, IPEndPoint remoteEndPoint, CancellationToken token)
+        {
+            try
+            {
+                Log($"Processing real-time data from {remoteEndPoint.Address}:{remoteEndPoint.Port} ({data.Length} bytes)");
+
+                // Register real-time client if not already known
+                lock (m_RealTimeClients)
+                {
+                    if (!m_RealTimeClients.ContainsKey(remoteEndPoint))
+                    {
+                        var clientInfo = new ConnectorInfo
+                        {
+                            id = remoteEndPoint.GetHashCode(),
+                            ipAddress = remoteEndPoint.Address.ToString(),
+                            port = remoteEndPoint.Port,
+                            remoteEndPoint = remoteEndPoint
+                        };
+                        m_RealTimeClients[remoteEndPoint] = clientInfo;
+                        Log($"New real-time client registered: {clientInfo.ipAddress}:{clientInfo.port}");
+                    }
+                }
+
+                // Parse real-time packet (simpler than TCP - no length prefix)
+                var packetResponse = ReadRealTimePacket(data, remoteEndPoint);
+                if (packetResponse != null)
+                {
+                    packetResponse.status = PacketResponse.ReceiveStatus.Received;
+                    packetResponse.totalBytes = data.Length;
+                    packetResponse.processedBytes = data.Length;
+
+                    Log($"Real-time packet parsed successfully: Action={packetResponse.action}, Data length={packetResponse.data?.Length ?? 0}");
+
+                    await UniTask.SwitchToMainThread();
+                    m_OnRealTimeDataReceived?.Invoke(packetResponse);
+                }
+                else
+                {
+                    Log($"Failed to parse real-time packet from {remoteEndPoint}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Real-time data processing error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.DataTransmission, "Real-time data processing failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Sends data via real-time transmission (unreliable but fast) - suitable for real-time updates
+        /// </summary>
+        /// <param name="action">Action identifier</param>
+        /// <param name="data">Data to send (should be small, < 512 bytes recommended)</param>
+        /// <param name="token">Cancellation token</param>
+        public async UniTask SendRealTimeDataAsync(ushort action, byte[] data, CancellationToken token = default)
+        {
+            if (!m_EnableRealTimeMode)
+            {
+                Log("Real-time mode is not enabled");
+                return;
+            }
+
+            if (!m_IsRunning) 
+            {
+                Log("Connection is not running - cannot send real-time data");
+                return;
+            }
+
+            if (data != null && data.Length > m_MaxRealTimePacketSize)
+            {
+                Log($"Real-time data too large ({data.Length} bytes). Max allowed: {m_MaxRealTimePacketSize}. Use TCP for large data.");
+                return;
+            }
+
+            try
+            {
+                byte[] packet = CreateRealTimePacket(action, data);
+                Log($"Sending real-time packet: Action={action}, Data length={data?.Length ?? 0}, Packet size={packet.Length}");
+
+                if (m_IsServer)
+                {
+                    // Server sends to all known real-time clients using their original endpoints
+                    List<IPEndPoint> clients;
+                    lock (m_RealTimeClients)
+                    {
+                        clients = m_RealTimeClients.Keys.ToList();
+                    }
+
+                    if (clients.Count == 0)
+                    {
+                        Log("No real-time clients to send data to");
+                        return;
+                    }
+
+                    foreach (var client in clients)
+                    {
+                        // Send back to the same endpoint that sent to us
+                        await _realTimeServer.SendAsync(packet, packet.Length, client);
+                        Log($"Real-time packet sent to client {client.Address}:{client.Port}");
+                    }
+
+                    Log($"Real-time data sent to {clients.Count} clients ({packet.Length} bytes)");
+                }
+                else
+                {
+                    // Client sends to server
+                    if (_realTimeClient != null)
+                    {
+                        await _realTimeClient.SendAsync(packet, packet.Length, m_Host, m_RealTimePort);
+                        Log($"Real-time data sent to server {m_Host}:{m_RealTimePort} ({packet.Length} bytes)");
+                    }
+                    else
+                    {
+                        Log("Real-time client not initialized");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Real-time send error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.DataTransmission, "Real-time data send failed", ex);
+            }
+        }
+
+        /// <summary>
+        /// Sends serialized object via real-time transmission
+        /// </summary>
+        public async UniTask SendRealTimeDataAsync<T>(ushort action, T data, CancellationToken token = default)
+        {
+            if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
+
+            byte[] serializedData;
+            try
+            {
+#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
+                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
+#else
+                serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
+#endif
+            }
+            catch (Exception ex)
+            {
+                Log($"Real-time Serialization Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Serialization, "Real-time data serialization failed", ex);
+                return;
+            }
+
+            await SendRealTimeDataAsync(action, serializedData, token);
+        }
+
+        /// <summary>
+        /// Creates the core packet structure (shared between TCP and UDP)
+        /// </summary>
+        private byte[] CreateCorePacket(ushort action, byte[] data)
+        {
+            data ??= Array.Empty<byte>();
+            byte[] packet = new byte[PACKET_HEADER_SIZE + data.Length];
+            int offset = 0;
+
+            int myId = m_IsServer ? -1 : (_tcpClient?.GetHashCode() ?? _realTimeClient?.Client?.GetHashCode() ?? 0);
+
+            Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, packet, offset, 4); offset += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(myId), 0, packet, offset, 4); offset += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(action), 0, packet, offset, 2);
+
+            Buffer.BlockCopy(data, 0, packet, PACKET_HEADER_SIZE, data.Length);
+
+            return packet;
+        }
+
+        /// <summary>
+        /// Reads the core packet structure (shared between TCP and UDP)
+        /// </summary>
+        private PacketResponse ReadCorePacket(byte[] data, int dataLength, IPEndPoint remoteEndPoint)
+        {
+            if (data == null || dataLength < PACKET_HEADER_SIZE) return null;
+            
+            int offset = 0;
+            int messageId = BitConverter.ToInt32(data, offset); offset += 4;
+            int senderId = BitConverter.ToInt32(data, offset); offset += 4;
+            var action = BitConverter.ToUInt16(data, offset);
+
+            int payloadLength = dataLength - PACKET_HEADER_SIZE;
+            var payload = new byte[payloadLength];
+            if (payloadLength > 0)
+            {
+                Buffer.BlockCopy(data, PACKET_HEADER_SIZE, payload, 0, payloadLength);
+            }
+
+            return new PacketResponse
+            {
+                messageId = messageId,
+                senderId = senderId,
+                action = action,
+                data = payload,
+                remoteEndPoint = remoteEndPoint,
+                status = PacketResponse.ReceiveStatus.None,
+                totalBytes = dataLength,
+                processedBytes = dataLength
+            };
+        }
+
+        /// <summary>
+        /// Creates a simple real-time packet (without length prefix since UDP preserves boundaries)
+        /// </summary>
+        private byte[] CreateRealTimePacket(ushort action, byte[] data)
+        {
+            // Real-time packets don't need length prefix - just return the core packet
+            return CreateCorePacket(action, data);
+        }
+
+        /// <summary>
+        /// Reads real-time packet (simpler than TCP since UDP preserves message boundaries)
+        /// </summary>
+        private PacketResponse ReadRealTimePacket(byte[] data, IPEndPoint remoteEndPoint)
+        {
+            // Real-time packets don't have length prefix - read directly
+            return ReadCorePacket(data, data?.Length ?? 0, remoteEndPoint);
         }
 
         #endregion
@@ -492,18 +861,18 @@ namespace Modules.Utilities
             try
             {
                 _tcpClient = new TcpClient();
-                
+
                 // Configure client before connecting
                 _tcpClient.ReceiveBufferSize = m_BufferSize;
                 _tcpClient.SendBufferSize = m_BufferSize;
-                
+
                 await _tcpClient.ConnectAsync(m_Host, m_Port).AsUniTask().AttachExternalCancellation(token);
 
                 if (_tcpClient.Connected)
                 {
                     // Configure TCP settings after connection
                     ConfigureTcpClient(_tcpClient);
-                    
+
                     m_IsConnected = true; // Set connected status
                     var serverEndPoint = (IPEndPoint)_tcpClient.Client.RemoteEndPoint;
                     m_ServerInfo = new ConnectorInfo
@@ -635,7 +1004,7 @@ namespace Modules.Utilities
                         {
                             int remainingBytes = messageLength - totalBytesRead;
                             int bufferSize = Math.Min(m_BufferSize, remainingBytes);
-                            
+
                             bytesRead = await stream.ReadAsync(dataBuffer, totalBytesRead, bufferSize, token);
                             if (bytesRead == 0)
                             {
@@ -828,9 +1197,9 @@ namespace Modules.Utilities
         private async UniTask SendAsServerAsync(byte[] message, int[] targetClientIds, IProgress<float> progress, CancellationToken token)
         {
             List<TcpClient> clientsToSend;
-            
-            lock (m_Clients) 
-            { 
+
+            lock (m_Clients)
+            {
                 if (targetClientIds == null || targetClientIds.Length == 0)
                 {
                     // Send to all connected clients
@@ -839,8 +1208,8 @@ namespace Modules.Utilities
                 else
                 {
                     // Send to specific clients
-                    clientsToSend = m_Clients.Where(kvp => 
-                        kvp.Key.Connected && 
+                    clientsToSend = m_Clients.Where(kvp =>
+                        kvp.Key.Connected &&
                         targetClientIds.Contains(kvp.Value.id))
                         .Select(kvp => kvp.Key)
                         .ToList();
@@ -959,7 +1328,7 @@ namespace Modules.Utilities
         {
             await SendDataAsync(action, data, (IProgress<float>)null, token);
         }
-        
+
         public async UniTask SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
@@ -1125,20 +1494,15 @@ namespace Modules.Utilities
             await SendDataToClientsAsync(action, serializedData, targetClientIds, progress, token);
         }
 
+        /// <summary>
+        /// Creates a TCP packet with length prefix for stream protocol
+        /// </summary>
         private byte[] CreatePacket(ushort action, byte[] data)
         {
-            data ??= Array.Empty<byte>();
-            byte[] packet = new byte[PACKET_HEADER_SIZE + data.Length];
-            int offset = 0;
+            // Get the core packet structure
+            byte[] packet = CreateCorePacket(action, data);
 
-            int myId = m_IsServer ? -1 : _tcpClient?.GetHashCode() ?? 0;
-
-            Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, packet, offset, 4); offset += 4;
-            Buffer.BlockCopy(BitConverter.GetBytes(myId), 0, packet, offset, 4); offset += 4;
-            Buffer.BlockCopy(BitConverter.GetBytes(action), 0, packet, offset, 2);
-
-            Buffer.BlockCopy(data, 0, packet, PACKET_HEADER_SIZE, data.Length);
-
+            // TCP needs length prefix for stream protocol
             byte[] lengthPrefix = BitConverter.GetBytes(packet.Length);
             byte[] finalMessage = new byte[4 + packet.Length];
 
@@ -1148,32 +1512,14 @@ namespace Modules.Utilities
             return finalMessage;
         }
 
+        /// <summary>
+        /// Reads TCP packet (assumes length prefix has already been processed)
+        /// </summary>
         private PacketResponse ReadPacket(byte[] data, int dataLength, IPEndPoint remoteEndPoint)
         {
-            if (data == null || dataLength < PACKET_HEADER_SIZE) return null;
-            int offset = 0;
-            int messageId = BitConverter.ToInt32(data, offset); offset += 4;
-            int senderId = BitConverter.ToInt32(data, offset); offset += 4;
-            var action = BitConverter.ToUInt16(data, offset);
-
-            int payloadLength = dataLength - PACKET_HEADER_SIZE;
-            var payload = new byte[payloadLength];
-            if (payloadLength > 0)
-            {
-                Buffer.BlockCopy(data, PACKET_HEADER_SIZE, payload, 0, payloadLength);
-            }
-
-            return new PacketResponse
-            {
-                messageId = messageId,
-                senderId = senderId,
-                action = action,
-                data = payload,
-                remoteEndPoint = remoteEndPoint,
-                status = PacketResponse.ReceiveStatus.None, // Will be set by caller
-                totalBytes = dataLength,
-                processedBytes = dataLength
-            };
+            // TCP packets don't include the length prefix in the data buffer passed here
+            // The length prefix is processed separately in the receive loop
+            return ReadCorePacket(data, dataLength, remoteEndPoint);
         }
         #endregion
 
@@ -1199,6 +1545,18 @@ namespace Modules.Utilities
             public float progressPercentage => totalBytes > 0 ? (float)processedBytes / totalBytes : 0f;
             public bool isCompleted => status == ReceiveStatus.Received;
             public string operationId;
+
+            public T GetData<T>()
+            {
+                if (data == null || data.Length == 0) return default;
+#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
+                return JsonConvert.DeserializeObject<T>(Encoding.UTF8.GetString(data));
+#else
+                // Fallback to Unity's JsonUtility if Newtonsoft.Json is not available  
+                return JsonUtility.FromJson<T>(Encoding.UTF8.GetString(data));
+#endif
+            }
+
         }
 
         [Serializable]
@@ -1236,10 +1594,14 @@ namespace Modules.Utilities
 
         #region Event Handlers
         public IUniTaskAsyncEnumerable<PacketResponse> OnDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnDataReceived, token);
+        public IUniTaskAsyncEnumerable<PacketResponse> OnRealTimeDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnRealTimeDataReceived, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnClientConnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnClientConnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnClientDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnClientDisconnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerConnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerConnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerDisconnected, token);
+
+        public IUniTaskAsyncEnumerable<ErrorInfo> OnError(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ErrorInfo>(m_OnError, token);
+
         #endregion
 
         #region Error Reporting
@@ -1285,7 +1647,8 @@ namespace Modules.Utilities
         // Foldout states
         private bool eventsExpanded = false;
         private bool settingsExpanded = true;
-        private bool dataTransmissionExpanded = false;
+        private bool performanceExpanded = false;
+        private bool udpExpanded = false;
 
         public override void OnInspectorGUI()
         {
@@ -1320,13 +1683,12 @@ namespace Modules.Utilities
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_StartOnEnable"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Port"));
 
-
                 EditorGUILayout.PropertyField(enableDiscovery);
                 // Only show Host field if discovery is disabled
                 if (!enableDiscovery.boolValue)
                 {
                     if (!isServer.boolValue)
-                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Host"));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Host"));
                 }
                 else
                 {
@@ -1334,22 +1696,26 @@ namespace Modules.Utilities
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryMessage"));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_DiscoveryInterval"));
                 }
-
-
-
             }
             EditorGUI.indentLevel--;
 
             EditorGUILayout.EndVertical();
 
+            // --- Performance Box ---
             EditorGUILayout.Space();
             EditorGUILayout.BeginVertical("box");
             EditorGUI.indentLevel++;
 
-            dataTransmissionExpanded = EditorGUILayout.Foldout(dataTransmissionExpanded, "Data Transmission", true);
+            performanceExpanded = EditorGUILayout.Foldout(performanceExpanded, "Performance Settings", true);
 
-            if (dataTransmissionExpanded)
+            if (performanceExpanded)
             {
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_BufferSize"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxConcurrentConnections"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableKeepAlive"));
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Data Transmission", EditorStyles.boldLabel);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRetryCount"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelay"));
             }
@@ -1357,7 +1723,31 @@ namespace Modules.Utilities
 
             EditorGUILayout.EndVertical();
 
+            // --- Real-time Mode Box ---
+            EditorGUILayout.Space();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
 
+            udpExpanded = EditorGUILayout.Foldout(udpExpanded, "Real-time Mode", true);
+
+            if (udpExpanded)
+            {
+                var enableRealTime = serializedObject.FindProperty("m_EnableRealTimeMode");
+                EditorGUILayout.PropertyField(enableRealTime);
+                
+                EditorGUI.BeginDisabledGroup(!enableRealTime.boolValue);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RealTimePort"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRealTimePacketSize"));
+                EditorGUI.EndDisabledGroup();
+                
+                if (enableRealTime.boolValue)
+                {
+                    EditorGUILayout.HelpBox("Real-time mode provides low-latency communication but packets may be lost. Recommended for frequent updates like player positions.", MessageType.Info);
+                }
+            }
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
 
             EditorGUILayout.Space();
 
@@ -1370,6 +1760,7 @@ namespace Modules.Utilities
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.LabelField("Status", EditorStyles.boldLabel);
                 EditorGUILayout.Toggle("Is Running", isRunningProp.boolValue);
+                EditorGUILayout.Toggle("Real-time Enabled", tcpConnector.IsRealTimeEnabled);
                 if (!isServer.boolValue)
                 {
                     EditorGUILayout.Toggle("Is Connected", isConnectedProp.boolValue);
@@ -1377,14 +1768,24 @@ namespace Modules.Utilities
 
                 if (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0)
                 {
-                    EditorGUILayout.LabelField($"Connected Clients: {tcpConnector.ClientInfoList.Count}");
+                    EditorGUILayout.LabelField($"TCP Clients: {tcpConnector.ClientInfoList.Count}");
+                    EditorGUILayout.LabelField($"Real-time Clients: {tcpConnector.RealTimeClientInfoList.Count}");
 
                     // Show client details
                     EditorGUILayout.Space();
-                    EditorGUILayout.LabelField("Client Details:", EditorStyles.miniLabel);
+                    EditorGUILayout.LabelField("TCP Client Details:", EditorStyles.miniLabel);
                     foreach (var client in tcpConnector.ClientInfoList)
                     {
-                        EditorGUILayout.LabelField($"• {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
+                        EditorGUILayout.LabelField($"• TCP {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
+                    }
+                    
+                    if (tcpConnector.RealTimeClientInfoList.Count > 0)
+                    {
+                        EditorGUILayout.LabelField("Real-time Client Details:", EditorStyles.miniLabel);
+                        foreach (var client in tcpConnector.RealTimeClientInfoList)
+                        {
+                            EditorGUILayout.LabelField($"• Real-time {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
+                        }
                     }
                 }
                 EditorGUILayout.EndVertical();
@@ -1413,12 +1814,23 @@ namespace Modules.Utilities
 
                     EditorGUILayout.BeginHorizontal();
                     GUI.backgroundColor = Color.yellow;
-                    if (GUILayout.Button("Send Text Message"))
+                    if (GUILayout.Button("Send TCP Message"))
                     {
                         tcpConnector.SendDataAsync(testAction, testMessage).Forget();
-                        Debug.Log($"[TCPConnector] Sent test message: Action={testAction}, Message='{testMessage}'");
+                        Debug.Log($"[TCPConnector] Sent TCP test message: Action={testAction}, Message='{testMessage}'");
                     }
 
+                    // Real-time Test Button
+                    EditorGUI.BeginDisabledGroup(!tcpConnector.IsRealTimeEnabled);
+                    GUI.backgroundColor = Color.cyan;
+                    if (GUILayout.Button("Send Real-time Message"))
+                    {
+                        tcpConnector.SendRealTimeDataAsync(testAction, testMessage).Forget();
+                        Debug.Log($"[TCPConnector] Sent Real-time test message: Action={testAction}, Message='{testMessage}'");
+                    }
+                    EditorGUI.EndDisabledGroup();
+
+                    GUI.backgroundColor = Color.green;
                     if (GUILayout.Button("Send Raw Bytes"))
                     {
                         byte[] rawData = System.Text.Encoding.UTF8.GetBytes(testMessage);
@@ -1433,12 +1845,12 @@ namespace Modules.Utilities
                     {
                         EditorGUILayout.Space();
                         EditorGUILayout.LabelField("Target Specific Clients (Server Only)", EditorStyles.boldLabel);
-                        
+
                         EditorGUILayout.BeginHorizontal();
                         EditorGUILayout.LabelField("Client IDs:", GUILayout.Width(70));
                         targetClientIdsText = EditorGUILayout.TextField(targetClientIdsText, GUILayout.ExpandWidth(true));
                         EditorGUILayout.EndHorizontal();
-                        
+
                         EditorGUILayout.LabelField("Available clients:", EditorStyles.miniLabel);
                         foreach (var client in tcpConnector.ClientInfoList)
                         {
@@ -1455,7 +1867,7 @@ namespace Modules.Utilities
                                     .Where(s => !string.IsNullOrWhiteSpace(s))
                                     .Select(s => int.Parse(s.Trim()))
                                     .ToArray();
-                                
+
                                 if (targetIds.Length > 0)
                                 {
                                     tcpConnector.SendDataToClientsAsync(testAction, testMessage, targetIds).Forget();
@@ -1517,6 +1929,7 @@ namespace Modules.Utilities
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerDisconnected"));
                 }
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnDataReceived"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnRealTimeDataReceived"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnError"));
             }
             EditorGUI.indentLevel--;
