@@ -45,7 +45,8 @@ namespace Modules.Utilities.Editor
         public static void OpenBuildManager()
         {
             BuildManagerWindowEditor window =
-            UnityEditor.EditorWindow.GetWindow<BuildManagerWindowEditor>(false, "Build Manager", true);
+            EditorWindow.GetWindow<BuildManagerWindowEditor>(false, "Build Manager", true);
+            window.name = "Build Manager";
             window.Show();
         }
 

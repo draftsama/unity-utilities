@@ -29,13 +29,18 @@ namespace Modules.Utilities
         #region Private Variables
 
         [Header("Connection Settings")]
-        [SerializeField] public string m_Host = "127.0.0.1";
-        [SerializeField] public int m_Port = 7777;
-        [SerializeField] public bool m_IsServer = false;
+        [SerializeField, Tooltip("IP address or hostname to connect to (for client) or bind to (for server)")]
+        public string m_Host = "127.0.0.1";
+        [SerializeField, Tooltip("TCP port number for main connection")]
+        public int m_Port = 54321;
+        [SerializeField, Tooltip("Enable server mode (listen for connections) or client mode (connect to server)")]
+        public bool m_IsServer = false;
 
-        [Header("Behavior")]
-        [SerializeField] public bool m_StartOnEnable = true;
-        [SerializeField] public bool m_IsDebug = true;
+        [Header("Network Behavior")]
+        [SerializeField, Tooltip("Automatically start connection when component is enabled")]
+        public bool m_StartOnEnable = true;
+        [SerializeField, Tooltip("Enable debug logging in console")]
+        public bool m_IsDebug = true;
 
         [SerializeField, Range(1000, 10000), Tooltip("Buffer size for network operations")]
         public int m_BufferSize = 8192;
@@ -47,8 +52,8 @@ namespace Modules.Utilities
         [Header("Real-time Mode")]
         [SerializeField, Tooltip("Enable real-time mode for low-latency data transmission")]
         public bool m_EnableRealTimeMode = false;
-        [SerializeField, Range(7000, 9999), Tooltip("Real-time communication port")]
-        public int m_RealTimePort = 7779;
+        [SerializeField, Range(7000, 65535), Tooltip("Real-time communication port")]
+        public int m_RealTimePort = 54323;
 
         [Header("Retry Settings")]
         [SerializeField, Range(0, 5), Tooltip("Maximum retry attempts")]
@@ -57,11 +62,15 @@ namespace Modules.Utilities
         public int m_RetryDelay = 1000;
 
         [Header("Auto Discovery (UDP Broadcast)")]
-        [SerializeField] public bool m_EnableDiscovery = true;
+        [SerializeField, Tooltip("Enable automatic server discovery via UDP broadcast")]
+        public bool m_EnableDiscovery = true;
 
-        [SerializeField, Range(0, 5000)] public int m_DiscoveryInterval = 1000; // milliseconds
-        [SerializeField] public int m_DiscoveryPort = 7778;
-        [SerializeField] public string m_DiscoveryMessage = "DiscoverServer";
+        [SerializeField, Range(0, 5000), Tooltip("Interval between discovery broadcasts (milliseconds)")]
+        public int m_DiscoveryInterval = 1000; // milliseconds
+        [SerializeField, Tooltip("UDP port for server discovery broadcasts")]
+        public int m_DiscoveryPort = 54322;
+        [SerializeField, Tooltip("Message string sent during server discovery")]
+        public string m_DiscoveryMessage = "DiscoverServer";
 
         // --- Status ---
         [Header("Status (Read Only)")]
@@ -77,10 +86,6 @@ namespace Modules.Utilities
         private UdpClient _realTimeServer; // Server real-time listener
         private UdpClient _realTimeClient; // Client real-time sender
         private readonly Dictionary<IPEndPoint, ConnectorInfo> m_RealTimeClients = new Dictionary<IPEndPoint, ConnectorInfo>();
-        
-        // --- UDP Client Caching for Performance ---
-        private readonly Dictionary<string, UdpClient> _udpClientCache = new Dictionary<string, UdpClient>();
-        private readonly object _udpCacheLock = new object();
 
         [Header("Connected Server Info")]
         [SerializeField] public ConnectorInfo m_ServerInfo;
@@ -100,17 +105,16 @@ namespace Modules.Utilities
         // --- Performance Optimizations ---
         private readonly Queue<byte[]> _bufferPool = new Queue<byte[]>();
         private readonly object _bufferPoolLock = new object();
-        
+
         // Optimize memory allocation
         private const int MAX_BUFFER_POOL_SIZE = 20; // ลดจาก unlimited เป็น 20
         private const int BUFFER_REUSE_THRESHOLD = 4096; // ใช้ buffer ซ้ำถ้า >= 4KB
-        
+
         // Optimize health check frequency  
         private readonly Dictionary<TcpClient, DateTime> _lastHealthCheck = new Dictionary<TcpClient, DateTime>();
         private const int HEALTH_CHECK_INTERVAL_MS = 5000; // ตรวจสอบทุก 5 วินาที แทน real-time
-        
-        // Optimize progress reporting
-        private static readonly DateTime _epoch = new DateTime(1970, 1, 1);
+
+        // Optimize progress reporting (per-instance)
         private long _lastProgressTicks = 0;
 
         // --- Packet Structure ---
@@ -177,7 +181,7 @@ namespace Modules.Utilities
 
                 // Update cache
                 _lastHealthCheck[client] = now;
-                
+
                 // Clean old entries to prevent memory leak
                 if (_lastHealthCheck.Count > m_MaxConcurrentConnections * 2)
                 {
@@ -241,21 +245,8 @@ namespace Modules.Utilities
 
         #region Unity Methods
 
-        private void Awake()
-        {
-            // Validate retry configuration
-            if (m_MaxRetryCount < 0)
-            {
-                Debug.LogWarning($"[TCPConnector] MaxRetryCount cannot be negative. Setting to 0.");
-                m_MaxRetryCount = 0;
-            }
 
-            if (m_RetryDelay < 0)
-            {
-                Debug.LogWarning($"[TCPConnector] RetryDelay cannot be negative. Setting to 0.");
-                m_RetryDelay = 0;
-            }
-        }
+
 
         private void OnEnable()
         {
@@ -268,11 +259,7 @@ namespace Modules.Utilities
             StopConnection();
         }
 
-        private void OnDestroy()
-        {
-            StopConnection();
-            CleanupUdpClientCache();
-        }
+
 
         #endregion
 
@@ -282,8 +269,15 @@ namespace Modules.Utilities
         {
             if (!m_IsDebug) return;
             var prefix = m_IsServer ? "Server" : "Client";
-            Debug.Log($"[TCP-{prefix}] {message}");
+            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
+            var logMessage = $"[{timestamp}][TCP-{prefix}] {message}";
+            Debug.Log(logMessage);
+
         }
+
+        /// <summary>
+        /// Logs network information for debugging build vs editor differences
+        /// </summary>
 
         public async UniTask StartConnection()
         {
@@ -293,88 +287,93 @@ namespace Modules.Utilities
                 return;
             }
 
+
+            Log("Starting connection...");
+
             _cts?.Cancel();
             _cts = new CancellationTokenSource();
+            var token = _cts.Token;
 
-            if (m_IsServer)
+
+            try
             {
-                m_IsRunning = true; // <<< Set IsRunning true for server here
-                if (m_EnableDiscovery)
+                m_IsRunning = true;
+                // For Trigger network stack initialization (important for macOS security permissions)
+                Dns.GetHostEntry(Dns.GetHostName());
+
+                if (m_IsServer)
                 {
-                    BroadcastPresenceAsync(_cts.Token).Forget();
+                    await StartServerAsync(_cts.Token);
                 }
-                
-                // Start real-time server if enabled
-                if (m_EnableRealTimeMode)
+                else
                 {
-                    StartRealTimeServerAsync(_cts.Token).Forget();
+                    await StartClientAsync(token);
                 }
-                
-                await StartServerAsync(_cts.Token);
             }
-            else
+            catch (Exception ex)
             {
-                m_IsRunning = true; // <<< Set IsRunning true for client here
-                
-                // Start real-time client if enabled
-                if (m_EnableRealTimeMode)
-                {
-                    StartRealTimeClientAsync(_cts.Token).Forget();
-                }
-                
-                // <<< This is the new main client loop that handles reconnects
-                ClientConnectionLoopAsync(_cts.Token).Forget();
+                Log($"Error starting connection: {ex.Message}");
+                m_IsRunning = false;
+                ReportError(ErrorInfo.ErrorType.Connection, $"Failed to start connection: {ex.Message}", ex);
             }
+            finally
+            {
+                m_IsRunning = false;
+            }
+
+
         }
 
         public void StopConnection()
         {
             Log("Stopping connection...");
-            m_IsRunning = false; // <<< Set IsRunning false first
+            m_IsRunning = false;
+
             _cts?.Cancel();
+
+            // Stop TCP listener (server only)
+            _tcpListener?.Stop();
+
+            // Close TCP client (client only)
+            _tcpClient?.Close();
+
+            // Close all client connections (server only)
+            lock (m_Clients)
+            {
+                foreach (var client in m_Clients.Keys.ToList())
+                {
+                    client?.Close();
+                }
+                m_Clients.Clear();
+            }
+
+            // Clear real-time clients
+            lock (m_RealTimeClients)
+            {
+                m_RealTimeClients.Clear();
+            }
+
+            // Close real-time UDP components
+            _realTimeServer?.Close();
+            _realTimeServer?.Dispose();
+            _realTimeServer = null;
+
+            _realTimeClient?.Close();
+            _realTimeClient?.Dispose();
+            _realTimeClient = null;
+
+            // Handle connection state
+            if (m_IsConnected)
+            {
+                m_IsConnected = false;
+                m_OnServerDisconnected?.Invoke(m_ServerInfo);
+            }
+
+            // Dispose cancellation token
             _cts?.Dispose();
             _cts = null;
 
-            if (m_IsServer)
-            {
-                _tcpListener?.Stop();
-                _realTimeServer?.Close();
-                _realTimeServer?.Dispose();
-                _realTimeServer = null;
-                
-                lock (m_Clients)
-                {
-                    foreach (var client in m_Clients.Keys)
-                    {
-                        client.Close();
-                    }
-                    m_Clients.Clear();
-                }
-                
-                lock (m_RealTimeClients)
-                {
-                    m_RealTimeClients.Clear();
-                }
-                
-                Log("Server and all client connections closed.");
-            }
-            else
-            {
-                _tcpClient?.Close();
-                _realTimeClient?.Close();
-                _realTimeClient?.Dispose();
-                _realTimeClient = null;
-                
-                if (m_IsConnected)
-                {
-                    m_IsConnected = false;
-                    m_OnServerDisconnected?.Invoke(m_ServerInfo);
-                }
-                Log("Client connection closed.");
-            }
-            
-            // Clean up UDP client cache
-            CleanupUdpClientCache();
+            Log("Connection stopped.");
         }
 
         #endregion
@@ -385,9 +384,71 @@ namespace Modules.Utilities
         {
             try
             {
+                // Check if we should still be running before starting server
+                if (!m_IsRunning || token.IsCancellationRequested)
+                {
+                    Log("Server start canceled before initialization.");
+                    return;
+                }
+
+                // Validate port range
+                if (m_Port <= 0 || m_Port > 65535)
+                {
+                    Log($"Invalid port number: {m_Port}. Must be between 1-65535.");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Invalid port number: {m_Port}", null);
+                    return;
+                }
+
+                // Start UDP broadcast for discovery if enabled
+                if (m_EnableDiscovery)
+                {
+                    BroadcastPresenceAsync(token).Forget();
+                }
+
+                // Start real-time server if enabled
+                if (m_EnableRealTimeMode)
+                {
+                    StartRealTimeServerAsync(token).Forget();
+                }
+
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
-                _tcpListener.Start(m_MaxConcurrentConnections); // Limit backlog
-                
+
+                try
+                {
+                    _tcpListener.Start(m_MaxConcurrentConnections);
+                    Log($"✅ Server started on port {m_Port}");
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressAlreadyInUse)
+                {
+                    Log($"❌ Port {m_Port} is already in use by another application");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Port {m_Port} is already in use", ex);
+                    return;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AccessDenied)
+                {
+                    Log($"❌ Access denied for port {m_Port}. May require administrator privileges");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Access denied for port {m_Port}", ex);
+                    return;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressNotAvailable)
+                {
+                    Log($"❌ Address not available for port {m_Port}. Check network configuration");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Address not available for port {m_Port}", ex);
+                    return;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.NetworkUnreachable)
+                {
+                    Log($"❌ Network unreachable. Check Windows network adapter settings");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Network unreachable for port {m_Port}", ex);
+                    return;
+                }
+                catch (SocketException ex) when (ex.SocketErrorCode == SocketError.HostUnreachable)
+                {
+                    Log($"❌ Host unreachable. Check Windows Firewall or network configuration");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Host unreachable for port {m_Port}", ex);
+                    return;
+                }
+
                 // Create server info for consistent ID mapping
                 m_ServerInfo = new ConnectorInfo
                 {
@@ -396,12 +457,19 @@ namespace Modules.Utilities
                     port = m_Port,
                     remoteEndPoint = new IPEndPoint(IPAddress.Any, m_Port)
                 };
-                
+
                 Log($"Server listening on TCP port {m_Port} (max {m_MaxConcurrentConnections} connections)");
 
-                while (!token.IsCancellationRequested)
+                while (!token.IsCancellationRequested && m_IsRunning)
                 {
                     TcpClient connectedClient = await _tcpListener.AcceptTcpClientAsync().AsUniTask().AttachExternalCancellation(token);
+
+                    // Check again after accepting client
+                    if (!m_IsRunning || token.IsCancellationRequested)
+                    {
+                        connectedClient?.Close();
+                        break;
+                    }
 
                     // Configure TCP settings for performance
                     ConfigureTcpClient(connectedClient);
@@ -411,17 +479,15 @@ namespace Modules.Utilities
             }
             catch (OperationCanceledException)
             {
-                Log("Server operation was canceled.");
+                // Silent cancellation
             }
             catch (ObjectDisposedException)
             {
-                // TcpListener was disposed - this is expected during shutdown
-                Log("Server listener disposed.");
+                // Silent disposal
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted)
             {
-                // Socket operation was aborted - this is expected during shutdown
-                Log("Server socket operation aborted.");
+                // Silent abort
             }
             catch (Exception ex)
             {
@@ -438,28 +504,29 @@ namespace Modules.Utilities
         private async UniTask HandleClientAsync(TcpClient client, CancellationToken token)
         {
             var clientEndPoint = (IPEndPoint)client.Client.RemoteEndPoint;
-                    var clientInfo = new ConnectorInfo
-                    {
-                        id = client.GetHashCode(),
-                        ipAddress = clientEndPoint.Address.ToString(),
-                        port = clientEndPoint.Port,
-                        remoteEndPoint = clientEndPoint
-                    };
+            var clientInfo = new ConnectorInfo
+            {
+                id = client.GetHashCode(),
+                ipAddress = clientEndPoint.Address.ToString(),
+                port = clientEndPoint.Port,
+                remoteEndPoint = clientEndPoint
+            };
 
-                    lock (m_Clients) { m_Clients.Add(client, clientInfo); }
-                    Log($"Client connected: {clientInfo.ipAddress}:{clientInfo.port}");
-                    
-                    // Use try-catch for main thread switch to avoid SynchronizationContext errors
-                    try
-                    {
-                        await UniTask.SwitchToMainThread();
-                        m_OnClientConnected?.Invoke(clientInfo);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Warning: Could not switch to main thread for event: {ex.Message}");
-                        // Events will be invoked when possible - continue operation
-                    }            var stream = client.GetStream();
+            lock (m_Clients) { m_Clients.Add(client, clientInfo); }
+            Log($"Client connected: {clientInfo.ipAddress}:{clientInfo.port}");
+
+            // Use try-catch for main thread switch to avoid SynchronizationContext errors
+            try
+            {
+                await UniTask.SwitchToMainThread();
+                m_OnClientConnected?.Invoke(clientInfo);
+            }
+            catch (Exception ex)
+            {
+                Log($"Warning: Could not switch to main thread for event: {ex.Message}");
+                // Events will be invoked when possible - continue operation
+            }
+            var stream = client.GetStream();
             try
             {
                 await ReceiveDataLoopAsync(stream, clientInfo, token);
@@ -468,21 +535,18 @@ namespace Modules.Utilities
                                             ex.SocketErrorCode == SocketError.ConnectionAborted ||
                                             ex.SocketErrorCode == SocketError.ConnectionReset)
             {
-                // Connection was closed gracefully or aborted - don't log as error
-                Log($"Client connection closed: {clientInfo.ipAddress}:{clientInfo.port}");
+                // Connection closed
             }
             catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
                                        (socketEx.SocketErrorCode == SocketError.OperationAborted ||
                                         socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
                                         socketEx.SocketErrorCode == SocketError.ConnectionReset))
             {
-                // Connection was closed gracefully or aborted - don't log as error
-                Log($"Client connection closed: {clientInfo.ipAddress}:{clientInfo.port}");
+                // Connection closed
             }
             catch (ObjectDisposedException)
             {
-                // Stream was disposed - this is expected during shutdown
-                Log($"Client stream disposed: {clientInfo.ipAddress}:{clientInfo.port}");
+                // Stream disposed
             }
             catch (Exception ex)
             {
@@ -491,158 +555,100 @@ namespace Modules.Utilities
             }
             finally
             {
-                Log($"Client disconnected: {clientInfo.ipAddress}:{clientInfo.port}");
                 lock (m_Clients) { m_Clients.Remove(client); }
                 client.Close();
-                
-                // Use try-catch for main thread switch
+
                 try
                 {
                     await UniTask.SwitchToMainThread();
                     m_OnClientDisconnected?.Invoke(clientInfo);
                 }
-                catch (Exception ex)
+                catch
                 {
-                    Log($"Warning: Could not switch to main thread for disconnect event: {ex.Message}");
+                    // Ignore thread switch errors
                 }
             }
         }
 
         private async UniTask BroadcastPresenceAsync(CancellationToken token)
         {
-            const string UDP_BROADCAST_KEY = "discovery_broadcast";
-            UdpClient udpClient = null;
-            
             try
             {
-                // Use cached UDP client for discovery broadcasting
-                lock (_udpCacheLock)
-                {
-                    if (!_udpClientCache.TryGetValue(UDP_BROADCAST_KEY, out udpClient) || 
-                        udpClient?.Client == null)
-                    {
-                        udpClient = new UdpClient { EnableBroadcast = true };
-                        
-                        // Try to bind to a specific interface to avoid routing issues
-                        try
-                        {
-                            udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); // Let OS choose port
-                        }
-                        catch (Exception bindEx)
-                        {
-                            Log($"UDP bind warning: {bindEx.Message}");
-                        }
-                        
-                        _udpClientCache[UDP_BROADCAST_KEY] = udpClient;
-                    }
-                }
+                using var udpClient = new UdpClient();
+                udpClient.EnableBroadcast = true;           
 
                 var broadcastAddress = new IPEndPoint(IPAddress.Broadcast, m_DiscoveryPort);
                 var messageBytes = Encoding.UTF8.GetBytes(m_DiscoveryMessage);
 
-                Log($"Starting discovery broadcast on UDP port {m_DiscoveryPort}");
-                
-                // Try broadcast first, fallback to local network if fails
-                bool broadcastWorking = true;
-                
+                Log($"Broadcasting discovery on UDP port {m_DiscoveryPort}");
+                bool useBroadcast = true;
+                int broadcastCount = 0;
+
                 while (!token.IsCancellationRequested)
                 {
                     try
                     {
-                        if (broadcastWorking)
+                        broadcastCount++;
+
+                        if (useBroadcast)
                         {
-                            // Try full broadcast first
                             await udpClient.SendAsync(messageBytes, messageBytes.Length, broadcastAddress);
                         }
                         else
                         {
-                            // Fallback: Send to local subnet only
-                            await SendToLocalSubnetAsync(udpClient, messageBytes, token);
+                            // Send to common local network ranges
+                            var localRanges = new[]
+                            {
+                                "192.168.1.255",
+                                "192.168.0.255",
+                                "10.0.0.255",
+                                "172.16.255.255"
+                            };
+
+                            foreach (var range in localRanges)
+                            {
+                                try
+                                {
+                                    var endpoint = new IPEndPoint(IPAddress.Parse(range), m_DiscoveryPort);
+                                    await udpClient.SendAsync(messageBytes, messageBytes.Length, endpoint);
+                                }
+                                catch
+                                {
+                                    // Ignore individual subnet failures
+                                }
+                            }
                         }
-                        
+
                         await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
                     }
-                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.HostUnreachable || 
+                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.HostUnreachable ||
                                                     ex.SocketErrorCode == SocketError.NetworkUnreachable)
                     {
-                        if (broadcastWorking)
+                        if (useBroadcast)
                         {
-                            Log($"Broadcast failed ({ex.Message}), switching to local subnet discovery");
-                            broadcastWorking = false;
-                            continue;
+                            Log($"Broadcast failed, switching to local subnet");
+                            useBroadcast = false;
                         }
-                        else
-                        {
-                            Log($"Local subnet discovery also failed: {ex.Message}");
-                            await UniTask.Delay(m_DiscoveryInterval * 3, cancellationToken: token); // Wait longer before retry
-                        }
+                        await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
                     }
                     catch (Exception ex)
                     {
-                        Log($"UDP Send Error: {ex.Message}");
+                        Log($"Broadcast error: {ex.Message}");
                         await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
                     }
                 }
             }
-            catch (OperationCanceledException) 
+            catch (OperationCanceledException)
             {
-                Log("Discovery broadcast canceled");
+                // Silent cancellation
             }
             catch (Exception ex)
             {
-                Log($"UDP Broadcast Setup Error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Discovery, "UDP broadcast setup failed", ex);
-            }
-            finally 
-            { 
-                // Don't dispose cached client here - let cleanup handle it
-                Log("Discovery broadcast stopped"); 
-            }
-        }
-
-        /// <summary>
-        /// Fallback method to send discovery to local subnet when broadcast fails
-        /// </summary>
-        private async UniTask SendToLocalSubnetAsync(UdpClient udpClient, byte[] messageBytes, CancellationToken token)
-        {
-            try
-            {
-                // Get local IP addresses
-                var localIPs = NetworkInterface.GetAllNetworkInterfaces()
-                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up && 
-                                ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-                    .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
-                    .Where(addr => addr.Address.AddressFamily == AddressFamily.InterNetwork &&
-                                  !IPAddress.IsLoopback(addr.Address))
-                    .ToList();
-
-                foreach (var localAddr in localIPs)
-                {
-                    try
-                    {
-                        // Calculate subnet broadcast address
-                        var ip = localAddr.Address.GetAddressBytes();
-                        var mask = localAddr.IPv4Mask.GetAddressBytes();
-                        
-                        var broadcast = new byte[4];
-                        for (int i = 0; i < 4; i++)
-                        {
-                            broadcast[i] = (byte)(ip[i] | (~mask[i]));
-                        }
-                        
-                        var subnetBroadcast = new IPEndPoint(new IPAddress(broadcast), m_DiscoveryPort);
-                        await udpClient.SendAsync(messageBytes, messageBytes.Length, subnetBroadcast);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Failed to send to subnet {localAddr.Address}: {ex.Message}");
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"Local subnet discovery error: {ex.Message}");
+                Log($"Broadcast setup error: {ex.Message}");
             }
         }
 
@@ -696,7 +702,7 @@ namespace Modules.Utilities
             {
                 _realTimeServer = new UdpClient(m_RealTimePort);
                 _realTimeServer.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                
+
                 Log($"Real-time server listening on port {m_RealTimePort}");
 
                 while (!token.IsCancellationRequested)
@@ -707,11 +713,11 @@ namespace Modules.Utilities
             }
             catch (OperationCanceledException)
             {
-                Log("Real-time server operation was canceled.");
+                // Silent cancellation
             }
             catch (ObjectDisposedException)
             {
-                Log("Real-time server disposed.");
+                // Silent disposal
             }
             catch (Exception ex)
             {
@@ -736,10 +742,9 @@ namespace Modules.Utilities
                 // Let OS choose an available port automatically (pass 0)
                 _realTimeClient = new UdpClient(0);
                 _realTimeClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                
+
                 // Get the actual port assigned by OS
                 var localEndPoint = (IPEndPoint)_realTimeClient.Client.LocalEndPoint;
-                Log($"Real-time client bound to port {localEndPoint.Port}");
 
                 // Start listening for real-time data from server on the same port
                 StartRealTimeClientReceiveLoopAsync(token).Forget();
@@ -817,9 +822,9 @@ namespace Modules.Utilities
                         await UniTask.SwitchToMainThread();
                         m_OnRealTimeDataReceived?.Invoke(packetResponse);
                     }
-                    catch (Exception ex)
+                    catch
                     {
-                        Log($"Warning: Could not switch to main thread for real-time data: {ex.Message}");
+                        // Ignore thread switch errors
                     }
                 }
             }
@@ -844,7 +849,7 @@ namespace Modules.Utilities
                 return;
             }
 
-            if (!m_IsRunning) 
+            if (!m_IsRunning)
             {
                 Log("Real-time: Connection not running");
                 return;
@@ -983,7 +988,7 @@ namespace Modules.Utilities
         private PacketResponse ReadCorePacket(byte[] data, int dataLength, IPEndPoint remoteEndPoint)
         {
             if (data == null || dataLength < PACKET_HEADER_SIZE) return null;
-            
+
             int offset = 0;
             int messageId = BitConverter.ToInt32(data, offset); offset += 4;
             int senderId = BitConverter.ToInt32(data, offset); offset += 4;
@@ -1031,239 +1036,183 @@ namespace Modules.Utilities
 
         #region Client Methods
 
-        // Client connection loop with simple retry logic
-        private async UniTask ClientConnectionLoopAsync(CancellationToken token)
+
+
+        /// <summary>
+        /// Discover server IP address using UDP broadcast - keeps listening until server found
+        /// </summary>
+        private async UniTask DiscoverServerAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
             {
-                string serverIp = null;
-                
-                if (m_EnableDiscovery)
+                try
                 {
-                    Log($"Searching for server on UDP port {m_DiscoveryPort}...");
-                    
-                    // Try discovery with timeout
-                    using var discoveryCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                    using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(token, discoveryCts.Token);
-                    
-                    serverIp = await ListenForServerAsync(combinedCts.Token);
-                    
-                    if (string.IsNullOrEmpty(serverIp))
+                    string serverIp = await ListenForServerAsync(token);
+
+                    if (!string.IsNullOrEmpty(serverIp))
                     {
-                        Log($"Discovery timeout. Using manual host: {m_Host}");
-                        serverIp = m_Host;
+                        m_Host = serverIp;
+                        return;
                     }
-                    else
-                    {
-                        Log($"Server discovered at: {serverIp}");
-                    }
+                    // If no server found, wait before retrying
+                    await UniTask.Delay(1000, cancellationToken: token);
+
                 }
-                else
+                catch (OperationCanceledException)
                 {
-                    serverIp = m_Host;
+                    // Silent cancellation
+                    return;
+                }
+                catch (Exception ex)
+                {
+                    Log($"Discovery Error: {ex.Message}");
+                    ReportError(ErrorInfo.ErrorType.Discovery, "Server discovery failed", ex);
                 }
 
-                if (!string.IsNullOrEmpty(serverIp) && !token.IsCancellationRequested)
-                {
-                    Log($"Attempting to connect to {serverIp}...");
-                    m_Host = serverIp;
-                    await StartClientAsync(token);
-                }
+            }
+        }
 
-                // Wait before retrying
-                if (!token.IsCancellationRequested)
+
+        private async UniTask StartClientAsync(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested)
+            {
+                try
                 {
-                    await UniTask.Delay(TimeSpan.FromSeconds(2), cancellationToken: token);
-                    Log("Retrying connection...");
+                    if (m_EnableDiscovery)
+                        await DiscoverServerAsync(token).AttachExternalCancellation(token);
+
+                    // Start real-time client if enabled
+                    if (m_EnableRealTimeMode)
+                    {
+                        StartRealTimeClientAsync(token).Forget();
+                    }
+
+                    // Start TCP client connection
+                    await ConnectToServerAsync(m_Host, m_Port, token).AttachExternalCancellation(token);
+
+                    // If we reach here, connection was successful but then disconnected
+                    // Wait before retrying
+                    await UniTask.Delay(1000, cancellationToken: token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // Exit gracefully on cancellation
+                }
+                catch (Exception ex)
+                {
+                    Log($"Client Error: {ex.GetType().Name} - {ex.Message}");
+                    ReportError(ErrorInfo.ErrorType.Connection, "Client connection failed", ex);
                 }
             }
         }
 
-        private async UniTask StartClientAsync(CancellationToken token)
+        private async UniTask ConnectToServerAsync(string _host, int _port, CancellationToken token)
         {
-            // This method now only handles a single connection attempt and lifetime
             try
             {
-                _tcpClient = new TcpClient();
+                Log($"Attempting to connect to {_host}:{_port}");
 
-                // Configure client before connecting
+                _tcpClient = new TcpClient();
                 _tcpClient.ReceiveBufferSize = m_BufferSize;
                 _tcpClient.SendBufferSize = m_BufferSize;
 
-                await _tcpClient.ConnectAsync(m_Host, m_Port).AsUniTask().AttachExternalCancellation(token);
+                // Add connection timeout for builds
+                var connectTask = _tcpClient.ConnectAsync(_host, _port).AsUniTask().AttachExternalCancellation(token);
+                var timeoutTask = UniTask.Delay(10000, cancellationToken: token); // 10 second timeout
 
-                if (_tcpClient.Connected)
+                var result = await UniTask.WhenAny(connectTask, timeoutTask);
+
+                if (result == 1) // Timeout
                 {
-                    // Configure TCP settings after connection
-                    ConfigureTcpClient(_tcpClient);
-
-                    m_IsConnected = true; // Set connected status
-                    var serverEndPoint = (IPEndPoint)_tcpClient.Client.RemoteEndPoint;
-                    m_ServerInfo = new ConnectorInfo
-                    {
-                        id = _tcpClient.GetHashCode(),
-                        ipAddress = serverEndPoint.Address.ToString(),
-                        port = serverEndPoint.Port,
-                        remoteEndPoint = serverEndPoint
-                    };
-                    Log($"Connected to server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
-                    
-                    // Use try-catch for main thread switch
-                    try
-                    {
-                        await UniTask.SwitchToMainThread();
-                        m_OnServerConnected?.Invoke(m_ServerInfo);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Warning: Could not switch to main thread for server connect event: {ex.Message}");
-                    }
-
-                    var stream = _tcpClient.GetStream();
-                    await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
+                    Log($"❌ Connection timeout to {_host}:{_port}");
+                    throw new TimeoutException($"Connection timeout to {_host}:{_port}");
                 }
+
+                if (!_tcpClient.Connected)
+                {
+                    Log($"❌ Failed to connect to {_host}:{_port}");
+                    throw new InvalidOperationException($"Failed to connect to {_host}:{_port}");
+                }
+
+                ConfigureTcpClient(_tcpClient);
+                m_IsConnected = true;
+
+                var serverEndPoint = (IPEndPoint)_tcpClient.Client.RemoteEndPoint;
+                var localEndPoint = (IPEndPoint)_tcpClient.Client.LocalEndPoint;
+
+                m_ServerInfo = new ConnectorInfo
+                {
+                    id = _tcpClient.GetHashCode(),
+                    ipAddress = serverEndPoint.Address.ToString(),
+                    port = serverEndPoint.Port,
+                    remoteEndPoint = serverEndPoint
+                };
+
+                Log($"✅ Connected to server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
+
+                await UniTask.SwitchToMainThread();
+                m_OnServerConnected?.Invoke(m_ServerInfo);
+
+                var stream = _tcpClient.GetStream();
+                await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
             }
             catch (OperationCanceledException)
             {
-                Log("Connection attempt canceled.");
-            }
-            catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
-                                            ex.SocketErrorCode == SocketError.ConnectionAborted ||
-                                            ex.SocketErrorCode == SocketError.ConnectionReset)
-            {
-                // Connection was closed gracefully or aborted - don't log as error during shutdown
-                Log("Connection closed during client operation.");
-            }
-            catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
-                                       (socketEx.SocketErrorCode == SocketError.OperationAborted ||
-                                        socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
-                                        socketEx.SocketErrorCode == SocketError.ConnectionReset))
-            {
-                // Connection was closed gracefully or aborted - don't log as error during shutdown
-                Log("Connection closed during client operation.");
-            }
-            catch (ObjectDisposedException)
-            {
-                // TcpClient was disposed - this is expected during shutdown
-                Log("Client disposed during operation.");
+                // Silent cancellation - don't log when stopping
+                throw;
             }
             catch (Exception ex)
             {
-                Log($"Unexpected client error: {ex.GetType().Name} - {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Connection, "Unexpected client connection error", ex);
+                Log($"TCP connection error: {ex.GetType().Name} - {ex.Message}");
+                throw ex;
             }
             finally
             {
                 if (m_IsConnected)
                 {
-                    Log("Disconnected from server.");
                     m_IsConnected = false;
-                    
-                    // Use try-catch for main thread switch
-                    try
-                    {
-                        await UniTask.SwitchToMainThread();
-                        m_OnServerDisconnected?.Invoke(m_ServerInfo);
-                    }
-                    catch (Exception ex)
-                    {
-                        Log($"Warning: Could not switch to main thread for server disconnect event: {ex.Message}");
-                    }
+                    await UniTask.SwitchToMainThread();
+                    m_OnServerDisconnected?.Invoke(m_ServerInfo);
                 }
+
                 _tcpClient?.Close();
+                _tcpClient?.Dispose();
             }
         }
 
         private async UniTask<string> ListenForServerAsync(CancellationToken token)
         {
-            const string UDP_DISCOVERY_KEY = "discovery_listen";
-            UdpClient udpClient = null;
-            
             try
             {
-                // Use cached UDP client for discovery listening
-                lock (_udpCacheLock)
-                {
-                    if (!_udpClientCache.TryGetValue(UDP_DISCOVERY_KEY, out udpClient) || 
-                        udpClient?.Client == null)
-                    {
-                        udpClient = new UdpClient();
-                        udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-                        
-                        // Try to bind to the discovery port, if fails use any available port
-                        try
-                        {
-                            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, m_DiscoveryPort));
-                        }
-                        catch (SocketException)
-                        {
-                            // If discovery port is busy, bind to any available port
-                            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
-                            var boundPort = ((IPEndPoint)udpClient.Client.LocalEndPoint).Port;
-                            Log($"Discovery port {m_DiscoveryPort} busy, listening on port {boundPort}");
-                        }
-                        
-                        _udpClientCache[UDP_DISCOVERY_KEY] = udpClient;
-                    }
-                }
+                using var udpClient = new UdpClient(m_DiscoveryPort);
 
-                // Set a timeout for discovery
-                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-                using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
 
-                var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(combinedCts.Token);
 
+
+
+                Log($"Listening for server on UDP port {m_DiscoveryPort}");
+
+                var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
                 var receivedMessage = Encoding.UTF8.GetString(receiveResult.Buffer);
+
                 if (receivedMessage == m_DiscoveryMessage)
                 {
-                    return receiveResult.RemoteEndPoint.Address.ToString();
+                    var serverIP = receiveResult.RemoteEndPoint.Address.ToString();
+                    Log($"✅ Server found: {serverIP}");
+                    return serverIP;
                 }
             }
-            catch (OperationCanceledException) 
-            { 
-                // Silent timeout or cancellation
+            catch (OperationCanceledException)
+            {
+                // Silent cancellation
             }
             catch (Exception ex)
             {
-                Log($"UDP Listen Error: {ex.Message}");
-                
-                // Remove faulty client from cache
-                lock (_udpCacheLock)
-                {
-                    if (_udpClientCache.TryGetValue(UDP_DISCOVERY_KEY, out var faultyClient))
-                    {
-                        faultyClient?.Close();
-                        faultyClient?.Dispose();
-                        _udpClientCache.Remove(UDP_DISCOVERY_KEY);
-                    }
-                }
+                Log($"Listen error: {ex.Message}");
             }
-            
-            return null;
-        }
 
-        /// <summary>
-        /// Cleans up cached UDP clients and releases resources
-        /// </summary>
-        private void CleanupUdpClientCache()
-        {
-            lock (_udpCacheLock)
-            {
-                foreach (var cachedClient in _udpClientCache.Values)
-                {
-                    try
-                    {
-                        cachedClient?.Close();
-                        cachedClient?.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        if (m_IsDebug)
-                            Log($"Warning: Error disposing cached UDP client: {ex.Message}");
-                    }
-                }
-                _udpClientCache.Clear();
-            }
+            return null;
         }
 
         #endregion
@@ -1383,8 +1332,7 @@ namespace Modules.Utilities
                                                  ex.SocketErrorCode == SocketError.ConnectionAborted ||
                                                  ex.SocketErrorCode == SocketError.ConnectionReset)
                 {
-                    // Connection was closed gracefully or aborted - this is expected during shutdown
-                    Log($"Connection closed: {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    // Connection closed
                     break;
                 }
                 catch (IOException ex) when (ex.InnerException is SocketException socketEx &&
@@ -1392,14 +1340,12 @@ namespace Modules.Utilities
                                             socketEx.SocketErrorCode == SocketError.ConnectionAborted ||
                                             socketEx.SocketErrorCode == SocketError.ConnectionReset))
                 {
-                    // Connection was closed gracefully or aborted - this is expected during shutdown
-                    Log($"Connection closed: {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    // Connection closed
                     break;
                 }
                 catch (ObjectDisposedException)
                 {
-                    // Stream was disposed - this is expected during shutdown
-                    Log($"Stream disposed for: {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    // Stream disposed
                     break;
                 }
                 catch (Exception ex)
@@ -1696,13 +1642,13 @@ namespace Modules.Utilities
         private byte[] SerializeAsJson<T>(T data)
         {
             string jsonString;
-            
+
 #if PACKAGE_NEWTONSOFT_JSON_INSTALLED
             jsonString = JsonConvert.SerializeObject(data);
 #else
             jsonString = JsonUtility.ToJson(data);
 #endif
-            
+
             var bytes = Encoding.UTF8.GetBytes(jsonString);
             // Log removed for performance - was logging every JSON serialization
             return bytes;
@@ -1892,26 +1838,26 @@ namespace Modules.Utilities
         /// <summary>
         /// Extended information for real-time clients with timeout tracking
         /// </summary>
-        [Serializable] 
-        public struct RealTimeClientInfo 
-        { 
-            public ConnectorInfo connectorInfo; 
-            public DateTime lastSeen; 
+        [Serializable]
+        public struct RealTimeClientInfo
+        {
+            public ConnectorInfo connectorInfo;
+            public DateTime lastSeen;
             public bool isActive;
-            
+
             public RealTimeClientInfo(ConnectorInfo info)
             {
                 connectorInfo = info;
                 lastSeen = DateTime.Now;
                 isActive = true;
             }
-            
+
             public void UpdateActivity()
             {
                 lastSeen = DateTime.Now;
                 isActive = true;
             }
-            
+
             public bool IsExpired(int timeoutSeconds)
             {
                 return (DateTime.Now - lastSeen).TotalSeconds > timeoutSeconds;
@@ -1945,7 +1891,7 @@ namespace Modules.Utilities
             public T GetData<T>()
             {
                 if (data == null || data.Length == 0) return default;
-                
+
                 try
                 {
                     // Use the intelligent deserialization from UnityConverter
@@ -1954,7 +1900,7 @@ namespace Modules.Utilities
                 catch (Exception ex)
                 {
                     Debug.LogError($"Failed to deserialize data to {typeof(T).Name}: {ex.Message}");
-                    
+
                     // Fallback to JSON deserialization for complex objects
                     try
                     {
@@ -2008,7 +1954,7 @@ namespace Modules.Utilities
         #endregion
 
         #region Simple API Methods
-        
+
         /// <summary>
         /// Simple method to send string data
         /// </summary>
@@ -2016,7 +1962,7 @@ namespace Modules.Utilities
         {
             await SendDataAsync(actionId, message);
         }
-        
+
         /// <summary>
         /// Simple method to send real-time string data (if enabled)
         /// </summary>
@@ -2025,7 +1971,7 @@ namespace Modules.Utilities
             if (m_EnableRealTimeMode)
                 await SendRealTimeDataAsync(actionId, message);
         }
-        
+
         /// <summary>
         /// Simple method to check if server/client is ready
         /// </summary>
@@ -2036,7 +1982,7 @@ namespace Modules.Utilities
             else
                 return m_IsRunning && m_IsConnected;
         }
-        
+
         /// <summary>
         /// Check if connection can handle TCP data transmission
         /// </summary>
@@ -2044,14 +1990,14 @@ namespace Modules.Utilities
         {
             return m_IsRunning && IsConnectionHealthy();
         }
-        
+
         /// <summary>
         /// Check if real-time mode is available
         /// </summary>
         public bool CanSendRealTimeData()
         {
             if (!m_EnableRealTimeMode || !m_IsRunning) return false;
-            
+
             if (m_IsServer)
                 return _realTimeServer != null;
             else
@@ -2182,8 +2128,8 @@ namespace Modules.Utilities
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_BufferSize"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxConcurrentConnections"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableKeepAlive"));
-                
-                
+
+
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRetryCount"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelay"));
             }
@@ -2202,12 +2148,11 @@ namespace Modules.Utilities
             {
                 var enableRealTime = serializedObject.FindProperty("m_EnableRealTimeMode");
                 EditorGUILayout.PropertyField(enableRealTime);
-                
+
                 EditorGUI.BeginDisabledGroup(!enableRealTime.boolValue);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RealTimePort"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRealTimePacketSize"));
                 EditorGUI.EndDisabledGroup();
-                
+
                 if (enableRealTime.boolValue)
                 {
                     EditorGUILayout.HelpBox("Real-time mode provides low-latency communication but packets may be lost. Recommended for frequent updates like player positions.", MessageType.Info);
@@ -2246,7 +2191,7 @@ namespace Modules.Utilities
                     {
                         EditorGUILayout.LabelField($"• TCP {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
                     }
-                    
+
                     if (tcpConnector.RealTimeClientInfoList.Count > 0)
                     {
                         EditorGUILayout.LabelField("Real-time Client Details:", EditorStyles.miniLabel);
