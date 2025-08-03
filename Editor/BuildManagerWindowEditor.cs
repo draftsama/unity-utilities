@@ -15,8 +15,6 @@ namespace Modules.Utilities.Editor
 
     public class BuildManagerWindowEditor : EditorWindow, IPostprocessBuildWithReport, IPreprocessBuildWithReport
     {
-
-
         BuildProfile[] buildProfiles;
         int selectedBuildProfileIndex = 0;
         string buildFolderPath = string.Empty;
@@ -27,17 +25,23 @@ namespace Modules.Utilities.Editor
         public int callbackOrder { get; }
         string buildVersion = string.Empty;
         string buildName = string.Empty;
+        string buildSuffix = string.Empty;
 
         bool isNotify = false;
+        bool isSoundNotify = false;
 
+        // ScriptableObject settings
+        private BuildManagerSettings settings;
+        private const string SETTINGS_PATH = "Assets/Settings/BuildManagerSettings.asset";
+        private const string SETTINGS_FOLDER = "Assets/Settings";
 
-
-        const string PROFILE_SELECT_INDEX_KEY = "BM_PROFILE_SELECT_INDEX";
-        const string BUILD_FOLDER_PATH_KEY = "BM_BUILD_FOLDER_PATH";
-        const string COPY_FOLDER_PATHS_KEY = "BM_COPY_FOLDER_PATHS";
-        const string ENABLE_COPY_FOLDERS_KEY = "BM_ENABLE_COPY_FOLDERS";
-        const string BUILD_NAME_KEY = "BM_BUILD_NAME";
-        const string IS_NOTIFY_KEY = "BM_IS_NOTIFY";
+        [MenuItem("Window/Build Manager")]
+        static void Init()
+        {
+            BuildManagerWindowEditor window = (BuildManagerWindowEditor)EditorWindow.GetWindow(typeof(BuildManagerWindowEditor));
+            window.titleContent = new GUIContent("Build Manager");
+            window.Show();
+        }
 
         void OnEnable()
         {
@@ -46,6 +50,7 @@ namespace Modules.Utilities.Editor
             CompilationPipeline.compilationFinished += OnCompilationFinished;
 
             LoadBuildProfiles();
+            LoadOrCreateSettings(); // Load settings after profiles are loaded
         }
 
         void OnDisable()
@@ -68,6 +73,316 @@ namespace Modules.Utilities.Editor
             Repaint();
         }
 
+        void LoadOrCreateSettings()
+        {
+            settings = AssetDatabase.LoadAssetAtPath<BuildManagerSettings>(SETTINGS_PATH);
+            if (settings == null)
+            {
+                // Settings don't exist, will be created when user clicks the button
+                Debug.Log("Build Manager Settings not found. Use 'Create Settings' button to create one.");
+            }
+        }
+
+        void CreateSettings()
+        {
+            // Ensure the Settings folder exists
+            if (!AssetDatabase.IsValidFolder(SETTINGS_FOLDER))
+            {
+                AssetDatabase.CreateFolder("Assets", "Settings");
+            }
+
+            // Create new settings
+            settings = ScriptableObject.CreateInstance<BuildManagerSettings>();
+            AssetDatabase.CreateAsset(settings, SETTINGS_PATH);
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+
+            Debug.Log($"Created Build Manager Settings at: {SETTINGS_PATH}");
+        }
+
+        void CreateSettingsForProfile(string profileName)
+        {
+            CreateSettings();
+            
+            // Initialize with current profile
+            if (settings != null && buildProfiles != null && buildProfiles.Length > 0)
+            {
+                settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
+                var profileSettings = settings.GetOrCreateProfileSettings(profileName);
+                profileSettings.buildName = profileName;
+                SaveSettings();
+                
+                // Load settings for this profile
+                LoadProfileSpecificSettings();
+            }
+            
+            Debug.Log($"Created Build Manager Settings for profile: {profileName}");
+        }
+
+        void LoadProfileSpecificSettings()
+        {
+            if (settings == null || buildProfiles == null || buildProfiles.Length == 0) return;
+
+            var selectedProfile = buildProfiles[selectedBuildProfileIndex];
+            var profileSettings = settings.GetOrCreateProfileSettings(selectedProfile.name);
+            
+            // Load profile-specific settings
+            buildFolderPath = profileSettings.buildFolderPath;
+            copyFolderPaths = new List<string>(profileSettings.copyFolderPaths);
+            enableCopyFolders = profileSettings.enableCopyFolders;
+            buildName = !string.IsNullOrEmpty(profileSettings.buildName) ? profileSettings.buildName : selectedProfile.name;
+            buildSuffix = profileSettings.buildSuffix;
+            buildVersion = !string.IsNullOrEmpty(profileSettings.buildVersion) ? profileSettings.buildVersion : PlayerSettings.bundleVersion;
+            
+            // Load global settings
+            isNotify = settings.isNotify;
+            isSoundNotify = settings.isSoundNotify;
+        }
+
+        void ShowProfileSettingsUI(BuildProfile selectedBuildProfile)
+        {
+            GUILayout.BeginVertical("box");
+
+            // Current platform 
+            try
+            {
+                GUILayout.Label("Platform: " + EditorUserBuildSettings.activeBuildTarget, EditorStyles.label);
+            }
+            catch
+            {
+                GUILayout.Label("Platform: Loading...", EditorStyles.label);
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Build Name: ", EditorStyles.label);
+            buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
+            GUILayout.EndHorizontal();
+            if (GUI.changed)
+            {
+                // Update settings
+                var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                profileSettings.buildName = buildName;
+                SaveSettings();
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Build Suffix: ", EditorStyles.label);
+            buildSuffix = GUILayout.TextField(buildSuffix, GUILayout.Width(200));
+            GUILayout.EndHorizontal();
+            if (GUI.changed)
+            {
+                // Update settings
+                var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                profileSettings.buildSuffix = buildSuffix;
+                SaveSettings();
+            }
+
+            // Current version
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Version: ", EditorStyles.label);
+
+            buildVersion = GUILayout.TextField(buildVersion, GUILayout.Width(100));
+            if (GUI.changed)
+            {
+                // Update settings
+                var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                profileSettings.buildVersion = buildVersion;
+                SaveSettings();
+            }
+
+            // Disable update button during compilation
+            GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
+
+            if (PlayerSettings.bundleVersion != buildVersion && GUILayout.Button("Update", GUILayout.Width(60)))
+            {
+                try
+                {
+                    PlayerSettings.bundleVersion = buildVersion;
+                    var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                    profileSettings.buildVersion = buildVersion;
+                    Debug.Log($"Updated build version to: {buildVersion}");
+                    AssetDatabase.SaveAssets();
+                    SaveSettings();
+                }
+                catch (System.Exception e)
+                {
+                    Debug.LogError($"Failed to update version: {e.Message}");
+                }
+            }
+
+            GUI.enabled = true;
+            GUILayout.EndHorizontal();
+
+            //select build folder using dialog
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("Build Folder: ", EditorStyles.label);
+            buildFolderPath = GUILayout.TextField(buildFolderPath);
+            if (GUILayout.Button("Browse", GUILayout.Width(60)))
+            {
+                string path = EditorUtility.OpenFolderPanel("Select Build Folder", buildFolderPath, "");
+                if (!string.IsNullOrEmpty(path))
+                {
+                    buildFolderPath = path;
+                    // Save to settings
+                    var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                    profileSettings.buildFolderPath = buildFolderPath;
+                    SaveSettings();
+                }
+                // Focus back to this window
+                Focus();
+            }
+            GUILayout.EndHorizontal();
+
+            // Show warning if build folder is empty
+            if (string.IsNullOrEmpty(buildFolderPath))
+            {
+                EditorGUILayout.HelpBox("Build folder path is required. Please select a folder using the Browse button above.", MessageType.Error);
+            }
+
+            //copy folder support for windows only
+            if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows ||
+               EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows64)
+            {
+                // Display copy folder paths
+                GUILayout.BeginVertical("box");
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Copy Folders:", EditorStyles.label);
+                GUILayout.FlexibleSpace();
+                enableCopyFolders = GUILayout.Toggle(enableCopyFolders, "Enable Copy Folders", GUILayout.Width(150));
+                // Save toggle state to settings
+                if (GUI.changed)
+                {
+                    var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                    profileSettings.enableCopyFolders = enableCopyFolders;
+                    SaveSettings();
+                }
+                GUILayout.EndHorizontal();
+
+                if (copyFolderPaths != null && copyFolderPaths.Count > 0)
+                {
+                    int indexToRemove = -1;
+                    for (int i = 0; i < copyFolderPaths.Count; i++)
+                    {
+                        EditorGUI.indentLevel++;
+
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Label(copyFolderPaths[i], EditorStyles.label);
+                        if (GUILayout.Button("DEL", GUILayout.Width(60)))
+                        {
+                            indexToRemove = i;
+                        }
+                        GUILayout.EndHorizontal();
+                        EditorGUI.indentLevel--;
+                    }
+
+                    if (indexToRemove >= 0)
+                    {
+                        copyFolderPaths.RemoveAt(indexToRemove);
+                        var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                        profileSettings.copyFolderPaths = copyFolderPaths;
+                        SaveSettings();
+                    }
+                }
+                else
+                {
+                    GUILayout.Label("No copy folders specified.", EditorStyles.label);
+                }
+
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                // Button to add a new copy folder path
+                if (GUILayout.Button("Add Copy Folder"))
+                {
+                    string path = EditorUtility.OpenFolderPanel("Select Copy Folder", System.Environment.CurrentDirectory, "");
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        copyFolderPaths.Add(path);
+                        var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                        profileSettings.copyFolderPaths = copyFolderPaths;
+                        SaveSettings();
+                    }
+                    // Focus back to this window
+                    Focus();
+                }
+                GUILayout.EndHorizontal();
+
+                GUILayout.EndVertical();
+            }
+            else
+            {
+                copyFolderPaths.Clear();
+                enableCopyFolders = false;
+            }
+
+            //draw checkbox for isNotify
+            isNotify = GUILayout.Toggle(isNotify, "Enable Message Notify", GUILayout.Width(150));
+            if (GUI.changed)
+            {
+                settings.isNotify = isNotify;
+                SaveSettings();
+            }
+
+            //draw checkbox for isSoundNotify
+            isSoundNotify = GUILayout.Toggle(isSoundNotify, "Enable Sound Notify", GUILayout.Width(150));
+            if (GUI.changed)
+            {
+                settings.isSoundNotify = isSoundNotify;
+                SaveSettings();
+            }
+
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            
+            // Disable Build button if build folder is empty
+            GUI.enabled = !string.IsNullOrEmpty(buildFolderPath);
+            if (GUILayout.Button("Build", GUILayout.Width(100)))
+            {
+                Build(selectedBuildProfile);
+            }
+            GUI.enabled = true; // Reset GUI.enabled
+            
+            GUILayout.EndHorizontal();
+
+            GUILayout.EndVertical();
+
+            // Auto-save any changes
+            if (GUI.changed)
+            {
+                UpdateCurrentProfileSettings();
+            }
+        }
+
+        void SaveSettings()
+        {
+            if (settings != null)
+            {
+                EditorUtility.SetDirty(settings);
+                AssetDatabase.SaveAssets();
+            }
+        }
+
+        void UpdateCurrentProfileSettings()
+        {
+            if (settings != null && buildProfiles != null && buildProfiles.Length > 0)
+            {
+                var selectedBuildProfile = buildProfiles[selectedBuildProfileIndex];
+                var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                
+                profileSettings.buildFolderPath = buildFolderPath;
+                profileSettings.copyFolderPaths = new List<string>(copyFolderPaths);
+                profileSettings.enableCopyFolders = enableCopyFolders;
+                profileSettings.buildName = buildName;
+                profileSettings.buildSuffix = buildSuffix;
+                profileSettings.buildVersion = buildVersion;
+                
+                settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
+                settings.isNotify = isNotify;
+                settings.isSoundNotify = isSoundNotify;
+                
+                SaveSettings();
+            }
+        }
+
         void LoadBuildProfiles()
         {
             // Only load if not compiling
@@ -83,29 +398,34 @@ namespace Modules.Utilities.Editor
                     string path = AssetDatabase.GUIDToAssetPath(profilePaths[i]);
                     buildProfiles[i] = AssetDatabase.LoadAssetAtPath<BuildProfile>(path);
                 }
-                selectedBuildProfileIndex = PlayerPrefs.GetInt(PROFILE_SELECT_INDEX_KEY, -1);
-                if (selectedBuildProfileIndex < 0 || selectedBuildProfileIndex >= buildProfiles.Length)
-                {
-                    selectedBuildProfileIndex = 0; // Default to first profile if index is invalid
-                    PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
 
-                }
-                var profile = buildProfiles[selectedBuildProfileIndex];
-                buildFolderPath = PlayerPrefs.GetString($"{BUILD_FOLDER_PATH_KEY}_{profile.name}", string.Empty);
-                // Debug.Log($"Loaded build folder path: {buildFolderPath} using key: {BUILD_FOLDER_PATH_KEY}_{profile.name}");
-                string copyFolderPathsString = PlayerPrefs.GetString($"{COPY_FOLDER_PATHS_KEY}_{profile.name}", string.Empty);
-                if (!string.IsNullOrEmpty(copyFolderPathsString))
+                if (settings != null && buildProfiles.Length > 0)
                 {
-                    copyFolderPaths = new List<string>(copyFolderPathsString.Split(';'));
+                    // Load from ScriptableObject
+                    selectedBuildProfileIndex = settings.selectedBuildProfileIndex;
+                    if (selectedBuildProfileIndex < 0 || selectedBuildProfileIndex >= buildProfiles.Length)
+                    {
+                        selectedBuildProfileIndex = 0;
+                        settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
+                        SaveSettings();
+                    }
+
+                    // Load settings for current profile
+                    LoadProfileSpecificSettings();
                 }
-                else
+                else if (buildProfiles.Length > 0)
                 {
-                    copyFolderPaths.Clear();
+                    // Fallback to default values when no settings exist
+                    selectedBuildProfileIndex = 0;
+                    buildFolderPath = string.Empty;
+                    copyFolderPaths = new List<string>();
+                    enableCopyFolders = true;
+                    buildVersion = PlayerSettings.bundleVersion;
+                    buildName = buildProfiles[0].name;
+                    buildSuffix = string.Empty;
+                    isNotify = false;
+                    isSoundNotify = false;
                 }
-                enableCopyFolders = PlayerPrefs.GetInt($"{ENABLE_COPY_FOLDERS_KEY}_{profile.name}", 1) == 1;
-                buildVersion = PlayerSettings.bundleVersion;
-                buildName = PlayerPrefs.GetString($"{BUILD_NAME_KEY}_{profile.name}", profile.name);
-                isNotify = PlayerPrefs.GetInt(IS_NOTIFY_KEY, 0) == 1;
             }
             catch (System.Exception e)
             {
@@ -143,9 +463,8 @@ namespace Modules.Utilities.Editor
                 LoadBuildProfiles();
             }
 
-            GUILayout.Label("Build Manager", EditorStyles.boldLabel);
 
-            // Dropdown to select build profile
+            // Dropdown to select build profile - show this first
             if (buildProfiles != null && buildProfiles.Length > 0)
             {
                 BuildProfile activeProfile = null;
@@ -168,25 +487,48 @@ namespace Modules.Utilities.Editor
                     var profile = buildProfiles[i];
                     if (profile == null) continue;
 
-                    profileNames[i] = profile.name;
-
                     if (profile == activeProfile)
                     {
                         activeProfileIndex = i;
-                        profileNames[i] += " [ACTIVE]";
+                        profileNames[i] = $"● {profile.name}"; // Active profile with bullet
+                    }
+                    else
+                    {
+                        profileNames[i] = $"○ {profile.name}"; // Inactive profile with hollow bullet
                     }
                 }
 
-                // Begin horizontal layout
-                GUI.color = Color.white;
+                // Begin horizontal layout for profile selection
                 GUILayout.BeginHorizontal();
 
                 // Clamp selectedBuildProfileIndex to valid range
                 selectedBuildProfileIndex = Mathf.Clamp(selectedBuildProfileIndex, 0, buildProfiles.Length - 1);
-                selectedBuildProfileIndex = EditorGUILayout.Popup("Build Profile:", selectedBuildProfileIndex, profileNames);
+                var previousIndex = selectedBuildProfileIndex;
+                
+                // Label with normal color
+                GUILayout.Label("Build Profile:", EditorStyles.label, GUILayout.Width(80));
+                
+                // Change GUI color only for dropdown
+                var originalColor = GUI.color;
+                if (activeProfileIndex == selectedBuildProfileIndex)
+                {
+                    GUI.color = Color.green; // Green color for active profile
+                }
+                
+                selectedBuildProfileIndex = EditorGUILayout.Popup(selectedBuildProfileIndex, profileNames);
+                
+                // Restore original color
+                GUI.color = originalColor;
 
                 var selectedBuildProfile = buildProfiles[selectedBuildProfileIndex];
                 var isActive = activeProfileIndex == selectedBuildProfileIndex;
+
+                // Check if profile selection changed
+                if (previousIndex != selectedBuildProfileIndex)
+                {
+                    // Profile changed, reload settings for new profile
+                    LoadProfileSpecificSettings();
+                }
 
                 // Disable button during operations that might cause compilation
                 GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
@@ -197,7 +539,11 @@ namespace Modules.Utilities.Editor
                     {
                         BuildProfile.SetActiveBuildProfile(selectedBuildProfile);
                         Debug.Log($"Set {selectedBuildProfile.name} as active build profile.");
-                        PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
+                        if (settings != null)
+                        {
+                            settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
+                            SaveSettings();
+                        }
                         GUI.FocusControl(null);
                     }
                     catch (System.Exception e)
@@ -208,166 +554,44 @@ namespace Modules.Utilities.Editor
 
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
-                GUI.color = Color.white;
 
+                // Show settings status and create button if needed - AFTER profile selection
+                GUILayout.BeginHorizontal("box");
+                if (settings == null)
+                {
+                    GUILayout.Label($"⚠️ No Build Manager Settings found for profile: {selectedBuildProfile.name}", EditorStyles.helpBox);
+                    if (GUILayout.Button("Create Settings", GUILayout.Width(120)))
+                    {
+                        CreateSettingsForProfile(selectedBuildProfile.name);
+                    }
+                }
+                else
+                {
+                    
+                    // Show BuildManagerSettings object reference (disabled)
+                    EditorGUI.BeginDisabledGroup(true);
+                    EditorGUILayout.ObjectField("BuildManagerSettings:", settings, typeof(BuildManagerSettings), false);
+                    EditorGUI.EndDisabledGroup();
+                    
+                    if (GUILayout.Button("Refresh", GUILayout.Width(80)))
+                    {
+                        LoadOrCreateSettings();
+                        LoadProfileSpecificSettings();
+                    }
+                }
+                GUILayout.EndHorizontal();
+
+                // Don't show the rest of the UI if no settings exist
+                if (settings == null)
+                {
+                    EditorGUILayout.HelpBox($"Please create Build Manager Settings for profile '{selectedBuildProfile.name}' to continue.", MessageType.Info);
+                    return;
+                }
+
+                // Show the active profile settings UI
                 if (isActive)
                 {
-
-                    GUILayout.BeginVertical("box");
-
-                    // Current platform 
-                    try
-                    {
-                        GUILayout.Label("Platform: " + EditorUserBuildSettings.activeBuildTarget, EditorStyles.label);
-                    }
-                    catch
-                    {
-                        GUILayout.Label("Platform: Loading...", EditorStyles.label);
-                    }
-
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Build Name: ", EditorStyles.label);
-                    buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
-                    GUILayout.EndHorizontal();
-                    if (GUI.changed)
-                    {
-                        // Debug.Log($"Build Name changed to: {buildName}");
-                        PlayerPrefs.SetString($"{BUILD_NAME_KEY}_{selectedBuildProfile.name}", buildName);
-                    }
-
-                    // Current version
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Version: ", EditorStyles.label);
-
-
-                    buildVersion = GUILayout.TextField(buildVersion, GUILayout.Width(100));
-
-                    // Disable update button during compilation
-                    GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
-
-                    if (PlayerSettings.bundleVersion != buildVersion && GUILayout.Button("Update", GUILayout.Width(60)))
-                    {
-                        try
-                        {
-                            PlayerSettings.bundleVersion = buildVersion;
-                            Debug.Log($"Updated build version to: {buildVersion}");
-                            AssetDatabase.SaveAssets();
-                        }
-                        catch (System.Exception e)
-                        {
-                            Debug.LogError($"Failed to update version: {e.Message}");
-                        }
-                    }
-
-
-                    GUI.enabled = true;
-                    GUILayout.EndHorizontal();
-
-                    //select build folder using dialog
-                    GUILayout.BeginHorizontal();
-                    GUILayout.Label("Build Folder: ", EditorStyles.label);
-                    buildFolderPath = GUILayout.TextField(buildFolderPath);
-                    if (GUILayout.Button("Browse", GUILayout.Width(60)))
-                    {
-                        string path = EditorUtility.OpenFolderPanel("Select Build Folder", buildFolderPath, "");
-                        if (!string.IsNullOrEmpty(path))
-                        {
-                            buildFolderPath = path;
-                            // Save the path to PlayerPrefs for persistence
-                            PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{selectedBuildProfile.name}", buildFolderPath);
-                        }
-                    }
-                    GUILayout.EndHorizontal();
-
-                    //copy folder support for windows only
-                    if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows ||
-                       EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows64)
-                    {
-
-                        // Display copy folder paths
-                        GUILayout.BeginVertical("box");
-                        GUILayout.BeginHorizontal();
-                        GUILayout.Label("Copy Folders:", EditorStyles.label);
-                        GUILayout.FlexibleSpace();
-                        enableCopyFolders = GUILayout.Toggle(enableCopyFolders, "Enable Copy Folders", GUILayout.Width(150));
-                        //save the toggle state to PlayerPrefs
-                        PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{selectedBuildProfile.name}", enableCopyFolders ? 1 : 0);
-                        GUILayout.EndHorizontal();
-
-                        if (copyFolderPaths != null && copyFolderPaths.Count > 0)
-                        {
-                            int indexToRemove = -1;
-                            for (int i = 0; i < copyFolderPaths.Count; i++)
-                            {
-                                EditorGUI.indentLevel++;
-
-                                GUILayout.BeginHorizontal();
-                                GUILayout.Label(copyFolderPaths[i], EditorStyles.label);
-                                if (GUILayout.Button("DEL", GUILayout.Width(60)))
-                                {
-                                    indexToRemove = i;
-                                }
-                                GUILayout.EndHorizontal();
-                                EditorGUI.indentLevel--;
-
-
-                            }
-
-                            if (indexToRemove >= 0)
-                            {
-                                copyFolderPaths.RemoveAt(indexToRemove);
-                                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{selectedBuildProfile.name}", string.Join(";", copyFolderPaths));
-                            }
-
-                        }
-                        else
-                        {
-                            GUILayout.Label("No copy folders specified.", EditorStyles.label);
-                        }
-
-                        GUILayout.BeginHorizontal();
-
-
-                        GUILayout.FlexibleSpace();
-                        // Button to add a new copy folder path
-                        if (GUILayout.Button("Add Copy Folder"))
-                        {
-                            string path = EditorUtility.OpenFolderPanel("Select Copy Folder", System.Environment.CurrentDirectory, "");
-                            if (!string.IsNullOrEmpty(path))
-                            {
-                                copyFolderPaths.Add(path);
-                                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{selectedBuildProfile.name}", string.Join(";", copyFolderPaths));
-                            }
-
-
-                        }
-                        GUILayout.EndHorizontal();
-
-                        GUILayout.EndVertical();
-
-                    }
-                    else
-                    {
-                        copyFolderPaths.Clear();
-                        enableCopyFolders = false;
-                    }
-
-                    //draw checkbox for isNotify
-                    isNotify = GUILayout.Toggle(isNotify, "Enable Notifications", GUILayout.Width(150));
-
-                    GUILayout.BeginHorizontal();
-                    GUILayout.FlexibleSpace();
-                    if (GUILayout.Button("Build", GUILayout.Width(100)))
-                    {
-                        Build(selectedBuildProfile);
-                    }
-
-                    GUILayout.EndHorizontal();
-
-
-
-
-                    GUILayout.EndVertical();
+                    ShowProfileSettingsUI(selectedBuildProfile);
                 }
             }
             else
@@ -379,24 +603,6 @@ namespace Modules.Utilities.Editor
                     LoadBuildProfiles();
                 }
             }
-
-
-            if (GUI.changed)
-            {
-                var selectedBuildProfile = buildProfiles[selectedBuildProfileIndex];
-                PlayerPrefs.SetInt(PROFILE_SELECT_INDEX_KEY, selectedBuildProfileIndex);
-                PlayerPrefs.SetString($"{BUILD_FOLDER_PATH_KEY}_{selectedBuildProfile.name}", buildFolderPath);
-                PlayerPrefs.SetString($"{COPY_FOLDER_PATHS_KEY}_{selectedBuildProfile.name}", string.Join(";", copyFolderPaths));
-                PlayerPrefs.SetInt($"{ENABLE_COPY_FOLDERS_KEY}_{selectedBuildProfile.name}", enableCopyFolders ? 1 : 0);
-                PlayerPrefs.SetInt($"{IS_NOTIFY_KEY}_{selectedBuildProfile.name}", isNotify ? 1 : 0);
-                
-                PlayerPrefs.Save();
-
-            }
-
-
-
-
         }
         public void Build(BuildProfile selectedBuildProfile)
         {
@@ -413,13 +619,15 @@ namespace Modules.Utilities.Editor
                 var date = System.DateTime.Now;
                 var dateString = $"{date:yyMMdd}";
 
-                //version = 0.0.3 to v0_0_3
+                //version = 0.0.3 to v0-0-3
                 var versionParts = PlayerSettings.bundleVersion.Split('.');
-                var versionString = string.Join("_", versionParts);
+                var versionString = string.Join("-", versionParts);
 
                 var buildTarget = EditorUserBuildSettings.activeBuildTarget;
                 var extension = "";
-                var folderName = $"{buildName}_v{versionString}-{dateString}";
+                var folderName = string.IsNullOrEmpty(buildSuffix) 
+                    ? $"{buildName}-v{versionString}-{dateString}"
+                    : $"{buildName}-v{versionString}-{dateString}-{buildSuffix}";
                 var appName = buildName;
 
                 switch (buildTarget)
@@ -553,6 +761,16 @@ namespace Modules.Utilities.Editor
                 // Notify via Telegram
                 SendMessage(
                     $"[Build Success!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
+            }
+
+            // Play success sound if enabled
+            if(isSoundNotify)
+            {
+#if UNITY_EDITOR_WIN
+                RunCommand("rundll32 user32.dll,MessageBeep");
+#elif UNITY_EDITOR_OSX
+                RunCommand("afplay /System/Library/Sounds/Glass.aiff");
+#endif
             }
 
             // Optionally, you can reveal the build folder in the file explorer
