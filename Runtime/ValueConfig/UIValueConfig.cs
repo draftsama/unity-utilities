@@ -10,6 +10,14 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using UnityEngine.Events;
 
+#if ENABLE_INPUT_SYSTEM
+using UnityEngine.InputSystem;
+#endif
+
+
+
+
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -45,19 +53,175 @@ public class UIValueConfig : Singleton<UIValueConfig>
 
     public UnityEvent OnSaved = new UnityEvent();
 
+#if ENABLE_INPUT_SYSTEM
+    InputAction m_KeyboardAction;
+    InputAction m_PointerAction;
+#endif
+
 
     protected override void Awake()
     {
         base.Awake();
         m_ContentCanvasGroup.SetAlpha(0f);
     }
+    
+    void OnDestroy()
+    {
+        // Cleanup InputActions when object is destroyed
+#if ENABLE_INPUT_SYSTEM
+        m_KeyboardAction?.Disable();
+        m_KeyboardAction?.Dispose();
+        
+        m_PointerAction?.Disable();
+        m_PointerAction?.Dispose();
+#endif
+    }
+    
+    
+
+    public bool OnKeyDown(KeyCode key)
+    {
+#if ENABLE_INPUT_SYSTEM
+        if (m_KeyboardAction != null && m_KeyboardAction.WasPressedThisFrame())
+        {
+            return true;
+        }
+        
+        // Alternative approach using Keyboard directly
+        var keyboard = Keyboard.current;
+        if (keyboard != null)
+        {
+            return key switch
+            {
+                KeyCode.A => keyboard.aKey.wasPressedThisFrame,
+                KeyCode.B => keyboard.bKey.wasPressedThisFrame,
+                KeyCode.C => keyboard.cKey.wasPressedThisFrame,
+                KeyCode.D => keyboard.dKey.wasPressedThisFrame,
+                KeyCode.E => keyboard.eKey.wasPressedThisFrame,
+                KeyCode.F => keyboard.fKey.wasPressedThisFrame,
+                KeyCode.G => keyboard.gKey.wasPressedThisFrame,
+                KeyCode.H => keyboard.hKey.wasPressedThisFrame,
+                KeyCode.I => keyboard.iKey.wasPressedThisFrame,
+                KeyCode.J => keyboard.jKey.wasPressedThisFrame,
+                KeyCode.K => keyboard.kKey.wasPressedThisFrame,
+                KeyCode.L => keyboard.lKey.wasPressedThisFrame,
+                KeyCode.M => keyboard.mKey.wasPressedThisFrame,
+                KeyCode.N => keyboard.nKey.wasPressedThisFrame,
+                KeyCode.O => keyboard.oKey.wasPressedThisFrame,
+                KeyCode.P => keyboard.pKey.wasPressedThisFrame,
+                KeyCode.Q => keyboard.qKey.wasPressedThisFrame,
+                KeyCode.R => keyboard.rKey.wasPressedThisFrame,
+                KeyCode.S => keyboard.sKey.wasPressedThisFrame,
+                KeyCode.T => keyboard.tKey.wasPressedThisFrame,
+                KeyCode.U => keyboard.uKey.wasPressedThisFrame,
+                KeyCode.V => keyboard.vKey.wasPressedThisFrame,
+                KeyCode.W => keyboard.wKey.wasPressedThisFrame,
+                KeyCode.X => keyboard.xKey.wasPressedThisFrame,
+                KeyCode.Y => keyboard.yKey.wasPressedThisFrame,
+                KeyCode.Z => keyboard.zKey.wasPressedThisFrame,
+                KeyCode.Space => keyboard.spaceKey.wasPressedThisFrame,
+                KeyCode.Return => keyboard.enterKey.wasPressedThisFrame,
+                KeyCode.Escape => keyboard.escapeKey.wasPressedThisFrame,
+                _ => false
+            };
+        }
+#else
+        // Only use legacy input if Input System is not available
+        return UnityEngine.Input.GetKeyDown(key);
+#endif
+        return false;
+    }
+
+    public bool OnPointerDown()
+    {
+#if ENABLE_INPUT_SYSTEM
+        if (m_PointerAction != null && m_PointerAction.WasPressedThisFrame())
+        {
+            return true;
+        }
+        
+        // Alternative approach using Mouse directly
+        var mouse = Mouse.current;
+        if (mouse != null && mouse.leftButton.wasPressedThisFrame)
+        {
+            return true;
+        }
+        
+        // Check for touch input
+        var touchscreen = Touchscreen.current;
+        if (touchscreen != null && touchscreen.primaryTouch.press.wasPressedThisFrame)
+        {
+            return true;
+        }
+#else
+        // Only use legacy input if Input System is not available
+        if (Input.GetMouseButtonDown(0))
+        {
+            return true;
+        }
+#endif
+
+        return false;
+    }
+
+    public Vector2 GetPointerPosition()
+    {
+#if ENABLE_INPUT_SYSTEM
+        // Try New Input System first
+        if (Pointer.current != null)
+        {
+            return Pointer.current.position.ReadValue();
+        }
+        
+        // Alternative: Try mouse position
+        var mouse = Mouse.current;
+        if (mouse != null)
+        {
+            return mouse.position.ReadValue();
+        }
+        
+        // Alternative: Try touch position
+        var touchscreen = Touchscreen.current;
+        if (touchscreen != null && touchscreen.primaryTouch.isInProgress)
+        {
+            return touchscreen.primaryTouch.position.ReadValue();
+        }
+#else
+        // Only use legacy input if Input System is not available
+        return Input.mousePosition;
+#endif
+        
+        return Vector2.zero;
+    }
+
+   
+   
     void Start()
     {
         var token = this.GetCancellationTokenOnDestroy();
         m_HeaderText.text = $"Value Config (App v{Application.version})";
+
+#if ENABLE_INPUT_SYSTEM
+        // Initialize the open action following KeyCode
+        try
+        {
+            var binding = "Keyboard/" + m_OpenKey.ToString().ToLower();
+            m_KeyboardAction = new InputAction(binding: binding);
+            m_KeyboardAction.Enable();
+
+            // Support both mouse and touch input
+            m_PointerAction = new InputAction(binding: "<Pointer>/press");
+            m_PointerAction.Enable();
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogWarning($"Failed to initialize Input System actions: {ex.Message}");
+        }
+#endif
+
         UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
         {
-            if (!m_IsOpen && Input.GetKeyDown(m_OpenKey))
+            if (!m_IsOpen && OnKeyDown(m_OpenKey))
             {
                 // Toggle the canvas group visibility
                 m_IsOpen = true;
@@ -66,9 +230,9 @@ public class UIValueConfig : Singleton<UIValueConfig>
                 m_ProtectedCanvasGroup.SetAlpha(string.IsNullOrEmpty(m_Password) ? 0f : 1f);
                 m_ContentCanvasGroup.LerpAlphaAsync(300, 1f, _token: token).Forget();
             }
-            if (!m_IsOpen && Input.GetMouseButtonDown(0))
+            if (!m_IsOpen && OnPointerDown())
             {
-                Vector3 pos = Input.mousePosition;
+                Vector2 pos = GetPointerPosition();
                 if (pos.x < 200 && pos.y < 200)
                 {
                     if (Time.time - lastTap < 0.3f)
@@ -242,6 +406,71 @@ public class UIValueConfigEditor : Editor
             EditorGUILayout.PropertyField(requireRestart);
             EditorGUILayout.PropertyField(variable);
 
+            // Show StringViewType and StringOptions for String variables
+            var variableType = variable.FindPropertyRelative("type");
+        
+            if (variableType != null && variableType.intValue == (int)Variable.Type.String)
+            {
+
+                var stringValue = variable.FindPropertyRelative("stringValue");
+                EditorGUILayout.Space(5);
+                EditorGUILayout.LabelField("String Display Options", EditorStyles.boldLabel);
+
+                var stringViewType = element.FindPropertyRelative("stringViewType");
+                var stringOptions = element.FindPropertyRelative("stringOptions");
+
+                if (stringViewType != null)
+                {
+                    var previousViewType = stringViewType.intValue;
+                    EditorGUILayout.PropertyField(stringViewType, new GUIContent("View Type"));
+                    
+                    // Check if view type changed to Dropdown
+                    if (previousViewType != stringViewType.intValue && 
+                        stringViewType.intValue == (int)Modules.Utilities.ValueInspector.StringViewType.Dropdown)
+                    {
+                        // Initialize dropdown options with current string value
+                        if (stringOptions != null && stringValue != null)
+                        {
+                            stringOptions.ClearArray();
+                            stringOptions.InsertArrayElementAtIndex(0);
+                            stringOptions.GetArrayElementAtIndex(0).stringValue = stringValue.stringValue;
+                        }
+                    }
+
+                    // Show stringOptions only if Dropdown is selected
+                    if (stringOptions != null && stringViewType.intValue == (int)Modules.Utilities.ValueInspector.StringViewType.Dropdown)
+                    {
+                        // Ensure stringOptions has at least one element and it matches stringValue
+                        if (stringOptions.arraySize == 0)
+                        {
+                            stringOptions.InsertArrayElementAtIndex(0);
+                        }
+                        
+                        // Set first element to match current stringValue
+                        if (stringValue != null && stringOptions.arraySize > 0)
+                        {
+                            var firstOption = stringOptions.GetArrayElementAtIndex(0);
+                            if (firstOption.stringValue != stringValue.stringValue)
+                            {
+                                firstOption.stringValue = stringValue.stringValue;
+                            }
+                        }
+                        
+                        EditorGUILayout.PropertyField(stringOptions, new GUIContent("Dropdown Options"), true);
+                        
+                        // Update stringValue when first option changes
+                        if (stringOptions.arraySize > 0)
+                        {
+                            var firstOption = stringOptions.GetArrayElementAtIndex(0);
+                            if (stringValue != null && firstOption.stringValue != stringValue.stringValue)
+                            {
+                                stringValue.stringValue = firstOption.stringValue;
+                            }
+                        }
+                    }
+                }
+            }
+
             var keyProp = variable.FindPropertyRelative("key");
             if (keyProp != null)
                 keys.Add(keyProp.stringValue);
@@ -282,6 +511,29 @@ public class UIValueConfigEditor : Editor
             newElement.FindPropertyRelative("title").stringValue = "title value" + length;
             newElement.FindPropertyRelative("variable").FindPropertyRelative("key").stringValue = "key value" + length;
             newElement.FindPropertyRelative("variable").FindPropertyRelative("type").intValue = (int)Variable.Type.String;
+            
+            // Initialize string display options
+            var stringViewType = newElement.FindPropertyRelative("stringViewType");
+            if (stringViewType != null)
+            {
+                stringViewType.intValue = (int)Modules.Utilities.ValueInspector.StringViewType.TextField;
+            }
+            
+            var stringOptions = newElement.FindPropertyRelative("stringOptions");
+            if (stringOptions != null)
+            {
+                stringOptions.ClearArray();
+                // If it's a dropdown, add the current string value as first option
+                if (stringViewType != null && stringViewType.intValue == (int)Modules.Utilities.ValueInspector.StringViewType.Dropdown)
+                {
+                    var stringValue = newElement.FindPropertyRelative("variable").FindPropertyRelative("stringValue");
+                    if (stringValue != null)
+                    {
+                        stringOptions.InsertArrayElementAtIndex(0);
+                        stringOptions.GetArrayElementAtIndex(0).stringValue = stringValue.stringValue;
+                    }
+                }
+            }
         }
         GUI.color = Color.white;
         EditorGUILayout.EndHorizontal();
@@ -335,6 +587,28 @@ public class UIValueConfigEditor : Editor
                     newElement.FindPropertyRelative("title").stringValue = "title value" + length;
                     newElement.FindPropertyRelative("variable").FindPropertyRelative("key").stringValue = r.key;
                     newElement.FindPropertyRelative("variable").FindPropertyRelative("type").intValue = (int)r.type;
+                    
+                    // Initialize string display options for string variables
+                    if (r.type == Variable.Type.String)
+                    {
+                        var stringViewType = newElement.FindPropertyRelative("stringViewType");
+                        if (stringViewType != null)
+                        {
+                            stringViewType.intValue = (int)Modules.Utilities.ValueInspector.StringViewType.TextField;
+                        }
+                        
+                        var stringOptions = newElement.FindPropertyRelative("stringOptions");
+                        if (stringOptions != null)
+                        {
+                            stringOptions.ClearArray();
+                            // If it's a dropdown, add the current string value as first option
+                            if (stringViewType != null && stringViewType.intValue == (int)Modules.Utilities.ValueInspector.StringViewType.Dropdown)
+                            {
+                                stringOptions.InsertArrayElementAtIndex(0);
+                                stringOptions.GetArrayElementAtIndex(0).stringValue = r.stringValue;
+                            }
+                        }
+                    }
                     switch (r.type)
                     {
                         case Variable.Type.String:

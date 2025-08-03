@@ -24,6 +24,8 @@ public class UIVariable : MonoBehaviour
         m_Data = new ValueInspector();
         m_Data.title = _data.title;
         m_Data.requireRestart = _data.requireRestart;
+        m_Data.stringOptions = _data.stringOptions;
+        m_Data.stringViewType = _data.stringViewType;
 
 
         if (variable == null)
@@ -40,8 +42,7 @@ public class UIVariable : MonoBehaviour
             item.gameObject.SetActive(false);
         }
         m_Dropdowns.options.Clear();
-        m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("True"));
-        m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("False"));
+
         m_Dropdowns.gameObject.SetActive(false);
 
         var requireRestartText = "(Restart Required)";
@@ -51,9 +52,37 @@ public class UIVariable : MonoBehaviour
         switch (m_Data.variable.type)
         {
             case Variable.Type.String:
-                m_InputFields[0].gameObject.SetActive(true);
-                m_InputFields[0].contentType = TMP_InputField.ContentType.Standard;
-                m_InputFields[0].text = m_Data.variable.stringValue;
+
+                if (m_Data.stringViewType == ValueInspector.StringViewType.Dropdown && 
+                    m_Data.stringOptions != null && m_Data.stringOptions.Length > 0)
+                {
+                    m_Dropdowns.ClearOptions();
+                    
+                    // Check if current stringValue exists in stringOptions
+                    List<string> options = new List<string>(m_Data.stringOptions);
+                    int selectedIndex = options.IndexOf(m_Data.variable.stringValue);
+                    
+                    // If stringValue is not in options, add it at the beginning
+                    if (selectedIndex == -1)
+                    {
+                        options.Insert(0, m_Data.variable.stringValue);
+                        selectedIndex = 0;
+                    }
+                    
+                    m_Dropdowns.AddOptions(options);
+                    m_Dropdowns.value = selectedIndex; // Set the correct value
+                    m_Dropdowns.RefreshShownValue();
+                    m_Dropdowns.gameObject.SetActive(true);
+                }
+                else
+                {
+                    m_InputFields[0].gameObject.SetActive(true);
+                    m_InputFields[0].contentType = TMP_InputField.ContentType.Standard;
+                    m_InputFields[0].text = m_Data.variable.stringValue;
+                }
+
+
+
 
                 break;
             case Variable.Type.Int:
@@ -68,8 +97,11 @@ public class UIVariable : MonoBehaviour
                 m_InputFields[0].text = m_Data.variable.floatValue.ToString();
                 break;
             case Variable.Type.Boolean:
-                m_Dropdowns.gameObject.SetActive(true);
                 m_Dropdowns.value = m_Data.variable.boolValue ? 0 : 1;
+                m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("True"));
+                m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("False"));
+                m_Dropdowns.gameObject.SetActive(true);
+
                 break;
             case Variable.Type.Vector2:
                 m_InputFields[0].gameObject.SetActive(true);
@@ -106,28 +138,39 @@ public class UIVariable : MonoBehaviour
         switch (m_Data.variable.type)
         {
             case Variable.Type.String:
-                return m_InputFields[0].text != m_Data.variable.stringValue;
-                
+                // Check if using dropdown or input field
+                if (m_Dropdowns.gameObject.activeInHierarchy)
+                {
+                    // Using dropdown - get selected option text
+                    string selectedOption = m_Dropdowns.options[m_Dropdowns.value].text;
+                    return selectedOption != m_Data.variable.stringValue;
+                }
+                else
+                {
+                    // Using input field
+                    return m_InputFields[0].text != m_Data.variable.stringValue;
+                }
+
             case Variable.Type.Int:
                 if (int.TryParse(m_InputFields[0].text, out int intValue))
                 {
                     return intValue != m_Data.variable.intValue;
                 }
                 return true; // If parsing fails, consider it modified
-                
+
             case Variable.Type.Float:
                 if (float.TryParse(m_InputFields[0].text, out float floatValue))
                 {
                     return !Mathf.Approximately(floatValue, m_Data.variable.floatValue);
                 }
                 return true; // If parsing fails, consider it modified
-                
+
             case Variable.Type.Boolean:
                 bool dropdownBoolValue = m_Dropdowns.value == 0;
                 return dropdownBoolValue != m_Data.variable.boolValue;
-                
+
             case Variable.Type.Vector2:
-                if (float.TryParse(m_InputFields[0].text, out float x2) && 
+                if (float.TryParse(m_InputFields[0].text, out float x2) &&
                     float.TryParse(m_InputFields[1].text, out float y2))
                 {
                     Vector2 inputVector2 = new Vector2(x2, y2);
@@ -135,9 +178,9 @@ public class UIVariable : MonoBehaviour
                            !Mathf.Approximately(inputVector2.y, m_Data.variable.vector2Value.y);
                 }
                 return true; // If parsing fails, consider it modified
-                
+
             case Variable.Type.Vector3:
-                if (float.TryParse(m_InputFields[0].text, out float x3) && 
+                if (float.TryParse(m_InputFields[0].text, out float x3) &&
                     float.TryParse(m_InputFields[1].text, out float y3) &&
                     float.TryParse(m_InputFields[2].text, out float z3))
                 {
@@ -147,7 +190,7 @@ public class UIVariable : MonoBehaviour
                            !Mathf.Approximately(inputVector3.z, m_Data.variable.vector3Value.z);
                 }
                 return true; // If parsing fails, consider it modified
-                
+
             default:
                 return false;
         }
@@ -166,7 +209,18 @@ public class UIVariable : MonoBehaviour
         switch (m_Data.variable.type)
         {
             case Variable.Type.String:
-                ValueConfig.SetValue(m_Data.variable.key, m_InputFields[0].text);
+                // Check if using dropdown or input field
+                if (m_Dropdowns.gameObject.activeInHierarchy)
+                {
+                    // Using dropdown - get selected option text
+                    string selectedOption = m_Dropdowns.options[m_Dropdowns.value].text;
+                    ValueConfig.SetValue(m_Data.variable.key, selectedOption);
+                }
+                else
+                {
+                    // Using input field
+                    ValueConfig.SetValue(m_Data.variable.key, m_InputFields[0].text);
+                }
                 break;
             case Variable.Type.Int:
                 ValueConfig.SetValue(m_Data.variable.key, int.Parse(m_InputFields[0].text));
