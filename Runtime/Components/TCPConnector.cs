@@ -89,6 +89,7 @@ namespace Modules.Utilities
 
         [Header("Connected Server Info")]
         [SerializeField] public ConnectorInfo m_ServerInfo;
+        
 
         // --- Events ---
         [Header("Events")]
@@ -708,7 +709,9 @@ namespace Modules.Utilities
                 while (!token.IsCancellationRequested)
                 {
                     var result = await _realTimeServer.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-                    ProcessRealTimeDataAsync(result.Buffer, result.RemoteEndPoint, token).Forget();
+                    
+                    // UDP Style: Process immediately, don't queue
+                    ProcessRealTimeDataImmediate(result.Buffer, result.RemoteEndPoint);
                 }
             }
             catch (OperationCanceledException)
@@ -768,7 +771,9 @@ namespace Modules.Utilities
                 while (!token.IsCancellationRequested && _realTimeClient != null)
                 {
                     var result = await _realTimeClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-                    ProcessRealTimeDataAsync(result.Buffer, result.RemoteEndPoint, token).Forget();
+                    
+                    // UDP Style: Process immediately, don't queue
+                    ProcessRealTimeDataImmediate(result.Buffer, result.RemoteEndPoint);
                 }
             }
             catch (OperationCanceledException)
@@ -787,7 +792,62 @@ namespace Modules.Utilities
         }
 
         /// <summary>
-        /// Processes incoming real-time data
+        /// Processes incoming real-time data immediately (UDP style - no queuing)
+        /// </summary>
+        private void ProcessRealTimeDataImmediate(byte[] data, IPEndPoint remoteEndPoint)
+        {
+            try
+            {
+                // Register real-time client if not already known
+                lock (m_RealTimeClients)
+                {
+                    if (!m_RealTimeClients.ContainsKey(remoteEndPoint))
+                    {
+                        var clientInfo = new ConnectorInfo
+                        {
+                            id = remoteEndPoint.GetHashCode(),
+                            ipAddress = remoteEndPoint.Address.ToString(),
+                            port = remoteEndPoint.Port,
+                            remoteEndPoint = remoteEndPoint
+                        };
+                        m_RealTimeClients[remoteEndPoint] = clientInfo;
+                    }
+                }
+
+                // Parse real-time packet (simpler than TCP - no length prefix)
+                var packetResponse = ReadRealTimePacket(data, remoteEndPoint);
+                if (packetResponse != null)
+                {
+                    packetResponse.status = PacketResponse.ReceiveStatus.Received;
+                    packetResponse.totalBytes = data.Length;
+                    packetResponse.processedBytes = data.Length;
+
+                    // Fire immediately on main thread - no queuing!
+                    // This ensures latest data overwrites older data
+                    if (UnityEngine.Application.isPlaying)
+                    {
+                        // Use a simple immediate dispatch without complex threading
+                        // Since we're already on a background thread, we'll use a sync approach
+                        try
+                        {
+                            // Schedule for main thread execution without blocking
+                            UniTask.Post(() => m_OnRealTimeDataReceived?.Invoke(packetResponse));
+                        }
+                        catch
+                        {
+                            // Ignore dispatch errors in true UDP style
+                        }
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                if (m_IsDebug) Log($"Real-time data processing error: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Processes incoming real-time data (legacy async version - kept for compatibility)
         /// </summary>
         private async UniTask ProcessRealTimeDataAsync(byte[] data, IPEndPoint remoteEndPoint, CancellationToken token)
         {
@@ -841,23 +901,23 @@ namespace Modules.Utilities
         /// <param name="action">Action identifier</param>
         /// <param name="data">Data to send (should be small, < 512 bytes recommended)</param>
         /// <param name="token">Cancellation token</param>
-        public async UniTask SendRealTimeDataAsync(ushort action, byte[] data, CancellationToken token = default)
+        public void SendRealTimeData(ushort action, byte[] data)
         {
             if (!m_EnableRealTimeMode)
             {
-                Log("Real-time mode is not enabled");
+                if (m_IsDebug) Log("Real-time mode is not enabled");
                 return;
             }
 
             if (!m_IsRunning)
             {
-                Log("Real-time: Connection not running");
+                if (m_IsDebug) Log("Real-time: Connection not running");
                 return;
             }
 
             if (data != null && data.Length > 1024)
             {
-                Log($"Real-time data too large ({data.Length} bytes). Max recommended: 1024 bytes. Use TCP for large data.");
+                if (m_IsDebug) Log($"Real-time data too large ({data.Length} bytes). Max recommended: 1024 bytes. Use TCP for large data.");
                 return;
             }
 
@@ -868,10 +928,7 @@ namespace Modules.Utilities
                 if (m_IsServer)
                 {
                     // Server sends to all active real-time clients
-                    if (_realTimeServer == null)
-                    {
-                        return; // Not initialized - silently skip
-                    }
+                    if (_realTimeServer == null) return;
 
                     List<IPEndPoint> activeClients;
                     lock (m_RealTimeClients)
@@ -879,76 +936,72 @@ namespace Modules.Utilities
                         activeClients = m_RealTimeClients.Keys.ToList();
                     }
 
-                    if (activeClients.Count == 0)
-                    {
-                        return; // No clients to send to - silently skip
-                    }
+                    if (activeClients.Count == 0) return;
 
-                    // Fire and forget - send to all clients without caring about delivery
+                    // Fire and forget - parallel sending without awaiting
                     foreach (var client in activeClients)
                     {
                         try
                         {
-                            await _realTimeServer.SendAsync(packet, packet.Length, client);
+                            // True UDP style - no await, just fire!
+                            _ = _realTimeServer.SendAsync(packet, packet.Length, client);
                         }
                         catch
                         {
-                            // Pure UDP style - ignore send failures completely
-                            // Real-time data is expected to be lossy and unreliable
+                            // Ignore all send failures - pure UDP style
                         }
                     }
                 }
                 else
                 {
                     // Client sends to server
-                    if (_realTimeClient == null)
-                    {
-                        return; // Not initialized - silently skip
-                    }
+                    if (_realTimeClient == null) return;
 
                     try
                     {
-                        await _realTimeClient.SendAsync(packet, packet.Length, m_Host, m_RealTimePort);
+                        // True UDP style - no await, just fire!
+                        _ = _realTimeClient.SendAsync(packet, packet.Length, m_Host, m_RealTimePort);
                     }
                     catch
                     {
-                        // Pure UDP style - ignore send failures completely
-                        // If server is down, real-time data is simply lost (as expected)
+                        // Ignore all failures - pure UDP style
                     }
                 }
             }
             catch (Exception ex)
             {
-                // Pure UDP style - log only for debugging, don't report as error
+                // Pure UDP style - log only for debugging
                 if (m_IsDebug)
                 {
                     Log($"Real-time send ignored error: {ex.Message}");
                 }
-                // Real-time is expected to be unreliable - errors are normal
             }
         }
 
         /// <summary>
-        /// Sends serialized object via real-time transmission
+        /// Async version for compatibility (but still fire-and-forget internally)
         /// </summary>
-        public async UniTask SendRealTimeDataAsync<T>(ushort action, T data, CancellationToken token = default)
+    
+
+        /// <summary>
+        /// Sends serialized object via real-time transmission (sync version for max speed)
+        /// </summary>
+        public void SendRealTimeData<T>(ushort action, T data)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
 
             byte[] serializedData;
             try
             {
-                // Use the same intelligent serialization logic as TCP
                 serializedData = SerializeData(data);
             }
             catch (Exception ex)
             {
-                Log($"Real-time Serialization Error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Serialization, "Real-time data serialization failed", ex);
+                if (m_IsDebug) Log($"Real-time Serialization Error: {ex.Message}");
                 return;
             }
 
-            await SendRealTimeDataAsync(action, serializedData, token);
+            SendRealTimeData(action, serializedData);
         }
 
         /// <summary>
@@ -1966,10 +2019,10 @@ namespace Modules.Utilities
         /// <summary>
         /// Simple method to send real-time string data (if enabled)
         /// </summary>
-        public async UniTask SendRealTimeMessage(string message, ushort actionId = 1)
+        public void SendRealTimeMessage(string message, ushort actionId = 1)
         {
             if (m_EnableRealTimeMode)
-                await SendRealTimeDataAsync(actionId, message);
+                SendRealTimeData(actionId, message);
         }
 
         /// <summary>
@@ -2238,7 +2291,7 @@ namespace Modules.Utilities
                     GUI.backgroundColor = Color.cyan;
                     if (GUILayout.Button("Send Real-time Message"))
                     {
-                        tcpConnector.SendRealTimeDataAsync(testAction, testMessage).Forget();
+                        tcpConnector.SendRealTimeData(testAction, testMessage);
                         Debug.Log($"[TCPConnector] Sent Real-time test message: Action={testAction}, Message='{testMessage}'");
                     }
                     EditorGUI.EndDisabledGroup();
