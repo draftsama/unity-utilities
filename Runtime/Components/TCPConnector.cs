@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
+using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -44,17 +45,16 @@ namespace Modules.Utilities
         public bool m_EnableKeepAlive = true;
 
         [Header("Real-time Mode")]
-        [SerializeField, Tooltip("Enable real-time mode for low-latency data transmission (unreliable but fast)")]
+        [SerializeField, Tooltip("Enable real-time mode for low-latency data transmission")]
         public bool m_EnableRealTimeMode = false;
         [SerializeField, Range(7000, 9999), Tooltip("Real-time communication port")]
         public int m_RealTimePort = 7779;
-        [SerializeField, Range(1, 1000), Tooltip("Maximum real-time packet size in bytes")]
-        public int m_MaxRealTimePacketSize = 512;
 
-        [SerializeField, Range(0, 10), Tooltip("Maximum number of retry attempts when data sending fails")]
-        public int m_MaxRetryCount = 5;
-        [SerializeField, Range(0, 5000), Tooltip("Delay in milliseconds between retry attempts")]
-        public int m_RetryDelay = 100;
+        [Header("Retry Settings")]
+        [SerializeField, Range(0, 5), Tooltip("Maximum retry attempts")]
+        public int m_MaxRetryCount = 3;
+        [SerializeField, Range(0, 3000), Tooltip("Delay between retries (ms)")]
+        public int m_RetryDelay = 1000;
 
         [Header("Auto Discovery (UDP Broadcast)")]
         [SerializeField] public bool m_EnableDiscovery = true;
@@ -77,6 +77,10 @@ namespace Modules.Utilities
         private UdpClient _realTimeServer; // Server real-time listener
         private UdpClient _realTimeClient; // Client real-time sender
         private readonly Dictionary<IPEndPoint, ConnectorInfo> m_RealTimeClients = new Dictionary<IPEndPoint, ConnectorInfo>();
+        
+        // --- UDP Client Caching for Performance ---
+        private readonly Dictionary<string, UdpClient> _udpClientCache = new Dictionary<string, UdpClient>();
+        private readonly object _udpCacheLock = new object();
 
         [Header("Connected Server Info")]
         [SerializeField] public ConnectorInfo m_ServerInfo;
@@ -96,6 +100,18 @@ namespace Modules.Utilities
         // --- Performance Optimizations ---
         private readonly Queue<byte[]> _bufferPool = new Queue<byte[]>();
         private readonly object _bufferPoolLock = new object();
+        
+        // Optimize memory allocation
+        private const int MAX_BUFFER_POOL_SIZE = 20; // ลดจาก unlimited เป็น 20
+        private const int BUFFER_REUSE_THRESHOLD = 4096; // ใช้ buffer ซ้ำถ้า >= 4KB
+        
+        // Optimize health check frequency  
+        private readonly Dictionary<TcpClient, DateTime> _lastHealthCheck = new Dictionary<TcpClient, DateTime>();
+        private const int HEALTH_CHECK_INTERVAL_MS = 5000; // ตรวจสอบทุก 5 วินาที แทน real-time
+        
+        // Optimize progress reporting
+        private static readonly DateTime _epoch = new DateTime(1970, 1, 1);
+        private long _lastProgressTicks = 0;
 
         // --- Packet Structure ---
         private const int PACKET_HEADER_SIZE = 10; // 4-id, 4-sender, 2-type
@@ -109,6 +125,8 @@ namespace Modules.Utilities
         public List<ConnectorInfo> ClientInfoList => m_Clients.Values.ToList();
         public List<ConnectorInfo> RealTimeClientInfoList => m_RealTimeClients.Values.ToList();
         public ConnectorInfo ServerInfo => m_ServerInfo;
+        public int ConnectedClientCount => m_Clients.Count;
+        public int ActiveRealTimeClientCount => m_RealTimeClients.Count;
 
         /// <summary>
         /// Checks if the connection is healthy for data transmission
@@ -132,7 +150,7 @@ namespace Modules.Utilities
         }
 
         /// <summary>
-        /// Checks if a TCP client is truly connected (not just the Connected property)
+        /// Checks if a TCP client is truly connected (Optimized with caching)
         /// </summary>
         private bool IsClientConnected(TcpClient client)
         {
@@ -140,27 +158,54 @@ namespace Modules.Utilities
             {
                 if (client?.Client == null) return false;
 
-                // Use Socket.Poll to check if connection is still alive
+                // Cache health checks to reduce CPU usage
+                var now = DateTime.Now;
+                if (_lastHealthCheck.TryGetValue(client, out var lastCheck))
+                {
+                    if ((now - lastCheck).TotalMilliseconds < HEALTH_CHECK_INTERVAL_MS)
+                    {
+                        // Return true if recently checked (assume still connected)
+                        return client.Client.Connected;
+                    }
+                }
+
+                // Perform actual health check
                 var socket = client.Client;
                 bool part1 = socket.Poll(1000, SelectMode.SelectRead);
                 bool part2 = (socket.Available == 0);
+                bool isConnected = !(part1 && part2) && socket.Connected;
 
-                // If poll returns true and no data available, connection is closed
-                return !(part1 && part2) && socket.Connected;
+                // Update cache
+                _lastHealthCheck[client] = now;
+                
+                // Clean old entries to prevent memory leak
+                if (_lastHealthCheck.Count > m_MaxConcurrentConnections * 2)
+                {
+                    var cutoff = now.AddMinutes(-5);
+                    var toRemove = _lastHealthCheck.Where(kvp => kvp.Value < cutoff).Select(kvp => kvp.Key).ToList();
+                    foreach (var key in toRemove)
+                    {
+                        _lastHealthCheck.Remove(key);
+                    }
+                }
+
+                return isConnected;
             }
             catch
             {
+                _lastHealthCheck.Remove(client);
                 return false;
             }
         }
 
         /// <summary>
-        /// Gets a buffer from the pool or creates a new one
+        /// Gets a buffer from the pool or creates a new one (Optimized)
         /// </summary>
         private byte[] GetBuffer(int minSize)
         {
             lock (_bufferPoolLock)
             {
+                // Try to reuse existing buffer
                 while (_bufferPool.Count > 0)
                 {
                     var buffer = _bufferPool.Dequeue();
@@ -171,21 +216,22 @@ namespace Modules.Utilities
                 }
             }
 
-            // Create new buffer if none available or too small
-            return new byte[Math.Max(minSize, m_BufferSize)];
+            // Create new buffer only when needed - use exact size for small buffers
+            int actualSize = minSize < BUFFER_REUSE_THRESHOLD ? minSize : Math.Max(minSize, m_BufferSize);
+            return new byte[actualSize];
         }
 
         /// <summary>
-        /// Returns a buffer to the pool for reuse
+        /// Returns a buffer to the pool for reuse (Optimized)
         /// </summary>
         private void ReturnBuffer(byte[] buffer)
         {
-            if (buffer == null || buffer.Length < m_BufferSize) return;
+            if (buffer == null || buffer.Length < BUFFER_REUSE_THRESHOLD) return;
 
             lock (_bufferPoolLock)
             {
                 // Limit pool size to prevent memory bloat
-                if (_bufferPool.Count < 10)
+                if (_bufferPool.Count < MAX_BUFFER_POOL_SIZE)
                 {
                     _bufferPool.Enqueue(buffer);
                 }
@@ -225,6 +271,7 @@ namespace Modules.Utilities
         private void OnDestroy()
         {
             StopConnection();
+            CleanupUdpClientCache();
         }
 
         #endregion
@@ -325,6 +372,9 @@ namespace Modules.Utilities
                 }
                 Log("Client connection closed.");
             }
+            
+            // Clean up UDP client cache
+            CleanupUdpClientCache();
         }
 
         #endregion
@@ -347,8 +397,7 @@ namespace Modules.Utilities
                     remoteEndPoint = new IPEndPoint(IPAddress.Any, m_Port)
                 };
                 
-                Log($"listening on TCP port {m_Port} (max {m_MaxConcurrentConnections} concurrent connections).");
-                Log($"Server info created: ID={m_ServerInfo.id}, Port={m_ServerInfo.port}");
+                Log($"Server listening on TCP port {m_Port} (max {m_MaxConcurrentConnections} connections)");
 
                 while (!token.IsCancellationRequested)
                 {
@@ -389,20 +438,28 @@ namespace Modules.Utilities
         private async UniTask HandleClientAsync(TcpClient client, CancellationToken token)
         {
             var clientEndPoint = (IPEndPoint)client.Client.RemoteEndPoint;
-            var clientInfo = new ConnectorInfo
-            {
-                id = client.GetHashCode(),
-                ipAddress = clientEndPoint.Address.ToString(),
-                port = clientEndPoint.Port,
-                remoteEndPoint = clientEndPoint
-            };
+                    var clientInfo = new ConnectorInfo
+                    {
+                        id = client.GetHashCode(),
+                        ipAddress = clientEndPoint.Address.ToString(),
+                        port = clientEndPoint.Port,
+                        remoteEndPoint = clientEndPoint
+                    };
 
-            lock (m_Clients) { m_Clients.Add(client, clientInfo); }
-            Log($"Client connected: {clientInfo.ipAddress}:{clientInfo.port}");
-            await UniTask.SwitchToMainThread();
-            m_OnClientConnected?.Invoke(clientInfo);
-
-            var stream = client.GetStream();
+                    lock (m_Clients) { m_Clients.Add(client, clientInfo); }
+                    Log($"Client connected: {clientInfo.ipAddress}:{clientInfo.port}");
+                    
+                    // Use try-catch for main thread switch to avoid SynchronizationContext errors
+                    try
+                    {
+                        await UniTask.SwitchToMainThread();
+                        m_OnClientConnected?.Invoke(clientInfo);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Warning: Could not switch to main thread for event: {ex.Message}");
+                        // Events will be invoked when possible - continue operation
+                    }            var stream = client.GetStream();
             try
             {
                 await ReceiveDataLoopAsync(stream, clientInfo, token);
@@ -437,33 +494,156 @@ namespace Modules.Utilities
                 Log($"Client disconnected: {clientInfo.ipAddress}:{clientInfo.port}");
                 lock (m_Clients) { m_Clients.Remove(client); }
                 client.Close();
-                await UniTask.SwitchToMainThread();
-                m_OnClientDisconnected?.Invoke(clientInfo);
+                
+                // Use try-catch for main thread switch
+                try
+                {
+                    await UniTask.SwitchToMainThread();
+                    m_OnClientDisconnected?.Invoke(clientInfo);
+                }
+                catch (Exception ex)
+                {
+                    Log($"Warning: Could not switch to main thread for disconnect event: {ex.Message}");
+                }
             }
         }
 
         private async UniTask BroadcastPresenceAsync(CancellationToken token)
         {
-            using var udpClient = new UdpClient { EnableBroadcast = true };
-            var broadcastAddress = new IPEndPoint(IPAddress.Broadcast, m_DiscoveryPort);
-            var messageBytes = Encoding.UTF8.GetBytes(m_DiscoveryMessage);
-
-            Log($"Starting discovery broadcast on UDP port {m_DiscoveryPort}");
+            const string UDP_BROADCAST_KEY = "discovery_broadcast";
+            UdpClient udpClient = null;
+            
             try
             {
+                // Use cached UDP client for discovery broadcasting
+                lock (_udpCacheLock)
+                {
+                    if (!_udpClientCache.TryGetValue(UDP_BROADCAST_KEY, out udpClient) || 
+                        udpClient?.Client == null)
+                    {
+                        udpClient = new UdpClient { EnableBroadcast = true };
+                        
+                        // Try to bind to a specific interface to avoid routing issues
+                        try
+                        {
+                            udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 0)); // Let OS choose port
+                        }
+                        catch (Exception bindEx)
+                        {
+                            Log($"UDP bind warning: {bindEx.Message}");
+                        }
+                        
+                        _udpClientCache[UDP_BROADCAST_KEY] = udpClient;
+                    }
+                }
+
+                var broadcastAddress = new IPEndPoint(IPAddress.Broadcast, m_DiscoveryPort);
+                var messageBytes = Encoding.UTF8.GetBytes(m_DiscoveryMessage);
+
+                Log($"Starting discovery broadcast on UDP port {m_DiscoveryPort}");
+                
+                // Try broadcast first, fallback to local network if fails
+                bool broadcastWorking = true;
+                
                 while (!token.IsCancellationRequested)
                 {
-                    await udpClient.SendAsync(messageBytes, messageBytes.Length, broadcastAddress);
-                    await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
+                    try
+                    {
+                        if (broadcastWorking)
+                        {
+                            // Try full broadcast first
+                            await udpClient.SendAsync(messageBytes, messageBytes.Length, broadcastAddress);
+                        }
+                        else
+                        {
+                            // Fallback: Send to local subnet only
+                            await SendToLocalSubnetAsync(udpClient, messageBytes, token);
+                        }
+                        
+                        await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
+                    }
+                    catch (SocketException ex) when (ex.SocketErrorCode == SocketError.HostUnreachable || 
+                                                    ex.SocketErrorCode == SocketError.NetworkUnreachable)
+                    {
+                        if (broadcastWorking)
+                        {
+                            Log($"Broadcast failed ({ex.Message}), switching to local subnet discovery");
+                            broadcastWorking = false;
+                            continue;
+                        }
+                        else
+                        {
+                            Log($"Local subnet discovery also failed: {ex.Message}");
+                            await UniTask.Delay(m_DiscoveryInterval * 3, cancellationToken: token); // Wait longer before retry
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"UDP Send Error: {ex.Message}");
+                        await UniTask.Delay(m_DiscoveryInterval, cancellationToken: token);
+                    }
                 }
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) 
+            {
+                Log("Discovery broadcast canceled");
+            }
             catch (Exception ex)
             {
-                Log($"UDP Broadcast Error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Discovery, "UDP broadcast failed", ex);
+                Log($"UDP Broadcast Setup Error: {ex.Message}");
+                ReportError(ErrorInfo.ErrorType.Discovery, "UDP broadcast setup failed", ex);
             }
-            finally { Log("Stopping discovery broadcast."); }
+            finally 
+            { 
+                // Don't dispose cached client here - let cleanup handle it
+                Log("Discovery broadcast stopped"); 
+            }
+        }
+
+        /// <summary>
+        /// Fallback method to send discovery to local subnet when broadcast fails
+        /// </summary>
+        private async UniTask SendToLocalSubnetAsync(UdpClient udpClient, byte[] messageBytes, CancellationToken token)
+        {
+            try
+            {
+                // Get local IP addresses
+                var localIPs = NetworkInterface.GetAllNetworkInterfaces()
+                    .Where(ni => ni.OperationalStatus == OperationalStatus.Up && 
+                                ni.NetworkInterfaceType != NetworkInterfaceType.Loopback)
+                    .SelectMany(ni => ni.GetIPProperties().UnicastAddresses)
+                    .Where(addr => addr.Address.AddressFamily == AddressFamily.InterNetwork &&
+                                  !IPAddress.IsLoopback(addr.Address))
+                    .ToList();
+
+                foreach (var localAddr in localIPs)
+                {
+                    try
+                    {
+                        // Calculate subnet broadcast address
+                        var ip = localAddr.Address.GetAddressBytes();
+                        var mask = localAddr.IPv4Mask.GetAddressBytes();
+                        
+                        var broadcast = new byte[4];
+                        for (int i = 0; i < 4; i++)
+                        {
+                            broadcast[i] = (byte)(ip[i] | (~mask[i]));
+                        }
+                        
+                        var subnetBroadcast = new IPEndPoint(new IPAddress(broadcast), m_DiscoveryPort);
+                        await udpClient.SendAsync(messageBytes, messageBytes.Length, subnetBroadcast);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Failed to send to subnet {localAddr.Address}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Local subnet discovery error: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -496,8 +676,6 @@ namespace Modules.Utilities
 
                 // Set linger option to close immediately
                 socket.LingerState = new LingerOption(false, 0);
-
-                Log($"TCP client configured: KeepAlive={m_EnableKeepAlive}, BufferSize={m_BufferSize}, NoDelay=true");
             }
             catch (Exception ex)
             {
@@ -519,7 +697,7 @@ namespace Modules.Utilities
                 _realTimeServer = new UdpClient(m_RealTimePort);
                 _realTimeServer.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 
-                Log($"Real-time server listening on port {m_RealTimePort} for real-time data");
+                Log($"Real-time server listening on port {m_RealTimePort}");
 
                 while (!token.IsCancellationRequested)
                 {
@@ -555,12 +733,13 @@ namespace Modules.Utilities
         {
             try
             {
-                // Use a specific local port for real-time client communication
-                int clientRealTimePort = m_RealTimePort + 100; // Offset to avoid conflicts
-                _realTimeClient = new UdpClient(clientRealTimePort);
+                // Let OS choose an available port automatically (pass 0)
+                _realTimeClient = new UdpClient(0);
                 _realTimeClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 
-                Log($"Real-time client bound to port {clientRealTimePort} for communication with {m_Host}:{m_RealTimePort}");
+                // Get the actual port assigned by OS
+                var localEndPoint = (IPEndPoint)_realTimeClient.Client.LocalEndPoint;
+                Log($"Real-time client bound to port {localEndPoint.Port}");
 
                 // Start listening for real-time data from server on the same port
                 StartRealTimeClientReceiveLoopAsync(token).Forget();
@@ -581,8 +760,6 @@ namespace Modules.Utilities
         {
             try
             {
-                Log($"Real-time client listening for server responses");
-
                 while (!token.IsCancellationRequested && _realTimeClient != null)
                 {
                     var result = await _realTimeClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
@@ -591,11 +768,11 @@ namespace Modules.Utilities
             }
             catch (OperationCanceledException)
             {
-                Log("Real-time client receive loop was canceled.");
+                // Silent cancellation
             }
             catch (ObjectDisposedException)
             {
-                Log("Real-time client receive disposed.");
+                // Silent disposal
             }
             catch (Exception ex)
             {
@@ -611,8 +788,6 @@ namespace Modules.Utilities
         {
             try
             {
-                Log($"Processing real-time data from {remoteEndPoint.Address}:{remoteEndPoint.Port} ({data.Length} bytes)");
-
                 // Register real-time client if not already known
                 lock (m_RealTimeClients)
                 {
@@ -626,7 +801,6 @@ namespace Modules.Utilities
                             remoteEndPoint = remoteEndPoint
                         };
                         m_RealTimeClients[remoteEndPoint] = clientInfo;
-                        Log($"New real-time client registered: {clientInfo.ipAddress}:{clientInfo.port}");
                     }
                 }
 
@@ -638,14 +812,15 @@ namespace Modules.Utilities
                     packetResponse.totalBytes = data.Length;
                     packetResponse.processedBytes = data.Length;
 
-                    Log($"Real-time packet parsed successfully: Action={packetResponse.action}, Data length={packetResponse.data?.Length ?? 0}");
-
-                    await UniTask.SwitchToMainThread();
-                    m_OnRealTimeDataReceived?.Invoke(packetResponse);
-                }
-                else
-                {
-                    Log($"Failed to parse real-time packet from {remoteEndPoint}");
+                    try
+                    {
+                        await UniTask.SwitchToMainThread();
+                        m_OnRealTimeDataReceived?.Invoke(packetResponse);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Warning: Could not switch to main thread for real-time data: {ex.Message}");
+                    }
                 }
             }
             catch (Exception ex)
@@ -671,63 +846,80 @@ namespace Modules.Utilities
 
             if (!m_IsRunning) 
             {
-                Log("Connection is not running - cannot send real-time data");
+                Log("Real-time: Connection not running");
                 return;
             }
 
-            if (data != null && data.Length > m_MaxRealTimePacketSize)
+            if (data != null && data.Length > 1024)
             {
-                Log($"Real-time data too large ({data.Length} bytes). Max allowed: {m_MaxRealTimePacketSize}. Use TCP for large data.");
+                Log($"Real-time data too large ({data.Length} bytes). Max recommended: 1024 bytes. Use TCP for large data.");
                 return;
             }
 
             try
             {
                 byte[] packet = CreateRealTimePacket(action, data);
-                Log($"Sending real-time packet: Action={action}, Data length={data?.Length ?? 0}, Packet size={packet.Length}");
 
                 if (m_IsServer)
                 {
-                    // Server sends to all known real-time clients using their original endpoints
-                    List<IPEndPoint> clients;
+                    // Server sends to all active real-time clients
+                    if (_realTimeServer == null)
+                    {
+                        return; // Not initialized - silently skip
+                    }
+
+                    List<IPEndPoint> activeClients;
                     lock (m_RealTimeClients)
                     {
-                        clients = m_RealTimeClients.Keys.ToList();
+                        activeClients = m_RealTimeClients.Keys.ToList();
                     }
 
-                    if (clients.Count == 0)
+                    if (activeClients.Count == 0)
                     {
-                        Log("No real-time clients to send data to");
-                        return;
+                        return; // No clients to send to - silently skip
                     }
 
-                    foreach (var client in clients)
+                    // Fire and forget - send to all clients without caring about delivery
+                    foreach (var client in activeClients)
                     {
-                        // Send back to the same endpoint that sent to us
-                        await _realTimeServer.SendAsync(packet, packet.Length, client);
-                        Log($"Real-time packet sent to client {client.Address}:{client.Port}");
+                        try
+                        {
+                            await _realTimeServer.SendAsync(packet, packet.Length, client);
+                        }
+                        catch
+                        {
+                            // Pure UDP style - ignore send failures completely
+                            // Real-time data is expected to be lossy and unreliable
+                        }
                     }
-
-                    Log($"Real-time data sent to {clients.Count} clients ({packet.Length} bytes)");
                 }
                 else
                 {
                     // Client sends to server
-                    if (_realTimeClient != null)
+                    if (_realTimeClient == null)
+                    {
+                        return; // Not initialized - silently skip
+                    }
+
+                    try
                     {
                         await _realTimeClient.SendAsync(packet, packet.Length, m_Host, m_RealTimePort);
-                        Log($"Real-time data sent to server {m_Host}:{m_RealTimePort} ({packet.Length} bytes)");
                     }
-                    else
+                    catch
                     {
-                        Log("Real-time client not initialized");
+                        // Pure UDP style - ignore send failures completely
+                        // If server is down, real-time data is simply lost (as expected)
                     }
                 }
             }
             catch (Exception ex)
             {
-                Log($"Real-time send error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.DataTransmission, "Real-time data send failed", ex);
+                // Pure UDP style - log only for debugging, don't report as error
+                if (m_IsDebug)
+                {
+                    Log($"Real-time send ignored error: {ex.Message}");
+                }
+                // Real-time is expected to be unreliable - errors are normal
             }
         }
 
@@ -839,34 +1031,49 @@ namespace Modules.Utilities
 
         #region Client Methods
 
-        // <<< NEW: The main loop for the client
+        // Client connection loop with simple retry logic
         private async UniTask ClientConnectionLoopAsync(CancellationToken token)
         {
             while (!token.IsCancellationRequested)
             {
                 string serverIp = null;
+                
                 if (m_EnableDiscovery)
                 {
-                    Log($"Searching for server on UDP port {m_DiscoveryPort} ...");
-                    serverIp = await ListenForServerAsync(token);
+                    Log($"Searching for server on UDP port {m_DiscoveryPort}...");
+                    
+                    // Try discovery with timeout
+                    using var discoveryCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                    using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(token, discoveryCts.Token);
+                    
+                    serverIp = await ListenForServerAsync(combinedCts.Token);
+                    
+                    if (string.IsNullOrEmpty(serverIp))
+                    {
+                        Log($"Discovery timeout. Using manual host: {m_Host}");
+                        serverIp = m_Host;
+                    }
+                    else
+                    {
+                        Log($"Server discovered at: {serverIp}");
+                    }
                 }
                 else
                 {
-                    serverIp = m_Host; // Use manual host if discovery is disabled
+                    serverIp = m_Host;
                 }
 
                 if (!string.IsNullOrEmpty(serverIp) && !token.IsCancellationRequested)
                 {
-                    Log($"Server found at {serverIp}. Attempting to connect...");
+                    Log($"Attempting to connect to {serverIp}...");
                     m_Host = serverIp;
-                    // This method will now block until the connection is lost
                     await StartClientAsync(token);
                 }
 
-                // If connection fails or is lost, wait before retrying
+                // Wait before retrying
                 if (!token.IsCancellationRequested)
                 {
-                    await UniTask.Delay(TimeSpan.FromSeconds(1), cancellationToken: token);
+                    await UniTask.Delay(TimeSpan.FromSeconds(2), cancellationToken: token);
                     Log("Retrying connection...");
                 }
             }
@@ -900,8 +1107,17 @@ namespace Modules.Utilities
                         remoteEndPoint = serverEndPoint
                     };
                     Log($"Connected to server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
-                    await UniTask.SwitchToMainThread();
-                    m_OnServerConnected?.Invoke(m_ServerInfo);
+                    
+                    // Use try-catch for main thread switch
+                    try
+                    {
+                        await UniTask.SwitchToMainThread();
+                        m_OnServerConnected?.Invoke(m_ServerInfo);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Warning: Could not switch to main thread for server connect event: {ex.Message}");
+                    }
 
                     var stream = _tcpClient.GetStream();
                     await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
@@ -942,8 +1158,17 @@ namespace Modules.Utilities
                 {
                     Log("Disconnected from server.");
                     m_IsConnected = false;
-                    await UniTask.SwitchToMainThread();
-                    m_OnServerDisconnected?.Invoke(m_ServerInfo);
+                    
+                    // Use try-catch for main thread switch
+                    try
+                    {
+                        await UniTask.SwitchToMainThread();
+                        m_OnServerDisconnected?.Invoke(m_ServerInfo);
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"Warning: Could not switch to main thread for server disconnect event: {ex.Message}");
+                    }
                 }
                 _tcpClient?.Close();
             }
@@ -951,14 +1176,42 @@ namespace Modules.Utilities
 
         private async UniTask<string> ListenForServerAsync(CancellationToken token)
         {
-            using var udpClient = new UdpClient();
-            // <<< Allow reusing the address to avoid issues on quick restarts
-            udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, m_DiscoveryPort));
-
+            const string UDP_DISCOVERY_KEY = "discovery_listen";
+            UdpClient udpClient = null;
+            
             try
             {
-                var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
+                // Use cached UDP client for discovery listening
+                lock (_udpCacheLock)
+                {
+                    if (!_udpClientCache.TryGetValue(UDP_DISCOVERY_KEY, out udpClient) || 
+                        udpClient?.Client == null)
+                    {
+                        udpClient = new UdpClient();
+                        udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                        
+                        // Try to bind to the discovery port, if fails use any available port
+                        try
+                        {
+                            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, m_DiscoveryPort));
+                        }
+                        catch (SocketException)
+                        {
+                            // If discovery port is busy, bind to any available port
+                            udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+                            var boundPort = ((IPEndPoint)udpClient.Client.LocalEndPoint).Port;
+                            Log($"Discovery port {m_DiscoveryPort} busy, listening on port {boundPort}");
+                        }
+                        
+                        _udpClientCache[UDP_DISCOVERY_KEY] = udpClient;
+                    }
+                }
+
+                // Set a timeout for discovery
+                using var timeoutCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+                using var combinedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
+
+                var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(combinedCts.Token);
 
                 var receivedMessage = Encoding.UTF8.GetString(receiveResult.Buffer);
                 if (receivedMessage == m_DiscoveryMessage)
@@ -966,13 +1219,51 @@ namespace Modules.Utilities
                     return receiveResult.RemoteEndPoint.Address.ToString();
                 }
             }
-            catch (OperationCanceledException) { }
+            catch (OperationCanceledException) 
+            { 
+                // Silent timeout or cancellation
+            }
             catch (Exception ex)
             {
                 Log($"UDP Listen Error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Discovery, "UDP listen failed", ex);
+                
+                // Remove faulty client from cache
+                lock (_udpCacheLock)
+                {
+                    if (_udpClientCache.TryGetValue(UDP_DISCOVERY_KEY, out var faultyClient))
+                    {
+                        faultyClient?.Close();
+                        faultyClient?.Dispose();
+                        _udpClientCache.Remove(UDP_DISCOVERY_KEY);
+                    }
+                }
             }
+            
             return null;
+        }
+
+        /// <summary>
+        /// Cleans up cached UDP clients and releases resources
+        /// </summary>
+        private void CleanupUdpClientCache()
+        {
+            lock (_udpCacheLock)
+            {
+                foreach (var cachedClient in _udpClientCache.Values)
+                {
+                    try
+                    {
+                        cachedClient?.Close();
+                        cachedClient?.Dispose();
+                    }
+                    catch (Exception ex)
+                    {
+                        if (m_IsDebug)
+                            Log($"Warning: Error disposing cached UDP client: {ex.Message}");
+                    }
+                }
+                _udpClientCache.Clear();
+            }
         }
 
         #endregion
@@ -990,10 +1281,9 @@ namespace Modules.Utilities
                     if (bytesRead < 4) break; // Connection closed
 
                     int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
-                    if (messageLength <= 0 || messageLength > 1024 * 1024 * 16) // Increased max to 16MB
+                    if (messageLength <= 0 || messageLength > 1024 * 1024 * 10) // Max 10MB
                     {
-                        Log($"Invalid message length received: {messageLength}. Disconnecting.");
-                        ReportError(ErrorInfo.ErrorType.Protocol, $"Invalid message length: {messageLength}", null, connectorInfo);
+                        Log($"Invalid message length: {messageLength}. Disconnecting.");
                         break;
                     }
 
@@ -1033,14 +1323,21 @@ namespace Modules.Utilities
                             // Update progress in packet response
                             packetResponse.processedBytes = totalBytesRead;
 
-                            // Throttle progress reports to avoid UI spam
-                            var now = System.DateTime.Now;
-                            if ((now - lastProgressReport).TotalMilliseconds >= progressReportIntervalMs ||
+                            // Throttle progress reports to avoid UI spam (Optimized)
+                            var nowTicks = DateTime.UtcNow.Ticks;
+                            if ((nowTicks - _lastProgressTicks) / TimeSpan.TicksPerMillisecond >= progressReportIntervalMs ||
                                 totalBytesRead >= messageLength)
                             {
-                                lastProgressReport = now;
-                                await UniTask.SwitchToMainThread();
-                                m_OnDataReceived?.Invoke(packetResponse);
+                                _lastProgressTicks = nowTicks;
+                                try
+                                {
+                                    await UniTask.SwitchToMainThread();
+                                    m_OnDataReceived?.Invoke(packetResponse);
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log($"Warning: Could not switch to main thread for progress update: {ex.Message}");
+                                }
                             }
 
                             // Only yield for large messages to reduce overhead
@@ -1060,9 +1357,15 @@ namespace Modules.Utilities
                             finalPacketResponse.processedBytes = totalBytesRead;
                             finalPacketResponse.operationId = operationId;
 
-                            await UniTask.SwitchToMainThread();
-                            Log($"Received complete packet: {finalPacketResponse.action} from {connectorInfo.ipAddress}:{connectorInfo.port} ({messageLength} bytes)");
-                            m_OnDataReceived?.Invoke(finalPacketResponse);
+                            try
+                            {
+                                await UniTask.SwitchToMainThread();
+                                m_OnDataReceived?.Invoke(finalPacketResponse);
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"Warning: Could not switch to main thread for final data received: {ex.Message}");
+                            }
                         }
                     }
                     finally
@@ -1166,10 +1469,12 @@ namespace Modules.Utilities
                     }
                 }
                 catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
-                                                           ex.Message.Contains("Stream disposed"))
+                                                           ex.Message.Contains("Stream disposed") ||
+                                                           ex.Message.Contains("Connection is not healthy") ||
+                                                           ex.Message.Contains("Client is not connected"))
                 {
-                    // Connection was closed during shutdown - don't retry, just exit gracefully
-                    Log($"Send operation aborted due to connection closure");
+                    // Connection issues - don't retry, just exit gracefully
+                    Log($"Send operation aborted: {ex.Message}");
                     break;
                 }
                 catch (OperationCanceledException)
@@ -1312,7 +1617,7 @@ namespace Modules.Utilities
 
                 // Ensure all data is sent
                 await stream.FlushAsync(token);
-                Log($"Data sent successfully: {message.Length} bytes (chunks: {chunkSize})");
+                // Log removed for performance - was logging every successful send operation
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
                                              ex.SocketErrorCode == SocketError.ConnectionAborted ||
@@ -1375,7 +1680,7 @@ namespace Modules.Utilities
             try
             {
                 byte[] bytes = UnityConverter.ToBytes(data);
-                Log($"Serializing {typeof(T).Name}: {data} ({bytes.Length} bytes)");
+                // Log removed for performance - was logging every serialization
                 return bytes;
             }
             catch (Exception ex)
@@ -1399,7 +1704,7 @@ namespace Modules.Utilities
 #endif
             
             var bytes = Encoding.UTF8.GetBytes(jsonString);
-            Log($"Serializing {typeof(T).Name} as JSON: '{jsonString}' ({bytes.Length} bytes)");
+            // Log removed for performance - was logging every JSON serialization
             return bytes;
         }
 
@@ -1558,7 +1863,7 @@ namespace Modules.Utilities
             Buffer.BlockCopy(lengthPrefix, 0, finalMessage, 0, 4);
             Buffer.BlockCopy(packet, 0, finalMessage, 4, packet.Length);
 
-            Log($"Created packet: Action={action}, Data={data?.Length ?? 0} bytes, Packet={packet.Length} bytes, Final={finalMessage.Length} bytes");
+            // Log removed for performance - was logging every packet creation
             return finalMessage;
         }
 
@@ -1583,6 +1888,35 @@ namespace Modules.Utilities
         /// - For Real-time: id = IPEndPoint.GetHashCode()
         /// </summary>
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
+
+        /// <summary>
+        /// Extended information for real-time clients with timeout tracking
+        /// </summary>
+        [Serializable] 
+        public struct RealTimeClientInfo 
+        { 
+            public ConnectorInfo connectorInfo; 
+            public DateTime lastSeen; 
+            public bool isActive;
+            
+            public RealTimeClientInfo(ConnectorInfo info)
+            {
+                connectorInfo = info;
+                lastSeen = DateTime.Now;
+                isActive = true;
+            }
+            
+            public void UpdateActivity()
+            {
+                lastSeen = DateTime.Now;
+                isActive = true;
+            }
+            
+            public bool IsExpired(int timeoutSeconds)
+            {
+                return (DateTime.Now - lastSeen).TotalSeconds > timeoutSeconds;
+            }
+        }
 
         [Serializable]
         public class PacketResponse
@@ -1673,6 +2007,59 @@ namespace Modules.Utilities
 
         #endregion
 
+        #region Simple API Methods
+        
+        /// <summary>
+        /// Simple method to send string data
+        /// </summary>
+        public async UniTask SendMessage(string message, ushort actionId = 1)
+        {
+            await SendDataAsync(actionId, message);
+        }
+        
+        /// <summary>
+        /// Simple method to send real-time string data (if enabled)
+        /// </summary>
+        public async UniTask SendRealTimeMessage(string message, ushort actionId = 1)
+        {
+            if (m_EnableRealTimeMode)
+                await SendRealTimeDataAsync(actionId, message);
+        }
+        
+        /// <summary>
+        /// Simple method to check if server/client is ready
+        /// </summary>
+        public bool IsReady()
+        {
+            if (m_IsServer)
+                return m_IsRunning && m_Clients.Count > 0;
+            else
+                return m_IsRunning && m_IsConnected;
+        }
+        
+        /// <summary>
+        /// Check if connection can handle TCP data transmission
+        /// </summary>
+        public bool CanSendTcpData()
+        {
+            return m_IsRunning && IsConnectionHealthy();
+        }
+        
+        /// <summary>
+        /// Check if real-time mode is available
+        /// </summary>
+        public bool CanSendRealTimeData()
+        {
+            if (!m_EnableRealTimeMode || !m_IsRunning) return false;
+            
+            if (m_IsServer)
+                return _realTimeServer != null;
+            else
+                return _realTimeClient != null;
+        }
+
+        #endregion
+
         #region Event Handlers
         public IUniTaskAsyncEnumerable<PacketResponse> OnDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnDataReceived, token);
         public IUniTaskAsyncEnumerable<PacketResponse> OnRealTimeDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnRealTimeDataReceived, token);
@@ -1691,22 +2078,23 @@ namespace Modules.Utilities
         {
             var errorInfo = new ErrorInfo(errorType, message, exception, connectorInfo, operationId);
 
-            if (m_IsDebug)
+            // Just report via event - let the user decide how to handle errors
+            // This allows for better separation of concerns and flexibility
+            try
             {
-                var prefix = m_IsServer ? "Server" : "Client";
-                Debug.LogError($"[TCP-{prefix}] {errorType}: {message}");
-                if (exception != null)
+                m_OnError?.Invoke(errorInfo);
+            }
+            catch (Exception ex)
+            {
+                // Only fallback to Debug.LogError if event invocation fails
+                // This prevents infinite recursion and ensures errors are not lost
+                if (m_IsDebug)
                 {
-                    Debug.LogException(exception);
+                    var prefix = m_IsServer ? "Server" : "Client";
+                    Debug.LogError($"[TCP-{prefix}] Failed to invoke error event: {ex.Message}");
+                    Debug.LogError($"[TCP-{prefix}] Original error - {errorType}: {message}");
                 }
             }
-
-            // Invoke error event on main thread
-            UniTask.Create(async () =>
-            {
-                await UniTask.SwitchToMainThread();
-                m_OnError?.Invoke(errorInfo);
-            }).Forget();
         }
 
         #endregion
