@@ -197,6 +197,7 @@ namespace Modules.Utilities
 
         }
 
+        #region UI Utilities
         public static bool IsUIElementInView(RectTransform _rectTransform)
         {
             var rect = RectTransformToRect(_rectTransform);
@@ -218,6 +219,7 @@ namespace Modules.Utilities
             return new Rect(x, y, width, height);
         }
         
+        #endregion
 
 
         
