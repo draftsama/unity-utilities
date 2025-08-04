@@ -75,7 +75,7 @@ namespace Modules.Utilities
             if (_VideoPlayer != null)
             {
                 _IsResume = m_IsPlaying;
-                _VideoPlayer.Pause();
+                if(_VideoPlayer.isPlaying) _VideoPlayer.Pause();
                 _VideoPlayer.targetTexture?.Release();
                 _VideoPlayer.targetTexture = null;
             }
