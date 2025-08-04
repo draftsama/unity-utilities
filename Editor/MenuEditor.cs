@@ -44,10 +44,23 @@ namespace Modules.Utilities.Editor
         [MenuItem("Utilities/Build Manager")]
         public static void OpenBuildManager()
         {
-            BuildManagerWindowEditor window =
-            EditorWindow.GetWindow<BuildManagerWindowEditor>(false, "Build Manager", true);
-            window.name = "Build Manager";
-            window.Show();
+            // Check if window already exists
+            BuildManagerWindowEditor[] existingWindows = Resources.FindObjectsOfTypeAll<BuildManagerWindowEditor>();
+            if (existingWindows.Length > 0)
+            {
+                // Focus existing window
+                existingWindows[0].Focus();
+                existingWindows[0].Show();
+            }
+            else
+            {
+                // Create new window
+                BuildManagerWindowEditor window =
+                EditorWindow.GetWindow<BuildManagerWindowEditor>(false, "Build Manager", true);
+                window.name = "Build Manager";
+                window.Show();
+                window.Focus();
+            }
         }
 
         public static void OpenFolder(string path)

@@ -45,7 +45,7 @@ namespace Modules.Utilities
         [SerializeField, Range(1000, 10000), Tooltip("Buffer size for network operations")]
         public int m_BufferSize = 8192;
         [SerializeField, Range(1, 100), Tooltip("Maximum concurrent connections for server")]
-        public int m_MaxConcurrentConnections = 50;
+        public int m_MaxConcurrentConnections = 8;
         [SerializeField, Tooltip("Enable TCP keep-alive to detect dead connections")]
         public bool m_EnableKeepAlive = true;
 
@@ -111,12 +111,12 @@ namespace Modules.Utilities
         private const int MAX_BUFFER_POOL_SIZE = 20; // ลดจาก unlimited เป็น 20
         private const int BUFFER_REUSE_THRESHOLD = 4096; // ใช้ buffer ซ้ำถ้า >= 4KB
 
-        // Optimize health check frequency  
-        private readonly Dictionary<TcpClient, DateTime> _lastHealthCheck = new Dictionary<TcpClient, DateTime>();
-        private const int HEALTH_CHECK_INTERVAL_MS = 5000; // ตรวจสอบทุก 5 วินาที แทน real-time
-
         // Optimize progress reporting (per-instance)
         private long _lastProgressTicks = 0;
+
+        // Discovery broadcast control
+        private bool m_IsDiscoveryPausedManually = false;
+        private readonly object _discoveryPauseLock = new object();
 
         // --- Packet Structure ---
         private const int PACKET_HEADER_SIZE = 10; // 4-id, 4-sender, 2-type
@@ -127,79 +127,29 @@ namespace Modules.Utilities
         public bool IsConnected => m_IsConnected;
         public bool IsRunning => m_IsRunning;
         public bool IsRealTimeEnabled => m_EnableRealTimeMode;
-        public List<ConnectorInfo> ClientInfoList => m_Clients.Values.ToList();
-        public List<ConnectorInfo> RealTimeClientInfoList => m_RealTimeClients.Values.ToList();
-        public ConnectorInfo ServerInfo => m_ServerInfo;
         public int ConnectedClientCount => m_Clients.Count;
         public int ActiveRealTimeClientCount => m_RealTimeClients.Count;
+        public ConnectorInfo ServerInfo => m_ServerInfo;
 
         /// <summary>
-        /// Checks if the connection is healthy for data transmission
+        /// Gets list of connected clients (creates new list each call - use sparingly)
         /// </summary>
-        /// <returns>True if connection is ready for sending data</returns>
-        private bool IsConnectionHealthy()
+        public List<ConnectorInfo> GetClientInfoList()
         {
-            if (!m_IsRunning) return false;
-
-            if (m_IsServer)
+            lock (m_Clients)
             {
-                lock (m_Clients)
-                {
-                    return m_Clients.Keys.Any(client => client != null && IsClientConnected(client));
-                }
-            }
-            else
-            {
-                return m_IsConnected && _tcpClient != null && IsClientConnected(_tcpClient);
+                return m_Clients.Values.ToList();
             }
         }
 
         /// <summary>
-        /// Checks if a TCP client is truly connected (Optimized with caching)
+        /// Gets list of real-time clients (creates new list each call - use sparingly)
         /// </summary>
-        private bool IsClientConnected(TcpClient client)
+        public List<ConnectorInfo> GetRealTimeClientInfoList()
         {
-            try
+            lock (m_RealTimeClients)
             {
-                if (client?.Client == null) return false;
-
-                // Cache health checks to reduce CPU usage
-                var now = DateTime.Now;
-                if (_lastHealthCheck.TryGetValue(client, out var lastCheck))
-                {
-                    if ((now - lastCheck).TotalMilliseconds < HEALTH_CHECK_INTERVAL_MS)
-                    {
-                        // Return true if recently checked (assume still connected)
-                        return client.Client.Connected;
-                    }
-                }
-
-                // Perform actual health check
-                var socket = client.Client;
-                bool part1 = socket.Poll(1000, SelectMode.SelectRead);
-                bool part2 = (socket.Available == 0);
-                bool isConnected = !(part1 && part2) && socket.Connected;
-
-                // Update cache
-                _lastHealthCheck[client] = now;
-
-                // Clean old entries to prevent memory leak
-                if (_lastHealthCheck.Count > m_MaxConcurrentConnections * 2)
-                {
-                    var cutoff = now.AddMinutes(-5);
-                    var toRemove = _lastHealthCheck.Where(kvp => kvp.Value < cutoff).Select(kvp => kvp.Key).ToList();
-                    foreach (var key in toRemove)
-                    {
-                        _lastHealthCheck.Remove(key);
-                    }
-                }
-
-                return isConnected;
-            }
-            catch
-            {
-                _lastHealthCheck.Remove(client);
-                return false;
+                return m_RealTimeClients.Values.ToList();
             }
         }
 
@@ -242,6 +192,37 @@ namespace Modules.Utilities
                 }
             }
         }
+
+        /// <summary>
+        /// Pauses server discovery broadcast manually. Server will stop advertising itself to clients.
+        /// </summary>
+        public void PauseDiscoveryBroadcast()
+        {
+            lock (_discoveryPauseLock)
+            {
+                if (!m_IsDiscoveryPausedManually)
+                {
+                    m_IsDiscoveryPausedManually = true;
+                    if (m_IsDebug && m_IsServer) Log("Discovery broadcast paused manually");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Resumes server discovery broadcast manually. Server will start advertising itself to clients again.
+        /// </summary>
+        public void ResumeDiscoveryBroadcast()
+        {
+            lock (_discoveryPauseLock)
+            {
+                if (m_IsDiscoveryPausedManually)
+                {
+                    m_IsDiscoveryPausedManually = false;
+                    if (m_IsDebug && m_IsServer) Log("Discovery broadcast resumed manually");
+                }
+            }
+        }
+
         #endregion
 
         #region Unity Methods
@@ -341,7 +322,11 @@ namespace Modules.Utilities
             // Close all client connections (server only)
             lock (m_Clients)
             {
-                foreach (var client in m_Clients.Keys.ToList())
+                // Create array to avoid ToList() allocation
+                var clientsArray = new TcpClient[m_Clients.Count];
+                m_Clients.Keys.CopyTo(clientsArray, 0);
+                
+                foreach (var client in clientsArray)
                 {
                     client?.Close();
                 }
@@ -368,6 +353,12 @@ namespace Modules.Utilities
             {
                 m_IsConnected = false;
                 m_OnServerDisconnected?.Invoke(m_ServerInfo);
+            }
+
+            // Reset manual discovery pause state
+            lock (_discoveryPauseLock)
+            {
+                m_IsDiscoveryPausedManually = false;
             }
 
             // Dispose cancellation token
@@ -584,11 +575,58 @@ namespace Modules.Utilities
                 Log($"Broadcasting discovery on UDP port {m_DiscoveryPort}");
                 bool useBroadcast = true;
                 int broadcastCount = 0;
+                bool wasBroadcastingPaused = false;
 
                 while (!token.IsCancellationRequested)
                 {
                     try
                     {
+                        // Check for manual pause first
+                        bool isManuallyPaused;
+                        lock (_discoveryPauseLock)
+                        {
+                            isManuallyPaused = m_IsDiscoveryPausedManually;
+                        }
+
+                        // Check if server has reached max concurrent connections
+                        int currentClientCount;
+                        lock (m_Clients)
+                        {
+                            currentClientCount = m_Clients.Count;
+                        }
+
+                        bool shouldPauseBroadcast = isManuallyPaused || currentClientCount >= m_MaxConcurrentConnections;
+
+                        if (shouldPauseBroadcast)
+                        {
+                            // Server is paused (manually or full) - pause broadcasting
+                            if (!wasBroadcastingPaused)
+                            {
+                                if (isManuallyPaused)
+                                {
+                                    Log($"Discovery broadcast paused manually");
+                                }
+                                else
+                                {
+                                    Log($"Server reached max connections ({currentClientCount}/{m_MaxConcurrentConnections}). Pausing discovery broadcast...");
+                                }
+                                wasBroadcastingPaused = true;
+                            }
+                            
+                            // Wait longer when server is paused to reduce CPU usage
+                            await UniTask.Delay(m_DiscoveryInterval * 3, cancellationToken: token);
+                            continue;
+                        }
+                        else
+                        {
+                            // Server has available slots and not manually paused - resume/continue broadcasting
+                            if (wasBroadcastingPaused)
+                            {
+                                Log($"Server has available slots ({currentClientCount}/{m_MaxConcurrentConnections}). Resuming discovery broadcast...");
+                                wasBroadcastingPaused = false;
+                            }
+                        }
+
                         broadcastCount++;
 
                         if (useBroadcast)
@@ -930,13 +968,13 @@ namespace Modules.Utilities
                     // Server sends to all active real-time clients
                     if (_realTimeServer == null) return;
 
-                    List<IPEndPoint> activeClients;
+                    IPEndPoint[] activeClients;
                     lock (m_RealTimeClients)
                     {
-                        activeClients = m_RealTimeClients.Keys.ToList();
+                        if (m_RealTimeClients.Count == 0) return;
+                        activeClients = new IPEndPoint[m_RealTimeClients.Count];
+                        m_RealTimeClients.Keys.CopyTo(activeClients, 0);
                     }
-
-                    if (activeClients.Count == 0) return;
 
                     // Fire and forget - parallel sending without awaiting
                     foreach (var client in activeClients)
@@ -1438,14 +1476,18 @@ namespace Modules.Utilities
             {
                 try
                 {
-                    // Check if we should even attempt to send
-                    if (!IsConnectionHealthy())
+                    // Simple connection check - let TCP error handling manage the rest
+                    if (!m_IsRunning)
                     {
-                        throw new InvalidOperationException("Connection is not healthy for data transmission");
+                        throw new InvalidOperationException("Connection is not running");
                     }
 
                     if (m_IsServer)
                     {
+                        if (m_Clients.Count == 0)
+                        {
+                            throw new InvalidOperationException("No clients connected");
+                        }
                         await SendAsServerAsync(message, progress, token);
                     }
                     else
@@ -1517,23 +1559,38 @@ namespace Modules.Utilities
         /// <param name="token">Cancellation token</param>
         private async UniTask SendAsServerAsync(byte[] message, int[] targetClientIds, IProgress<float> progress, CancellationToken token)
         {
-            List<TcpClient> clientsToSend;
+            List<TcpClient> clientsToSend = new List<TcpClient>();
 
             lock (m_Clients)
             {
                 if (targetClientIds == null || targetClientIds.Length == 0)
                 {
-                    // Send to all connected clients
-                    clientsToSend = m_Clients.Keys.Where(c => c.Connected).ToList();
+                    // Send to all connected clients - avoid LINQ for performance
+                    foreach (var client in m_Clients.Keys)
+                    {
+                        if (client.Connected)
+                        {
+                            clientsToSend.Add(client);
+                        }
+                    }
                 }
                 else
                 {
-                    // Send to specific clients
-                    clientsToSend = m_Clients.Where(kvp =>
-                        kvp.Key.Connected &&
-                        targetClientIds.Contains(kvp.Value.id))
-                        .Select(kvp => kvp.Key)
-                        .ToList();
+                    // Send to specific clients - avoid LINQ for performance
+                    foreach (var kvp in m_Clients)
+                    {
+                        if (kvp.Key.Connected)
+                        {
+                            foreach (var targetId in targetClientIds)
+                            {
+                                if (kvp.Value.id == targetId)
+                                {
+                                    clientsToSend.Add(kvp.Key);
+                                    break;
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
@@ -1755,9 +1812,15 @@ namespace Modules.Utilities
             {
                 try
                 {
-                    if (!IsConnectionHealthy())
+                    // Simple connection check - let TCP error handling manage the rest
+                    if (!m_IsRunning)
                     {
-                        throw new InvalidOperationException("Connection is not healthy for data transmission");
+                        throw new InvalidOperationException("Connection is not running");
+                    }
+
+                    if (m_Clients.Count == 0)
+                    {
+                        throw new InvalidOperationException("No clients connected");
                     }
 
                     await SendAsServerAsync(message, targetClientIds, progress, token);
@@ -2036,26 +2099,9 @@ namespace Modules.Utilities
                 return m_IsRunning && m_IsConnected;
         }
 
-        /// <summary>
-        /// Check if connection can handle TCP data transmission
-        /// </summary>
-        public bool CanSendTcpData()
-        {
-            return m_IsRunning && IsConnectionHealthy();
-        }
+   
 
-        /// <summary>
-        /// Check if real-time mode is available
-        /// </summary>
-        public bool CanSendRealTimeData()
-        {
-            if (!m_EnableRealTimeMode || !m_IsRunning) return false;
-
-            if (m_IsServer)
-                return _realTimeServer != null;
-            else
-                return _realTimeClient != null;
-        }
+      
 
         #endregion
 
@@ -2232,23 +2278,23 @@ namespace Modules.Utilities
                     EditorGUILayout.Toggle("Is Connected", isConnectedProp.boolValue);
                 }
 
-                if (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0)
+                if (isServer.boolValue && tcpConnector.ConnectedClientCount > 0)
                 {
-                    EditorGUILayout.LabelField($"TCP Clients: {tcpConnector.ClientInfoList.Count}");
-                    EditorGUILayout.LabelField($"Real-time Clients: {tcpConnector.RealTimeClientInfoList.Count}");
+                    EditorGUILayout.LabelField($"TCP Clients: {tcpConnector.ConnectedClientCount}");
+                    EditorGUILayout.LabelField($"Real-time Clients: {tcpConnector.ActiveRealTimeClientCount}");
 
                     // Show client details
                     EditorGUILayout.Space();
                     EditorGUILayout.LabelField("TCP Client Details:", EditorStyles.miniLabel);
-                    foreach (var client in tcpConnector.ClientInfoList)
+                    foreach (var client in tcpConnector.GetClientInfoList())
                     {
                         EditorGUILayout.LabelField($"• TCP {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
                     }
 
-                    if (tcpConnector.RealTimeClientInfoList.Count > 0)
+                    if (tcpConnector.ActiveRealTimeClientCount > 0)
                     {
                         EditorGUILayout.LabelField("Real-time Client Details:", EditorStyles.miniLabel);
-                        foreach (var client in tcpConnector.RealTimeClientInfoList)
+                        foreach (var client in tcpConnector.GetRealTimeClientInfoList())
                         {
                             EditorGUILayout.LabelField($"• Real-time {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
                         }
@@ -2257,7 +2303,7 @@ namespace Modules.Utilities
                 EditorGUILayout.EndVertical();
 
                 // --- Test Message Box (only show when connected) ---
-                bool canSendMessage = (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0) ||
+                bool canSendMessage = (isServer.boolValue && tcpConnector.ConnectedClientCount > 0) ||
                                      (!isServer.boolValue && tcpConnector.IsConnected);
 
                 if (canSendMessage)
@@ -2307,7 +2353,7 @@ namespace Modules.Utilities
                     EditorGUILayout.EndHorizontal();
 
                     // Server-only targeting section
-                    if (isServer.boolValue && tcpConnector.ClientInfoList.Count > 0)
+                    if (isServer.boolValue && tcpConnector.ConnectedClientCount > 0)
                     {
                         EditorGUILayout.Space();
                         EditorGUILayout.LabelField("Target Specific Clients (Server Only)", EditorStyles.boldLabel);
@@ -2318,7 +2364,7 @@ namespace Modules.Utilities
                         EditorGUILayout.EndHorizontal();
 
                         EditorGUILayout.LabelField("Available clients:", EditorStyles.miniLabel);
-                        foreach (var client in tcpConnector.ClientInfoList)
+                        foreach (var client in tcpConnector.GetClientInfoList())
                         {
                             EditorGUILayout.LabelField($"• ID: {client.id} ({client.ipAddress}:{client.port})", EditorStyles.miniLabel);
                         }
