@@ -39,6 +39,33 @@ namespace Modules.Utilities
 
         }
 
+        public HUDRenderer[] GetRenderers()
+        {
+            return m_Renderers;
+        }
+
+        public HUDIndicatorView GetView(HUDRenderer renderer)
+        {
+            foreach (var view in renderer.m_IndicatorViewList)
+            {
+                if (view.m_Indicator == this)
+                {
+                    return view;
+                }
+            }
+            return null;
+        }
+
+        public HUDIndicatorView[] GetAllViews()
+        {
+            var views = new HUDIndicatorView[m_Renderers.Length];
+            for (int i = 0; i < m_Renderers.Length; i++)
+            {
+                views[i] = GetView(m_Renderers[i]);
+            }
+            return views;
+        }
+
 
         void OnDestroy()
         {
