@@ -7,11 +7,21 @@ namespace Modules.Utilities
 
         public Camera m_Camera;
 
-        public bool m_IsShow = true;
+        public bool m_Visible = true;
 
         public float m_Margin = 20f;
         public float m_ArrowMargin = 20f;
 
+        [Header("Distance Settings")]
+        [Tooltip("Limits for fade distance slider")]
+        public float m_MinDistanceLimit = 0f;
+        public float m_MaxDistanceLimit = 100f;
+        
+        [Tooltip("X = Start Fade Distance, Y = Full Visible Distance")]
+        [MinMaxSlider("m_MinDistanceLimit", "m_MaxDistanceLimit", 0f, 200f)]
+        public Vector2 m_FadeDistance = new Vector2(50f, 20f); 
+
+      
 
         public List<HUDIndicatorView> m_IndicatorViewList = new List<HUDIndicatorView>();
 
@@ -82,6 +92,45 @@ namespace Modules.Utilities
             get { return m_Margin + m_ArrowMargin; }
         }
 
+        /// <summary>
+        /// Calculate alpha value based on distance from camera
+        /// </summary>
+        /// <param name="distance">Distance from camera to target</param>
+        /// <returns>Alpha value between 0 and 1</returns>
+        private float CalculateAlphaFromDistance(float distance)
+        {
+            // If distance values are invalid (0 or negative), don't use fade - always show full alpha
+            if (m_FadeDistance.x <= 0f || m_FadeDistance.y <= 0f)
+            {
+                return 1f;
+            }
+
+            // Ensure proper distance settings
+            float minDistance = Mathf.Min(m_FadeDistance.y, m_FadeDistance.x);
+            float maxDistance = Mathf.Max(m_FadeDistance.y, m_FadeDistance.x);
+
+            // If distances are equal, no fade effect
+            if (Mathf.Approximately(minDistance, maxDistance))
+            {
+                return 1f;
+            }
+            
+            if (distance <= minDistance)
+            {
+                return 1f; // Fully visible
+            }
+            else if (distance >= maxDistance)
+            {
+                return 0f; // Completely transparent
+            }
+            else
+            {
+                // Linear interpolation between distances
+                float t = (distance - minDistance) / (maxDistance - minDistance);
+                return 1f - t; // Fade from 1 to 0
+            }
+        }
+
         void Update()
         {
             foreach (var view in m_IndicatorViewList)
@@ -90,7 +139,7 @@ namespace Modules.Utilities
                 bool isIndicatorActive = view.m_Indicator.gameObject.activeInHierarchy;
 
                 // Check if the indicator should be shown based on m_IsShow flag
-                bool shouldShow = view.m_Indicator.m_IsShow && m_IsShow;
+                bool shouldShow = view.m_Indicator.m_Visible && m_Visible;
 
                 if (!isIndicatorActive || !shouldShow)
                 {
@@ -100,13 +149,17 @@ namespace Modules.Utilities
 
                 Vector3 worldPos = view.m_Indicator.m_Transform.position;
                 Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
+                float distance = cameraToTarget.magnitude;
+
+                // Calculate alpha based on distance
+                float alpha = CalculateAlphaFromDistance(distance);
 
                 // Check if the target is in front of the camera
                 bool isInFront = Vector3.Dot(cameraToTarget, m_Camera.transform.forward) > 0;
 
-                if (!isInFront)
+                if (!isInFront || alpha <= 0f)
                 {
-                    view.Hide(); // Hide when behind camera
+                    view.Hide(); // Hide when behind camera or too far
                     continue;
                 }
 
@@ -127,6 +180,7 @@ namespace Modules.Utilities
                     // Show on-screen indicator
                     view.UpdateOnScreenPosition(new Vector2(canvasPos.x, canvasPos.y));
                     view.ShowOnScreen();
+                    view.m_CanvasGroup.alpha = alpha; // Apply distance-based alpha
                 }
                 else
                 {
@@ -137,16 +191,13 @@ namespace Modules.Utilities
                     Vector2 arrowPos = ClampToCanvasEdge(canvasPos, canvasRect, m_ArrowMargin);
                     view.UpdateOffScreenArrowPosition(arrowPos);
 
-
-
-
-
                     // Calculate angle for arrow rotation (from view position to actual object position)
                     Vector2 viewToObject = new Vector2(canvasPos.x, canvasPos.y) - onscreenPos;
                     float angle = Mathf.Atan2(viewToObject.y, viewToObject.x) * Mathf.Rad2Deg;
                     view.SetArrowRotation(angle);
 
                     view.ShowOffScreen();
+                    view.m_CanvasGroup.alpha = alpha; // Apply distance-based alpha
                 }
             }
         }

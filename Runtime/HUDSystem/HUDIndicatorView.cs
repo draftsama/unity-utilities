@@ -110,7 +110,7 @@ namespace Modules.Utilities
             {
                 _OffScreenArrowRectTransform.gameObject.SetActive(false);
             }
-            m_CanvasGroup.alpha = 1f; // Show the indicator
+            // Alpha will be set by distance calculation in HUDRenderer
         }
 
         public void ShowOffScreen()
@@ -127,7 +127,7 @@ namespace Modules.Utilities
             {
                 _OffScreenArrowRectTransform.gameObject.SetActive(true);
             }
-            m_CanvasGroup.alpha = 1f; // Show the indicator
+            // Alpha will be set by distance calculation in HUDRenderer
         }
 
         public void ShowOffScreenArrow()
@@ -144,7 +144,7 @@ namespace Modules.Utilities
             {
                 _OffScreenArrowRectTransform.gameObject.SetActive(true);
             }
-            m_CanvasGroup.alpha = 1f; // Show the indicator
+            // Alpha will be set by distance calculation in HUDRenderer
         }
 
         public void Hide()
@@ -170,6 +170,15 @@ namespace Modules.Utilities
             {
                 _OffScreenArrowRectTransform.rotation = Quaternion.AngleAxis(angleDegrees, Vector3.forward);
             }
+        }
+
+        /// <summary>
+        /// Set the alpha transparency of the indicator
+        /// </summary>
+        /// <param name="alpha">Alpha value between 0 and 1</param>
+        public void SetAlpha(float alpha)
+        {
+            m_CanvasGroup.alpha = Mathf.Clamp01(alpha);
         }
 
 

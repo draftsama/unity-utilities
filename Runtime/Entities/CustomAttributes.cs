@@ -48,6 +48,44 @@ namespace Modules.Utilities
         }
     }
 
+    [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
+    public class MinMaxSliderAttribute : PropertyAttribute
+    {
+        public float MinValue { get; private set; }
+        public float MaxValue { get; private set; }
+        public bool UseInspectorLimits { get; private set; }
+        public string MinLimitFieldName { get; private set; }
+        public string MaxLimitFieldName { get; private set; }
+
+        // Constructor 1: Fixed limits (original behavior)
+        public MinMaxSliderAttribute(float minValue, float maxValue)
+        {
+            MinValue = minValue;
+            MaxValue = maxValue;
+            UseInspectorLimits = false;
+        }
+
+        // Constructor 2: Use inspector fields for limits
+        public MinMaxSliderAttribute(string minLimitFieldName, string maxLimitFieldName)
+        {
+            MinLimitFieldName = minLimitFieldName;
+            MaxLimitFieldName = maxLimitFieldName;
+            UseInspectorLimits = true;
+            MinValue = 0f; // Default fallback
+            MaxValue = 100f; // Default fallback
+        }
+
+        // Constructor 3: Mixed - use inspector fields with fallback values
+        public MinMaxSliderAttribute(string minLimitFieldName, string maxLimitFieldName, float fallbackMin, float fallbackMax)
+        {
+            MinLimitFieldName = minLimitFieldName;
+            MaxLimitFieldName = maxLimitFieldName;
+            UseInspectorLimits = true;
+            MinValue = fallbackMin;
+            MaxValue = fallbackMax;
+        }
+    }
+
 
 
 }

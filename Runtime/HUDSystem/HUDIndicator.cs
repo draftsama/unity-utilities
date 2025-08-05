@@ -18,7 +18,7 @@ namespace Modules.Utilities
             public GameObject m_OffScreenArrowPrefab;
         }
 
-        [SerializeField] public bool m_IsShow = true;
+        [SerializeField] public bool m_Visible = true;
         [SerializeField] private HUDRenderer[] m_Renderers;
 
         [SerializeField] public HUDIndicatorData m_IndicatorData;
