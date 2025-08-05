@@ -7,6 +7,8 @@ namespace Modules.Utilities
 
         public Camera m_Camera;
 
+        public bool m_IsShow = true;
+
         public float m_Margin = 20f;
         public float m_ArrowMargin = 20f;
 
@@ -88,7 +90,7 @@ namespace Modules.Utilities
                 bool isIndicatorActive = view.m_Indicator.gameObject.activeInHierarchy;
 
                 // Check if the indicator should be shown based on m_IsShow flag
-                bool shouldShow = view.m_Indicator.m_IsShow;
+                bool shouldShow = view.m_Indicator.m_IsShow && m_IsShow;
 
                 if (!isIndicatorActive || !shouldShow)
                 {
