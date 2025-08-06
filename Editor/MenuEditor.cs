@@ -41,7 +41,7 @@ namespace Modules.Utilities.Editor
             UnityEngine.Debug.Log("Open Config File: " + path);
             OpenFolder(path);
         }
-        [MenuItem("Utilities/Build Manager")]
+         [MenuItem("Utilities/Build Manager")]
         public static void OpenBuildManager()
         {
             // Check if window already exists

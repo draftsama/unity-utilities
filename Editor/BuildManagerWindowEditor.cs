@@ -35,13 +35,7 @@ namespace Modules.Utilities.Editor
         private const string SETTINGS_PATH = "Assets/Settings/BuildManagerSettings.asset";
         private const string SETTINGS_FOLDER = "Assets/Settings";
 
-        [MenuItem("Window/Build Manager")]
-        static void Init()
-        {
-            BuildManagerWindowEditor window = (BuildManagerWindowEditor)EditorWindow.GetWindow(typeof(BuildManagerWindowEditor));
-            window.titleContent = new GUIContent("Build Manager");
-            window.Show();
-        }
+     
 
         void OnEnable()
         {

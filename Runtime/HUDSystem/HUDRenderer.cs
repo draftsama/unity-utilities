@@ -19,13 +19,28 @@ namespace Modules.Utilities
         
         [Tooltip("X = Start Fade Distance, Y = Full Visible Distance")]
         [MinMaxSlider("m_MinDistanceLimit", "m_MaxDistanceLimit", 0f, 200f)]
-        public Vector2 m_FadeDistance = new Vector2(50f, 20f); 
+        public Vector2 m_FadeDistance = new Vector2(50f, 20f);
+
+        [Header("Rendering Order")]
+        [Tooltip("Sort indicators by distance")]
+        public bool m_SortByDistance = true;
+
+        [Header("Performance")]
+        [Tooltip("Update sorting every N frames (1 = every frame, 2 = every other frame)")]
+        [Range(1, 10)]
+        public int m_SortUpdateFrequency = 1; 
 
       
 
         public List<HUDIndicatorView> m_IndicatorViewList = new List<HUDIndicatorView>();
 
         private RectTransform _RectTransform;
+        
+        // Performance optimization: reuse collections
+        private List<HUDIndicatorView> _activeViews = new List<HUDIndicatorView>();
+        private List<float> _viewDistances = new List<float>();
+        private List<int> _sortedIndices = new List<int>();
+        private int _frameCounter = 0;
 
 
 
@@ -133,11 +148,26 @@ namespace Modules.Utilities
 
         void Update()
         {
-            foreach (var view in m_IndicatorViewList)
+            _frameCounter++;
+            bool shouldUpdateSorting = (_frameCounter % m_SortUpdateFrequency) == 0;
+            
+            // Clear and reuse existing collections to avoid GC allocation
+            _activeViews.Clear();
+            _viewDistances.Clear();
+            
+            // Only clear sorted indices if we're updating sorting this frame
+            if (shouldUpdateSorting)
             {
+                _sortedIndices.Clear();
+            }
+            
+            // First pass: collect active views and calculate distances
+            for (int i = 0; i < m_IndicatorViewList.Count; i++)
+            {
+                var view = m_IndicatorViewList[i];
+                
                 // Check if the indicator GameObject is active
                 bool isIndicatorActive = view.m_Indicator.gameObject.activeInHierarchy;
-
                 // Check if the indicator should be shown based on m_IsShow flag
                 bool shouldShow = view.m_Indicator.m_Visible && m_Visible;
 
@@ -150,9 +180,46 @@ namespace Modules.Utilities
                 Vector3 worldPos = view.m_Indicator.m_Transform.position;
                 Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
                 float distance = cameraToTarget.magnitude;
+                
+                _activeViews.Add(view);
+                _viewDistances.Add(distance);
+                
+                if (shouldUpdateSorting)
+                {
+                    _sortedIndices.Add(_activeViews.Count - 1);
+                }
+            }
+            
+            // Sort indices by distance if enabled and updating this frame
+            if (m_SortByDistance && shouldUpdateSorting && _activeViews.Count > 1)
+            {
+                // Farthest first (lower sibling index = renders behind)
+                // Closest last (higher sibling index = renders on top)
+                _sortedIndices.Sort((a, b) => _viewDistances[b].CompareTo(_viewDistances[a]));
+            }
 
+            // Use existing sorted order if not updating sorting this frame
+            int processCount = m_SortByDistance ? _sortedIndices.Count : _activeViews.Count;
+            
+            // Process views in sorted order
+            for (int i = 0; i < processCount; i++)
+            {
+                int viewIndex = m_SortByDistance ? _sortedIndices[i] : i;
+                var view = _activeViews[viewIndex];
+                float distance = _viewDistances[viewIndex];
+                
+                // Update sibling index only when sorting is updated
+                if (m_SortByDistance && shouldUpdateSorting && view.transform.GetSiblingIndex() != i)
+                {
+                    view.transform.SetSiblingIndex(i);
+                }
+                
                 // Calculate alpha based on distance
                 float alpha = CalculateAlphaFromDistance(distance);
+
+                // Reuse already calculated world position
+                Vector3 worldPos = view.m_Indicator.m_Transform.position;
+                Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
 
                 // Check if the target is in front of the camera
                 bool isInFront = Vector3.Dot(cameraToTarget, m_Camera.transform.forward) > 0;

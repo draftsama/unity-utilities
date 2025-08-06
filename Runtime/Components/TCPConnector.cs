@@ -56,7 +56,7 @@ namespace Modules.Utilities
         public int m_RealTimePort = 54323;
 
         [Header("Retry Settings")]
-        [SerializeField, Range(0, 5), Tooltip("Maximum retry attempts")]
+        [SerializeField, Range(0, 10), Tooltip("Maximum retry attempts")]
         public int m_MaxRetryCount = 3;
         [SerializeField, Range(0, 3000), Tooltip("Delay between retries (ms)")]
         public int m_RetryDelay = 1000;
@@ -1448,9 +1448,9 @@ namespace Modules.Utilities
                 }
             }
         }
-        public async UniTask SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
+        public async UniTask<bool> SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
         {
-            await SendDataAsync(action, data, (IProgress<float>)null, token);
+            return await SendDataAsync(action, data, (IProgress<float>)null, token);
         }
 
         /// <summary>
@@ -1464,9 +1464,10 @@ namespace Modules.Utilities
         /// <param name="data">Data to send</param>
         /// <param name="progress">Optional progress reporter (0.0 to 1.0)</param>
         /// <param name="token">Cancellation token</param>
-        public async UniTask SendDataAsync(ushort action, byte[] data, IProgress<float> progress, CancellationToken token = default)
+        /// <returns>True if data was sent successfully, false otherwise</returns>
+        public async UniTask<bool> SendDataAsync(ushort action, byte[] data, IProgress<float> progress, CancellationToken token = default)
         {
-            if (!m_IsRunning) return;
+            if (!m_IsRunning) return false;
 
             byte[] message = CreatePacket(action, data);
             int retryCount = 0;
@@ -1540,6 +1541,8 @@ namespace Modules.Utilities
                     }
                 }
             }
+
+            return success;
         }
 
         /// <summary>
@@ -1702,15 +1705,15 @@ namespace Modules.Utilities
             }
         }
 
-        public async UniTask SendDataAsync<T>(ushort action, T data, CancellationToken token = default)
+        public async UniTask<bool> SendDataAsync<T>(ushort action, T data, CancellationToken token = default)
         {
-            await SendDataAsync(action, data, (IProgress<float>)null, token);
+            return await SendDataAsync(action, data, (IProgress<float>)null, token);
         }
 
-        public async UniTask SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
+        public async UniTask<bool> SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
-            if (!m_IsRunning) return;
+            if (!m_IsRunning) return false;
 
             byte[] serializedData;
             try
@@ -1722,10 +1725,10 @@ namespace Modules.Utilities
             {
                 Log($"Serialization Error: {ex.Message}");
                 ReportError(ErrorInfo.ErrorType.Serialization, "Data serialization failed", ex);
-                return;
+                return false;
             }
 
-            await SendDataAsync(action, serializedData, progress, token);
+            return await SendDataAsync(action, serializedData, progress, token);
         }
 
         /// <summary>
@@ -1772,9 +1775,10 @@ namespace Modules.Utilities
         /// <param name="data">Data to send</param>
         /// <param name="targetClientIds">Target client IDs</param>
         /// <param name="token">Cancellation token</param>
-        public async UniTask SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, CancellationToken token = default)
+        /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
+        public async UniTask<bool> SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, CancellationToken token = default)
         {
-            await SendDataToClientsAsync(action, data, targetClientIds, null, token);
+            return await SendDataToClientsAsync(action, data, targetClientIds, null, token);
         }
 
         /// <summary>
@@ -1786,21 +1790,22 @@ namespace Modules.Utilities
         /// <param name="targetClientIds">Target client IDs</param>
         /// <param name="progress">Optional progress reporter (0.0 to 1.0)</param>
         /// <param name="token">Cancellation token</param>
-        public async UniTask SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
+        /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
+        public async UniTask<bool> SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
-            if (!m_IsRunning) return;
+            if (!m_IsRunning) return false;
 
             // Only servers can target specific clients
             if (!m_IsServer)
             {
                 Log("SendDataToClientsAsync is only available for servers");
-                return;
+                return false;
             }
 
             if (targetClientIds == null || targetClientIds.Length == 0)
             {
                 Log("No target client IDs specified - use SendDataAsync for broadcasting to all clients");
-                return;
+                return false;
             }
 
             // Server-side targeting logic
@@ -1858,37 +1863,41 @@ namespace Modules.Utilities
                     }
                 }
             }
+
+            return success;
         }
 
         /// <summary>
         /// Server-only: Sends serialized object to specific clients by their IDs
         /// This method is only effective when called from a server instance
         /// </summary>
-        public async UniTask SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, CancellationToken token = default)
+        /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
+        public async UniTask<bool> SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, CancellationToken token = default)
         {
-            await SendDataToClientsAsync(action, data, targetClientIds, null, token);
+            return await SendDataToClientsAsync(action, data, targetClientIds, null, token);
         }
 
         /// <summary>
         /// Server-only: Sends serialized object to specific clients by their IDs with progress reporting
         /// This method is only effective when called from a server instance
         /// </summary>
-        public async UniTask SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
+        /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
+        public async UniTask<bool> SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
             if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
-            if (!m_IsRunning) return;
+            if (!m_IsRunning) return false;
 
             // Only servers can target specific clients
             if (!m_IsServer)
             {
                 Log("SendDataToClientsAsync is only available for servers");
-                return;
+                return false;
             }
 
             if (targetClientIds == null || targetClientIds.Length == 0)
             {
                 Log("No target client IDs specified - use SendDataAsync for broadcasting to all clients");
-                return;
+                return false;
             }
 
             byte[] serializedData;
@@ -1904,10 +1913,10 @@ namespace Modules.Utilities
             {
                 Log($"Serialization Error: {ex.Message}");
                 ReportError(ErrorInfo.ErrorType.Serialization, "Data serialization failed", ex);
-                return;
+                return false;
             }
 
-            await SendDataToClientsAsync(action, serializedData, targetClientIds, progress, token);
+            return await SendDataToClientsAsync(action, serializedData, targetClientIds, progress, token);
         }
 
         /// <summary>
