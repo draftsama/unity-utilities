@@ -258,7 +258,7 @@ namespace Modules.Utilities
         {
             if (!m_IsDebug) return;
             var prefix = m_IsServer ? "Server" : "Client";
-            var logMessage = $"[[{prefix}] {message}";
+            var logMessage = $"[{prefix}] {message}";       
             Debug.Log(logMessage);
 
         }
