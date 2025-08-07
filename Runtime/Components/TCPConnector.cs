@@ -31,16 +31,23 @@ namespace Modules.Utilities
         [Header("Connection Settings")]
         [SerializeField, Tooltip("IP address or hostname to connect to (for client) or bind to (for server)")]
         public string m_Host = "127.0.0.1";
+        [Header("Network Behavior")]
+
         [SerializeField, Tooltip("TCP port number for main connection")]
         public int m_Port = 54321;
         [SerializeField, Tooltip("Enable server mode (listen for connections) or client mode (connect to server)")]
         public bool m_IsServer = false;
 
-        [Header("Network Behavior")]
         [SerializeField, Tooltip("Automatically start connection when component is enabled")]
         public bool m_StartOnEnable = true;
         [SerializeField, Tooltip("Enable debug logging in console")]
         public bool m_IsDebug = true;
+
+        [SerializeField, Tooltip("Enable logging for data sending operations")]
+        public bool m_LogSend = true;
+        [SerializeField, Tooltip("Enable logging for data receiving operations")]
+        public bool m_LogReceive = true;
+
 
         [SerializeField, Range(1000, 10000), Tooltip("Buffer size for network operations")]
         public int m_BufferSize = 8192;
@@ -89,7 +96,7 @@ namespace Modules.Utilities
 
         [Header("Connected Server Info")]
         [SerializeField] public ConnectorInfo m_ServerInfo;
-        
+
 
         // --- Events ---
         [Header("Events")]
@@ -203,7 +210,7 @@ namespace Modules.Utilities
                 if (!m_IsDiscoveryPausedManually)
                 {
                     m_IsDiscoveryPausedManually = true;
-                    if (m_IsDebug && m_IsServer) Log("Discovery broadcast paused manually");
+                    if (m_IsServer) Log("Discovery broadcast paused manually");
                 }
             }
         }
@@ -218,7 +225,7 @@ namespace Modules.Utilities
                 if (m_IsDiscoveryPausedManually)
                 {
                     m_IsDiscoveryPausedManually = false;
-                    if (m_IsDebug && m_IsServer) Log("Discovery broadcast resumed manually");
+                    if (m_IsServer) Log("Discovery broadcast resumed manually");
                 }
             }
         }
@@ -325,7 +332,7 @@ namespace Modules.Utilities
                 // Create array to avoid ToList() allocation
                 var clientsArray = new TcpClient[m_Clients.Count];
                 m_Clients.Keys.CopyTo(clientsArray, 0);
-                
+
                 foreach (var client in clientsArray)
                 {
                     client?.Close();
@@ -567,7 +574,7 @@ namespace Modules.Utilities
             try
             {
                 using var udpClient = new UdpClient();
-                udpClient.EnableBroadcast = true;           
+                udpClient.EnableBroadcast = true;
 
                 var broadcastAddress = new IPEndPoint(IPAddress.Broadcast, m_DiscoveryPort);
                 var messageBytes = Encoding.UTF8.GetBytes(m_DiscoveryMessage);
@@ -612,7 +619,7 @@ namespace Modules.Utilities
                                 }
                                 wasBroadcastingPaused = true;
                             }
-                            
+
                             // Wait longer when server is paused to reduce CPU usage
                             await UniTask.Delay(m_DiscoveryInterval * 3, cancellationToken: token);
                             continue;
@@ -747,7 +754,7 @@ namespace Modules.Utilities
                 while (!token.IsCancellationRequested)
                 {
                     var result = await _realTimeServer.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-                    
+
                     // UDP Style: Process immediately, don't queue
                     ProcessRealTimeDataImmediate(result.Buffer, result.RemoteEndPoint);
                 }
@@ -809,7 +816,7 @@ namespace Modules.Utilities
                 while (!token.IsCancellationRequested && _realTimeClient != null)
                 {
                     var result = await _realTimeClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-                    
+
                     // UDP Style: Process immediately, don't queue
                     ProcessRealTimeDataImmediate(result.Buffer, result.RemoteEndPoint);
                 }
@@ -860,6 +867,12 @@ namespace Modules.Utilities
                     packetResponse.totalBytes = data.Length;
                     packetResponse.processedBytes = data.Length;
 
+                    // Log real-time receive
+                    if (m_LogReceive)
+                    {
+                        Log($"📡 Real-time data received: Action={packetResponse.action}, Size={data.Length} bytes from {remoteEndPoint.Address}:{remoteEndPoint.Port}");
+                    }
+
                     // Fire immediately on main thread - no queuing!
                     // This ensures latest data overwrites older data
                     if (UnityEngine.Application.isPlaying)
@@ -880,7 +893,7 @@ namespace Modules.Utilities
             }
             catch (Exception ex)
             {
-                if (m_IsDebug) Log($"Real-time data processing error: {ex.Message}");
+                Log($"Real-time data processing error: {ex.Message}");
             }
         }
 
@@ -943,25 +956,31 @@ namespace Modules.Utilities
         {
             if (!m_EnableRealTimeMode)
             {
-                if (m_IsDebug) Log("Real-time mode is not enabled");
+                Log("Real-time mode is not enabled");
                 return;
             }
 
             if (!m_IsRunning)
             {
-                if (m_IsDebug) Log("Real-time: Connection not running");
+                Log("Real-time: Connection not running");
                 return;
             }
 
             if (data != null && data.Length > 1024)
             {
-                if (m_IsDebug) Log($"Real-time data too large ({data.Length} bytes). Max recommended: 1024 bytes. Use TCP for large data.");
+                Log($"Real-time data too large ({data.Length} bytes). Max recommended: 1024 bytes. Use TCP for large data.");
                 return;
             }
 
             try
             {
                 byte[] packet = CreateRealTimePacket(action, data);
+
+                // Log real-time send attempt
+                if (m_LogSend)
+                {
+                    Log($"📡 Sending real-time data: Action={action}, Size={data?.Length ?? 0} bytes");
+                }
 
                 if (m_IsServer)
                 {
@@ -989,6 +1008,12 @@ namespace Modules.Utilities
                             // Ignore all send failures - pure UDP style
                         }
                     }
+
+                    // Log successful send for server
+                    if (m_LogSend)
+                    {
+                        Log($"✅ Real-time data sent to {activeClients.Length} clients: Action={action}");
+                    }
                 }
                 else
                 {
@@ -999,6 +1024,12 @@ namespace Modules.Utilities
                     {
                         // True UDP style - no await, just fire!
                         _ = _realTimeClient.SendAsync(packet, packet.Length, m_Host, m_RealTimePort);
+
+                        // Log successful send for client
+                        if (m_LogSend)
+                        {
+                            Log($"✅ Real-time data sent to server: Action={action}");
+                        }
                     }
                     catch
                     {
@@ -1009,17 +1040,14 @@ namespace Modules.Utilities
             catch (Exception ex)
             {
                 // Pure UDP style - log only for debugging
-                if (m_IsDebug)
-                {
-                    Log($"Real-time send ignored error: {ex.Message}");
-                }
+                Log($"Real-time send ignored error: {ex.Message}");
             }
         }
 
         /// <summary>
         /// Async version for compatibility (but still fire-and-forget internally)
         /// </summary>
-    
+
 
         /// <summary>
         /// Sends serialized object via real-time transmission (sync version for max speed)
@@ -1035,7 +1063,7 @@ namespace Modules.Utilities
             }
             catch (Exception ex)
             {
-                if (m_IsDebug) Log($"Real-time Serialization Error: {ex.Message}");
+                Log($"Real-time Serialization Error: {ex.Message}");
                 return;
             }
 
@@ -1327,6 +1355,12 @@ namespace Modules.Utilities
                         break;
                     }
 
+                    // Log receive start
+                    if (m_LogReceive)
+                    {
+                        Log($"📥 Receiving data: Size={messageLength} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                    }
+
                     // Use buffer pool for large messages
                     var dataBuffer = GetBuffer(messageLength);
                     string operationId = Guid.NewGuid().ToString();
@@ -1396,6 +1430,12 @@ namespace Modules.Utilities
                             finalPacketResponse.totalBytes = messageLength;
                             finalPacketResponse.processedBytes = totalBytesRead;
                             finalPacketResponse.operationId = operationId;
+
+                            // Log successful receive
+                            if (m_LogReceive)
+                            {
+                                Log($"✅ Data received successfully: Action={finalPacketResponse.action}, Size={totalBytesRead} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                            }
 
                             try
                             {
@@ -1473,6 +1513,12 @@ namespace Modules.Utilities
             int retryCount = 0;
             bool success = false;
 
+            // Log send attempt
+            if (m_LogSend)
+            {
+                Log($"📤 Sending data: Action={action}, Size={data?.Length ?? 0} bytes");
+            }
+
             while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
             {
                 try
@@ -1505,9 +1551,18 @@ namespace Modules.Utilities
                     }
 
                     success = true; // If we reach here, send was successful
-                    if (retryCount > 0)
+
+                    // Log successful send
+                    if (m_LogSend)
                     {
-                        Log($"Data sent successfully after {retryCount} retries");
+                        if (retryCount > 0)
+                        {
+                            Log($"✅ Data sent successfully after {retryCount} retries: Action={action}");
+                        }
+                        else
+                        {
+                            Log($"✅ Data sent successfully: Action={action}");
+                        }
                     }
                 }
                 catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
@@ -1530,16 +1585,28 @@ namespace Modules.Utilities
                     retryCount++;
                     if (retryCount > m_MaxRetryCount)
                     {
-                        Log($"Send Data Failed after {m_MaxRetryCount} retries: {ex.Message}");
+                        if (m_LogSend)
+                        {
+                            Log($"❌ Send Data Failed after {m_MaxRetryCount} retries: Action={action}, Error={ex.Message}");
+                        }
                         ReportError(ErrorInfo.ErrorType.DataTransmission, $"Data send failed after {m_MaxRetryCount} retries", ex);
                         break;
                     }
                     else
                     {
-                        Log($"Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: {ex.Message}");
+                        if (m_LogSend)
+                        {
+                            Log($"⚠️ Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: Action={action}, Error={ex.Message}");
+                        }
                         await UniTask.Delay(m_RetryDelay, cancellationToken: token);
                     }
                 }
+            }
+
+            // Log final result if failed
+            if (!success && m_LogSend)
+            {
+                Log($"❌ Send operation failed completely: Action={action}");
             }
 
             return success;
@@ -2078,24 +2145,7 @@ namespace Modules.Utilities
 
         #endregion
 
-        #region Simple API Methods
 
-        /// <summary>
-        /// Simple method to send string data
-        /// </summary>
-        public async UniTask SendMessage(string message, ushort actionId = 1)
-        {
-            await SendDataAsync(actionId, message);
-        }
-
-        /// <summary>
-        /// Simple method to send real-time string data (if enabled)
-        /// </summary>
-        public void SendRealTimeMessage(string message, ushort actionId = 1)
-        {
-            if (m_EnableRealTimeMode)
-                SendRealTimeData(actionId, message);
-        }
 
         /// <summary>
         /// Simple method to check if server/client is ready
@@ -2108,11 +2158,8 @@ namespace Modules.Utilities
                 return m_IsRunning && m_IsConnected;
         }
 
-   
 
-      
 
-        #endregion
 
         #region Event Handlers
         public IUniTaskAsyncEnumerable<PacketResponse> OnDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnDataReceived, token);
@@ -2202,7 +2249,15 @@ namespace Modules.Utilities
 
             if (settingsExpanded)
             {
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_IsDebug"));
+                var isDebug = serializedObject.FindProperty("m_IsDebug");
+                EditorGUILayout.PropertyField(isDebug);
+
+                if (isDebug.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_LogSend"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_LogReceive"));
+                }
+
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_StartOnEnable"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_Port"));
 
