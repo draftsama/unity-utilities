@@ -35,6 +35,9 @@ namespace Modules.Utilities.Editor
         private const string SETTINGS_PATH = "Assets/Settings/BuildManagerSettings.asset";
         private const string SETTINGS_FOLDER = "Assets/Settings";
 
+        // Focus tracking
+        private bool hadFocusLastFrame = false;
+
 
         [MenuItem("Utilities/Build Manager")]
         public static void ShowWindow()
@@ -44,31 +47,27 @@ namespace Modules.Utilities.Editor
             if (existingWindow != null)
             {
                 existingWindow.Focus();
-                existingWindow.LoadBuildProfiles();
-                existingWindow.LoadProfileSpecificSettings();
-                existingWindow.LoadOrCreateSettings();
-
-
                 return;
             }
 
-            // Open new Build Manager window
+            // Open new Build Manager window - OnEnable() will handle loading
             var window = GetWindow<BuildManagerWindowEditor>("Build Manager");
-            window.LoadBuildProfiles();
-            window.LoadProfileSpecificSettings();
-            window.LoadOrCreateSettings();
         }
 
         void OnEnable()
         {
+            Debug.Log("Build Manager Window Enabled");
             // Subscribe to compilation events
             CompilationPipeline.compilationStarted += OnCompilationStarted;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
 
-            LoadBuildProfiles();
-                        LoadProfileSpecificSettings();
+            // Enable mouse move events for focus detection
+            wantsMouseMove = true;
+            hadFocusLastFrame = false;
 
+            LoadBuildProfiles();
             LoadOrCreateSettings(); // Load settings after profiles are loaded
+            LoadProfileSpecificSettings();
         }
 
         void OnDisable()
@@ -76,6 +75,32 @@ namespace Modules.Utilities.Editor
             // Unsubscribe from compilation events
             CompilationPipeline.compilationStarted -= OnCompilationStarted;
             CompilationPipeline.compilationFinished -= OnCompilationFinished;
+        }
+
+        void OnBecameVisible()
+        {
+            Debug.Log("Build Manager Window became visible (focused)");
+            // Refresh data when window becomes visible/focused
+            LoadBuildProfiles();
+            LoadOrCreateSettings();
+            LoadProfileSpecificSettings();
+            Repaint();
+        }
+
+        void OnBecameInvisible()
+        {
+            Debug.Log("Build Manager Window became invisible (lost focus)");
+        }
+
+        void OnWindowFocused()
+        {
+            Debug.Log("Build Manager Window gained focus");
+            Repaint();
+        }
+
+        void OnWindowLostFocus()
+        {
+            Debug.Log("Build Manager Window lost focus");
         }
 
         void OnCompilationStarted(object obj)
@@ -86,8 +111,7 @@ namespace Modules.Utilities.Editor
 
         void OnCompilationFinished(object obj)
         {
-            // Reload profiles after compilation
-            LoadBuildProfiles();
+            // Just repaint - OnGUI will handle reloading if needed
             Repaint();
         }
 
@@ -428,8 +452,7 @@ namespace Modules.Utilities.Editor
                         SaveSettings();
                     }
 
-                    // Load settings for current profile
-                    LoadProfileSpecificSettings();
+                    // Don't load profile settings here - let the caller decide
                 }
                 else if (buildProfiles.Length > 0)
                 {
@@ -454,6 +477,20 @@ namespace Modules.Utilities.Editor
 
         private void OnGUI()
         {
+            // Check for focus changes
+            bool hasFocusNow = EditorWindow.focusedWindow == this;
+            if (hasFocusNow && !hadFocusLastFrame)
+            {
+                // Window just gained focus
+                OnWindowFocused();
+            }
+            else if (!hasFocusNow && hadFocusLastFrame)
+            {
+                // Window just lost focus
+                OnWindowLostFocus();
+            }
+            hadFocusLastFrame = hasFocusNow;
+
             // Check if compiling and show appropriate UI
             if (EditorApplication.isCompiling)
             {
@@ -479,6 +516,11 @@ namespace Modules.Utilities.Editor
             if (buildProfiles == null || buildProfiles.Length == 0)
             {
                 LoadBuildProfiles();
+                // Load profile settings after loading profiles
+                if (buildProfiles != null && buildProfiles.Length > 0 && settings != null)
+                {
+                    LoadProfileSpecificSettings();
+                }
             }
 
 
@@ -569,7 +611,7 @@ namespace Modules.Utilities.Editor
                         Debug.LogError($"Failed to switch build profile: {e.Message}");
                     }
                 }
-
+                
                 GUI.enabled = true;
                 GUILayout.EndHorizontal();
 
