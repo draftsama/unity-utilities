@@ -35,7 +35,29 @@ namespace Modules.Utilities.Editor
         private const string SETTINGS_PATH = "Assets/Settings/BuildManagerSettings.asset";
         private const string SETTINGS_FOLDER = "Assets/Settings";
 
-     
+
+        [MenuItem("Utilities/Build Manager")]
+        public static void ShowWindow()
+        {
+            // Check if window is already open
+            var existingWindow = GetWindow<BuildManagerWindowEditor>(false, "Build Manager", false);
+            if (existingWindow != null)
+            {
+                existingWindow.Focus();
+                existingWindow.LoadBuildProfiles();
+                existingWindow.LoadProfileSpecificSettings();
+                existingWindow.LoadOrCreateSettings();
+
+
+                return;
+            }
+
+            // Open new Build Manager window
+            var window = GetWindow<BuildManagerWindowEditor>("Build Manager");
+            window.LoadBuildProfiles();
+            window.LoadProfileSpecificSettings();
+            window.LoadOrCreateSettings();
+        }
 
         void OnEnable()
         {
@@ -44,6 +66,8 @@ namespace Modules.Utilities.Editor
             CompilationPipeline.compilationFinished += OnCompilationFinished;
 
             LoadBuildProfiles();
+                        LoadProfileSpecificSettings();
+
             LoadOrCreateSettings(); // Load settings after profiles are loaded
         }
 
@@ -97,7 +121,7 @@ namespace Modules.Utilities.Editor
         void CreateSettingsForProfile(string profileName)
         {
             CreateSettings();
-            
+
             // Initialize with current profile
             if (settings != null && buildProfiles != null && buildProfiles.Length > 0)
             {
@@ -105,11 +129,11 @@ namespace Modules.Utilities.Editor
                 var profileSettings = settings.GetOrCreateProfileSettings(profileName);
                 profileSettings.buildName = profileName;
                 SaveSettings();
-                
+
                 // Load settings for this profile
                 LoadProfileSpecificSettings();
             }
-            
+
             Debug.Log($"Created Build Manager Settings for profile: {profileName}");
         }
 
@@ -119,7 +143,7 @@ namespace Modules.Utilities.Editor
 
             var selectedProfile = buildProfiles[selectedBuildProfileIndex];
             var profileSettings = settings.GetOrCreateProfileSettings(selectedProfile.name);
-            
+
             // Load profile-specific settings
             buildFolderPath = profileSettings.buildFolderPath;
             copyFolderPaths = new List<string>(profileSettings.copyFolderPaths);
@@ -127,7 +151,7 @@ namespace Modules.Utilities.Editor
             buildName = !string.IsNullOrEmpty(profileSettings.buildName) ? profileSettings.buildName : selectedProfile.name;
             buildSuffix = profileSettings.buildSuffix;
             buildVersion = !string.IsNullOrEmpty(profileSettings.buildVersion) ? profileSettings.buildVersion : PlayerSettings.bundleVersion;
-            
+
             // Load global settings
             isNotify = settings.isNotify;
             isSoundNotify = settings.isSoundNotify;
@@ -326,7 +350,7 @@ namespace Modules.Utilities.Editor
 
             GUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
-            
+
             // Disable Build button if build folder is empty
             GUI.enabled = !string.IsNullOrEmpty(buildFolderPath);
             if (GUILayout.Button("Build", GUILayout.Width(100)))
@@ -334,7 +358,7 @@ namespace Modules.Utilities.Editor
                 Build(selectedBuildProfile);
             }
             GUI.enabled = true; // Reset GUI.enabled
-            
+
             GUILayout.EndHorizontal();
 
             GUILayout.EndVertical();
@@ -361,18 +385,18 @@ namespace Modules.Utilities.Editor
             {
                 var selectedBuildProfile = buildProfiles[selectedBuildProfileIndex];
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                
+
                 profileSettings.buildFolderPath = buildFolderPath;
                 profileSettings.copyFolderPaths = new List<string>(copyFolderPaths);
                 profileSettings.enableCopyFolders = enableCopyFolders;
                 profileSettings.buildName = buildName;
                 profileSettings.buildSuffix = buildSuffix;
                 profileSettings.buildVersion = buildVersion;
-                
+
                 settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
                 settings.isNotify = isNotify;
                 settings.isSoundNotify = isSoundNotify;
-                
+
                 SaveSettings();
             }
         }
@@ -498,19 +522,19 @@ namespace Modules.Utilities.Editor
                 // Clamp selectedBuildProfileIndex to valid range
                 selectedBuildProfileIndex = Mathf.Clamp(selectedBuildProfileIndex, 0, buildProfiles.Length - 1);
                 var previousIndex = selectedBuildProfileIndex;
-                
+
                 // Label with normal color
                 GUILayout.Label("Build Profile:", EditorStyles.label, GUILayout.Width(80));
-                
+
                 // Change GUI color only for dropdown
                 var originalColor = GUI.color;
                 if (activeProfileIndex == selectedBuildProfileIndex)
                 {
                     GUI.color = Color.green; // Green color for active profile
                 }
-                
+
                 selectedBuildProfileIndex = EditorGUILayout.Popup(selectedBuildProfileIndex, profileNames);
-                
+
                 // Restore original color
                 GUI.color = originalColor;
 
@@ -561,12 +585,12 @@ namespace Modules.Utilities.Editor
                 }
                 else
                 {
-                    
+
                     // Show BuildManagerSettings object reference (disabled)
                     EditorGUI.BeginDisabledGroup(true);
                     EditorGUILayout.ObjectField("BuildManagerSettings:", settings, typeof(BuildManagerSettings), false);
                     EditorGUI.EndDisabledGroup();
-                    
+
                     if (GUILayout.Button("Refresh", GUILayout.Width(80)))
                     {
                         LoadOrCreateSettings();
@@ -619,7 +643,7 @@ namespace Modules.Utilities.Editor
 
                 var buildTarget = EditorUserBuildSettings.activeBuildTarget;
                 var extension = "";
-                var folderName = string.IsNullOrEmpty(buildSuffix) 
+                var folderName = string.IsNullOrEmpty(buildSuffix)
                     ? $"{buildName}-v{versionString}-{dateString}"
                     : $"{buildName}-v{versionString}-{dateString}-{buildSuffix}";
                 var appName = buildName;
@@ -701,7 +725,7 @@ namespace Modules.Utilities.Editor
                 }
                 var profile = buildProfiles[selectedBuildProfileIndex];
                 //write error message
-                if(isNotify)
+                if (isNotify)
                 {
                     SendMessage(
                         $"[Build Fail!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget} \nError: {condition} \nStackTrace: {stackTrace}");
@@ -750,7 +774,7 @@ namespace Modules.Utilities.Editor
                 }
             }
             var profile = buildProfiles[selectedBuildProfileIndex];
-            if(isNotify)
+            if (isNotify)
             {
                 // Notify via Telegram
                 SendMessage(
@@ -758,7 +782,7 @@ namespace Modules.Utilities.Editor
             }
 
             // Play success sound if enabled
-            if(isSoundNotify)
+            if (isSoundNotify)
             {
 #if UNITY_EDITOR_WIN
                 RunCommand("rundll32 user32.dll,MessageBeep");
