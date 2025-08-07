@@ -258,8 +258,7 @@ namespace Modules.Utilities
         {
             if (!m_IsDebug) return;
             var prefix = m_IsServer ? "Server" : "Client";
-            var timestamp = DateTime.Now.ToString("HH:mm:ss.fff");
-            var logMessage = $"[{timestamp}][TCP-{prefix}] {message}";
+            var logMessage = $"[[{prefix}] {message}";
             Debug.Log(logMessage);
 
         }
