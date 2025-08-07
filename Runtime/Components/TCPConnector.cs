@@ -1053,12 +1053,18 @@ namespace Modules.Utilities
         /// </summary>
         public void SendRealTimeData<T>(ushort action, T data)
         {
-            if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
-
             byte[] serializedData;
             try
             {
-                serializedData = SerializeData(data);
+                if (data == null)
+                {
+                    // Send empty data for null input
+                    serializedData = Array.Empty<byte>();
+                }
+                else
+                {
+                    serializedData = SerializeData(data);
+                }
             }
             catch (Exception ex)
             {
@@ -1508,6 +1514,9 @@ namespace Modules.Utilities
         {
             if (!m_IsRunning) return false;
 
+            // Handle null data by converting to empty byte array
+            data ??= Array.Empty<byte>();
+
             byte[] message = CreatePacket(action, data);
             int retryCount = 0;
             bool success = false;
@@ -1778,14 +1787,21 @@ namespace Modules.Utilities
 
         public async UniTask<bool> SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
-            if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
             if (!m_IsRunning) return false;
 
             byte[] serializedData;
             try
             {
-                // Handle primitive types and basic types directly
-                serializedData = SerializeData(data);
+                if (data == null)
+                {
+                    // Send empty data for null input
+                    serializedData = Array.Empty<byte>();
+                }
+                else
+                {
+                    // Handle primitive types and basic types directly
+                    serializedData = SerializeData(data);
+                }
             }
             catch (Exception ex)
             {
@@ -1950,7 +1966,6 @@ namespace Modules.Utilities
         /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
         public async UniTask<bool> SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
-            if (data == null) throw new ArgumentNullException(nameof(data), "Data cannot be null.");
             if (!m_IsRunning) return false;
 
             // Only servers can target specific clients
@@ -1969,11 +1984,19 @@ namespace Modules.Utilities
             byte[] serializedData;
             try
             {
+                if (data == null)
+                {
+                    // Send empty data for null input
+                    serializedData = Array.Empty<byte>();
+                }
+                else
+                {
 #if PACKAGE_NEWTONSOFT_JSON_INSTALLED
-                serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
+                    serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
 #else
-                serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
+                    serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
 #endif
+                }
             }
             catch (Exception ex)
             {
