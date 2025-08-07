@@ -56,7 +56,7 @@ namespace Modules.Utilities.Editor
 
         void OnEnable()
         {
-            Debug.Log("Build Manager Window Enabled");
+            // Debug.Log("Build Manager Window Enabled");
             // Subscribe to compilation events
             CompilationPipeline.compilationStarted += OnCompilationStarted;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
@@ -89,18 +89,18 @@ namespace Modules.Utilities.Editor
 
         void OnBecameInvisible()
         {
-            Debug.Log("Build Manager Window became invisible (lost focus)");
+           // Debug.Log("Build Manager Window became invisible (lost focus)");
         }
 
         void OnWindowFocused()
         {
-            Debug.Log("Build Manager Window gained focus");
+           // Debug.Log("Build Manager Window gained focus");
             Repaint();
         }
 
         void OnWindowLostFocus()
         {
-            Debug.Log("Build Manager Window lost focus");
+           // Debug.Log("Build Manager Window lost focus");
         }
 
         void OnCompilationStarted(object obj)
