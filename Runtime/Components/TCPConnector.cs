@@ -148,6 +148,25 @@ namespace Modules.Utilities
                 return m_Clients.Values.ToList();
             }
         }
+        
+
+        public bool TryGetClientInfoById(int id, out ConnectorInfo clientInfo)
+        {
+            lock (m_Clients)
+            {
+                foreach (var client in m_Clients.Values)
+                {
+                    if (client.id == id)
+                    {
+                        clientInfo = client;
+                        return true;
+                    }
+                }
+                clientInfo = default(ConnectorInfo);
+                return false;
+            }
+        }
+      
 
         /// <summary>
         /// Gets list of real-time clients (creates new list each call - use sparingly)

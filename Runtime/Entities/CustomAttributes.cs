@@ -15,6 +15,17 @@ namespace Modules.Utilities
     [AttributeUsage(AttributeTargets.Method, Inherited = true, AllowMultiple = false)]
     public class ButtonAttribute : Attribute
     {
+        public string ButtonText { get; private set; }
+
+        public ButtonAttribute()
+        {
+            ButtonText = null; // Will use method name
+        }
+
+        public ButtonAttribute(string buttonText)
+        {
+            ButtonText = buttonText;
+        }
     }
 
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
