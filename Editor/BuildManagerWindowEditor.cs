@@ -42,16 +42,9 @@ namespace Modules.Utilities.Editor
         [MenuItem("Utilities/Build Manager")]
         public static void ShowWindow()
         {
-            // Check if window is already open
-            var existingWindow = GetWindow<BuildManagerWindowEditor>(false, "Build Manager", false);
-            if (existingWindow != null)
-            {
-                existingWindow.Focus();
-                return;
-            }
+            var window = GetWindow<BuildManagerWindowEditor>(false, "Build Manager", false);
+            window.Show(true);
 
-            // Open new Build Manager window - OnEnable() will handle loading
-            var window = GetWindow<BuildManagerWindowEditor>("Build Manager");
         }
 
         void OnEnable()
@@ -79,7 +72,7 @@ namespace Modules.Utilities.Editor
 
         void OnBecameVisible()
         {
-            Debug.Log("Build Manager Window became visible (focused)");
+            // Debug.Log("Build Manager Window became visible (focused)");
             // Refresh data when window becomes visible/focused
             LoadBuildProfiles();
             LoadOrCreateSettings();
