@@ -102,10 +102,10 @@ namespace Modules.Utilities
                 return false;
             }
 
-            var point = Camera.main.WorldToViewportPoint(_position);
+            var point = _camera.WorldToViewportPoint(_position);
 
             _screenPosition.x = point.x * Screen.width;
-            _screenPosition.y = point.y * Screen.width;
+            _screenPosition.y = point.y * Screen.height;
 
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
         }
