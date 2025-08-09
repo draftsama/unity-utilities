@@ -126,7 +126,7 @@ namespace Modules.Utilities
         private readonly object _discoveryPauseLock = new object();
 
         // --- Packet Structure ---
-        private const int PACKET_HEADER_SIZE = 10; // 4-id, 4-sender, 2-type
+        private const int PACKET_HEADER_SIZE = 6; // 4-messageId, 2-action
 
         #endregion
 
@@ -137,6 +137,8 @@ namespace Modules.Utilities
         public int ConnectedClientCount => m_Clients.Count;
         public int ActiveRealTimeClientCount => m_RealTimeClients.Count;
         public ConnectorInfo ServerInfo => m_ServerInfo;
+
+
 
         /// <summary>
         /// Gets list of connected clients (creates new list each call - use sparingly)
@@ -307,6 +309,7 @@ namespace Modules.Utilities
                 m_IsRunning = true;
                 // For Trigger network stack initialization (important for macOS security permissions)
                 Dns.GetHostEntry(Dns.GetHostName());
+
 
                 if (m_IsServer)
                 {
@@ -877,8 +880,15 @@ namespace Modules.Utilities
                     }
                 }
 
+                // Get connector info for packet parsing
+                ConnectorInfo connectorInfo;
+                lock (m_RealTimeClients)
+                {
+                    connectorInfo = m_RealTimeClients[remoteEndPoint];
+                }
+
                 // Parse real-time packet (simpler than TCP - no length prefix)
-                var packetResponse = ReadRealTimePacket(data, remoteEndPoint);
+                var packetResponse = ReadRealTimePacket(data, connectorInfo);
                 if (packetResponse != null)
                 {
                     packetResponse.status = PacketResponse.ReceiveStatus.Received;
@@ -938,8 +948,15 @@ namespace Modules.Utilities
                     }
                 }
 
+                // Get connector info for packet parsing
+                ConnectorInfo connectorInfo;
+                lock (m_RealTimeClients)
+                {
+                    connectorInfo = m_RealTimeClients[remoteEndPoint];
+                }
+
                 // Parse real-time packet (simpler than TCP - no length prefix)
-                var packetResponse = ReadRealTimePacket(data, remoteEndPoint);
+                var packetResponse = ReadRealTimePacket(data, connectorInfo);
                 if (packetResponse != null)
                 {
                     packetResponse.status = PacketResponse.ReceiveStatus.Received;
@@ -1103,21 +1120,8 @@ namespace Modules.Utilities
             byte[] packet = new byte[PACKET_HEADER_SIZE + data.Length];
             int offset = 0;
 
-            // For consistent ID mapping between senderId and ConnectorInfo.id:
-            // - Server uses its TcpListener's hash code (consistent server ID)
-            // - Client uses its TcpClient's hash code
-            int myId;
-            if (m_IsServer)
-            {
-                myId = _tcpListener?.GetHashCode() ?? -1;
-            }
-            else
-            {
-                myId = _tcpClient?.GetHashCode() ?? _realTimeClient?.Client?.GetHashCode() ?? 0;
-            }
-
+            // Generate random message ID
             Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, packet, offset, 4); offset += 4;
-            Buffer.BlockCopy(BitConverter.GetBytes(myId), 0, packet, offset, 4); offset += 4;
             Buffer.BlockCopy(BitConverter.GetBytes(action), 0, packet, offset, 2);
 
             Buffer.BlockCopy(data, 0, packet, PACKET_HEADER_SIZE, data.Length);
@@ -1128,13 +1132,12 @@ namespace Modules.Utilities
         /// <summary>
         /// Reads the core packet structure (shared between TCP and UDP)
         /// </summary>
-        private PacketResponse ReadCorePacket(byte[] data, int dataLength, IPEndPoint remoteEndPoint)
+        private PacketResponse ReadCorePacket(byte[] data, int dataLength, ConnectorInfo connectorInfo)
         {
             if (data == null || dataLength < PACKET_HEADER_SIZE) return null;
 
             int offset = 0;
             int messageId = BitConverter.ToInt32(data, offset); offset += 4;
-            int senderId = BitConverter.ToInt32(data, offset); offset += 4;
             var action = BitConverter.ToUInt16(data, offset);
 
             int payloadLength = dataLength - PACKET_HEADER_SIZE;
@@ -1147,10 +1150,10 @@ namespace Modules.Utilities
             return new PacketResponse
             {
                 messageId = messageId,
-                senderId = senderId,
+                senderId = connectorInfo.id,
                 action = action,
                 data = payload,
-                remoteEndPoint = remoteEndPoint,
+                remoteEndPoint = connectorInfo.remoteEndPoint,
                 status = PacketResponse.ReceiveStatus.None,
                 totalBytes = dataLength,
                 processedBytes = dataLength
@@ -1169,10 +1172,10 @@ namespace Modules.Utilities
         /// <summary>
         /// Reads real-time packet (simpler than TCP since UDP preserves message boundaries)
         /// </summary>
-        private PacketResponse ReadRealTimePacket(byte[] data, IPEndPoint remoteEndPoint)
+        private PacketResponse ReadRealTimePacket(byte[] data, ConnectorInfo connectorInfo)
         {
             // Real-time packets don't have length prefix - read directly
-            return ReadCorePacket(data, data?.Length ?? 0, remoteEndPoint);
+            return ReadCorePacket(data, data?.Length ?? 0, connectorInfo);
         }
 
         #endregion
@@ -1446,7 +1449,7 @@ namespace Modules.Utilities
                         }
 
                         // Parse the complete packet and update status
-                        var finalPacketResponse = ReadPacket(dataBuffer, messageLength, connectorInfo.remoteEndPoint);
+                        var finalPacketResponse = ReadPacket(dataBuffer, messageLength, connectorInfo);
                         if (finalPacketResponse != null)
                         {
                             // Copy progress information to final response
@@ -1895,6 +1898,7 @@ namespace Modules.Utilities
         public async UniTask<bool> SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
             if (!m_IsRunning) return false;
+            
 
             // Only servers can target specific clients
             if (!m_IsServer)
@@ -2049,11 +2053,11 @@ namespace Modules.Utilities
         /// <summary>
         /// Reads TCP packet (assumes length prefix has already been processed)
         /// </summary>
-        private PacketResponse ReadPacket(byte[] data, int dataLength, IPEndPoint remoteEndPoint)
+        private PacketResponse ReadPacket(byte[] data, int dataLength, ConnectorInfo connectorInfo)
         {
             // TCP packets don't include the length prefix in the data buffer passed here
             // The length prefix is processed separately in the receive loop
-            return ReadCorePacket(data, dataLength, remoteEndPoint);
+            return ReadCorePacket(data, dataLength, connectorInfo);
         }
         #endregion
 
@@ -2061,10 +2065,9 @@ namespace Modules.Utilities
 
         /// <summary>
         /// Contains connection information for a client or server.
-        /// The 'id' field is consistent with PacketResponse.senderId for proper identification:
-        /// - For Server: id = TcpListener.GetHashCode()
-        /// - For Client: id = TcpClient.GetHashCode()  
-        /// - For Real-time: id = IPEndPoint.GetHashCode()
+        /// The 'id' field is used as PacketResponse.senderId:
+        /// - For TCP connections: id is set when connection is established
+        /// - For Real-time UDP: id = IPEndPoint.GetHashCode()
         /// </summary>
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
 
@@ -2104,9 +2107,9 @@ namespace Modules.Utilities
 
             public int messageId;
             /// <summary>
-            /// ID of the sender. This value matches ConnectorInfo.id for proper identification:
-            /// - Server packets: senderId = TcpListener.GetHashCode() (matches server's ConnectorInfo.id)
-            /// - Client packets: senderId = TcpClient.GetHashCode() (matches client's ConnectorInfo.id)
+            /// ID of the sender. This value comes from ConnectorInfo.id:
+            /// - For TCP: ConnectorInfo.id is set when connection is established
+            /// - For UDP: ConnectorInfo.id = IPEndPoint.GetHashCode()
             /// </summary>
             public int senderId;
             public ushort action;
