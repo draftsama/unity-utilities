@@ -16,7 +16,7 @@ namespace Modules.Utilities
             public GameObject m_OnScreenPrefab;
 
             [HelpBox("If you use AutoSize will be require BoxCollider for calculation ui size",1)]
-            public bool m_AutoSize = true;
+            public bool m_AutoSize = false;
             public BoxCollider m_BoxCollider;
 
             [Header("OffScreen")]
