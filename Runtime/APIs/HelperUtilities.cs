@@ -54,7 +54,7 @@ namespace Modules.Utilities
             var max = _camera.WorldToScreenPoint(new Vector3(maxX, maxY, 0));
 
             _screenPosition.x = point.x * Screen.width;
-            _screenPosition.y = point.y * Screen.width;
+            _screenPosition.y = point.y * Screen.height;
 
             return point.x >= 0f && point.x <= 1f && point.y >= 0f && point.y <= 1f;
 
@@ -218,11 +218,11 @@ namespace Modules.Utilities
             var y = _rectTransform.position.y - (height * _rectTransform.pivot.y);
             return new Rect(x, y, width, height);
         }
-        
+
         #endregion
 
 
-        
+
         /// <summary>
         /// Generate unique ID with custom character sets
         /// </summary>
@@ -233,36 +233,75 @@ namespace Modules.Utilities
         /// <param name="includeSpecialChars">Include special characters</param>
         /// <param name="customSpecialChars">Custom special characters to use</param>
         /// <returns>Generated unique ID</returns>
-        public static string GenerateUniqueId(int length = 8, 
-            bool includeUppercase = true, 
-            bool includeLowercase = true, 
-            bool includeNumbers = true, 
+        public static string GenerateUniqueId(int length = 8,
+            bool includeUppercase = true,
+            bool includeLowercase = true,
+            bool includeNumbers = true,
             bool includeSpecialChars = false,
             string customSpecialChars = "!@#$%^&*")
         {
             string chars = "";
-            
+
             if (includeUppercase) chars += "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
             if (includeLowercase) chars += "abcdefghijklmnopqrstuvwxyz";
             if (includeNumbers) chars += "0123456789";
             if (includeSpecialChars) chars += customSpecialChars;
-            
+
             if (string.IsNullOrEmpty(chars))
                 chars = "0123456789"; // Fallback to numbers only
-            
+
             var result = new System.Text.StringBuilder(length);
             var random = new System.Random();
-            
+
             for (int i = 0; i < length; i++)
             {
                 result.Append(chars[random.Next(chars.Length)]);
             }
-            
+
             return result.ToString();
         }
-       
-       
-      
+
+        /// <summary>
+        /// Calculate the screen space dimensions of a 3D bounding box projected by the camera
+        /// </summary>
+        /// <param name="_bounds">The 3D bounding box in world space</param>
+        /// <param name="_camera">The camera to project the bounds to screen space</param>
+        /// <returns>Vector2 containing the width and height of the bounding box in screen pixels</returns>
+        public static Vector2 GetBoundingSizeInScreenView(Bounds _bounds, Camera _camera)
+        {
+
+            // Get the corners of the bounding box in world space
+            Vector3[] corners = new Vector3[8];
+            corners[0] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
+            corners[1] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
+            corners[2] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
+            corners[3] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
+            corners[4] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
+            corners[5] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
+            corners[6] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
+            corners[7] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
+
+
+            Vector2[] screenPoints = new Vector2[8];
+            for (int i = 0; i < corners.Length; i++)
+            {
+                Vector3 screenPoint = _camera.WorldToScreenPoint(corners[i]);
+                screenPoints[i] = new Vector2(screenPoint.x, screenPoint.y);
+            }
+            // Find the min and max screen coordinates
+            Vector2 min = screenPoints[0];
+            Vector2 max = screenPoints[0];
+            for (int i = 1; i < screenPoints.Length; i++)
+            {
+                min = Vector2.Min(min, screenPoints[i]);
+                max = Vector2.Max(max, screenPoints[i]);
+            }
+
+            return new Vector2(max.x - min.x, max.y - min.y);
+        }
+
+
+
 
 
     }
