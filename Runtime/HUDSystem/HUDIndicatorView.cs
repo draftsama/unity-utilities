@@ -6,13 +6,12 @@ namespace Modules.Utilities
     public class HUDIndicatorView : MonoBehaviour
     {
 
+        public RectTransform RectTransform { get; private set; }
+        public CanvasGroup CanvasGroup { get; private set; }
 
-        public RectTransform m_RectTransform { get; private set; }
-        public CanvasGroup m_CanvasGroup { get; private set; }
+        [field: SerializeField] public HUDIndicator Indicator { get; private set; }
 
-        public HUDIndicator m_Indicator { get; private set; }
-
-        public HUDRenderer m_Renderer { get; private set; }
+        public HUDRenderer Renderer { get; private set; }
 
 
         RectTransform _OnScreenRectTransform;
@@ -21,18 +20,18 @@ namespace Modules.Utilities
 
         void Awake()
         {
-            m_RectTransform = GetComponent<RectTransform>();
-            m_CanvasGroup = GetComponent<CanvasGroup>();
-            m_CanvasGroup.alpha = 0f; // Start with invisible
+            RectTransform = GetComponent<RectTransform>();
+            CanvasGroup = GetComponent<CanvasGroup>();
+            CanvasGroup.alpha = 0f; // Start with invisible
         }
 
-        public void Initialize( HUDIndicator indicator, HUDRenderer renderer)
+        public void Initialize(HUDIndicator indicator, HUDRenderer renderer)
         {
             var data = indicator.m_IndicatorData;
-            m_Renderer = renderer;
+            Renderer = renderer;
             if (data.m_UseOnScreen && data.m_OnScreenPrefab != null)
             {
-                var onScreenView = Instantiate(data.m_OnScreenPrefab, m_RectTransform);
+                var onScreenView = Instantiate(data.m_OnScreenPrefab, RectTransform);
                 _OnScreenRectTransform = onScreenView.GetComponent<RectTransform>();
                 _OnScreenRectTransform.anchoredPosition = Vector2.zero;
                 _OnScreenRectTransform.localRotation = Quaternion.identity;
@@ -44,7 +43,7 @@ namespace Modules.Utilities
             {
                 if (data.m_OffScreenPrefab != null)
                 {
-                    var offScreenView = Instantiate(data.m_OffScreenPrefab, m_RectTransform);
+                    var offScreenView = Instantiate(data.m_OffScreenPrefab, RectTransform);
                     _OffScreenRectTransform = offScreenView.GetComponent<RectTransform>();
                     _OffScreenRectTransform.anchoredPosition = Vector2.zero;
                     _OffScreenRectTransform.localRotation = Quaternion.identity;
@@ -55,7 +54,7 @@ namespace Modules.Utilities
 
                 if (data.m_OffScreenArrowPrefab != null)
                 {
-                    var offScreenArrowView = Instantiate(data.m_OffScreenArrowPrefab, m_RectTransform);
+                    var offScreenArrowView = Instantiate(data.m_OffScreenArrowPrefab, RectTransform);
                     _OffScreenArrowRectTransform = offScreenArrowView.GetComponent<RectTransform>();
                     _OffScreenArrowRectTransform.anchoredPosition = Vector2.zero;
                     _OffScreenArrowRectTransform.localRotation = Quaternion.identity;
@@ -65,10 +64,10 @@ namespace Modules.Utilities
                 }
             }
 
-            m_Indicator = indicator;
-            m_RectTransform.localPosition = Vector3.zero;
-            m_RectTransform.localRotation = Quaternion.identity;
-            m_RectTransform.localScale = Vector3.one;
+            Indicator = indicator;
+            RectTransform.localPosition = Vector3.zero;
+            RectTransform.localRotation = Quaternion.identity;
+            RectTransform.localScale = Vector3.one;
 
 
         }
@@ -163,7 +162,7 @@ namespace Modules.Utilities
             {
                 _OffScreenArrowRectTransform.gameObject.SetActive(false);
             }
-            m_CanvasGroup.alpha = 0f; // Hide the indicator
+            CanvasGroup.alpha = 0f; // Hide the indicator
         }
 
         public void SetArrowRotation(float angleDegrees)
@@ -180,7 +179,25 @@ namespace Modules.Utilities
         /// <param name="alpha">Alpha value between 0 and 1</param>
         public void SetAlpha(float alpha)
         {
-            m_CanvasGroup.alpha = Mathf.Clamp01(alpha);
+            CanvasGroup.alpha = Mathf.Clamp01(alpha);
+        }
+
+        public void SetOnScreenSize(Vector2 size)
+        {
+            if (_OnScreenRectTransform != null)
+            {
+                _OnScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
+                _OnScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
+            }
+        }
+        
+        public void SetOffScreenSize(Vector2 size)
+        {
+            if (_OffScreenRectTransform != null)
+            {
+                _OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
+                _OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
+            }
         }
 
 

@@ -1,4 +1,6 @@
+using JetBrains.Annotations;
 using UnityEngine;
+using UnityEngine.UIElements;
 
 namespace Modules.Utilities
 {
@@ -9,13 +11,24 @@ namespace Modules.Utilities
 
         public class HUDIndicatorData
         {
+            [Header("OnScreen")]
             public bool m_UseOnScreen = true;
             public GameObject m_OnScreenPrefab;
+
+            [HelpBox("If you use AutoSize will be require BoxCollider for calculation ui size",1)]
+            public bool m_AutoSize = true;
+            public BoxCollider m_BoxCollider;
+
+            [Header("OffScreen")]
 
             public bool m_UseOffScreen = true;
             public GameObject m_OffScreenPrefab;
 
             public GameObject m_OffScreenArrowPrefab;
+
+
+          
+
         }
 
         [SerializeField] public bool m_Visible = true;
@@ -26,6 +39,11 @@ namespace Modules.Utilities
         void Start()
         {
             m_Transform = transform;
+            if(m_IndicatorData.m_AutoSize && m_IndicatorData.m_BoxCollider == null)
+            {
+                m_IndicatorData.m_BoxCollider = gameObject.GetComponent<BoxCollider>();
+            }
+
             if (m_Renderers == null || m_Renderers.Length == 0)
             {
                 m_Renderers = FindObjectsByType<HUDRenderer>(FindObjectsSortMode.None);
@@ -48,7 +66,7 @@ namespace Modules.Utilities
         {
             foreach (var view in renderer.m_IndicatorViewList)
             {
-                if (view.m_Indicator == this)
+                if (view.Indicator == this)
                 {
                     return view;
                 }

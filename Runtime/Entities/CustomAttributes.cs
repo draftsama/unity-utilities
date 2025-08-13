@@ -12,6 +12,20 @@ namespace Modules.Utilities
     {
     }
 
+    [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
+    public class HelpBoxAttribute : PropertyAttribute
+    {      
+          public string Message { get; private set; }
+          public int MessageType { get; private set; }
+
+        public HelpBoxAttribute(string message, int messageType = 0)
+        {
+            Message = message;
+            MessageType = messageType;
+        }
+       
+    }
+
     [AttributeUsage(AttributeTargets.Method, Inherited = true, AllowMultiple = false)]
     public class ButtonAttribute : Attribute
     {
@@ -40,7 +54,7 @@ namespace Modules.Utilities
 
         }
 
-         private Dictionary<string, string> GetStringConstants(Type type)
+        private Dictionary<string, string> GetStringConstants(Type type)
         {
             // Get all the fields in the class
             FieldInfo[] fields = type.GetFields(BindingFlags.Public | BindingFlags.Static);

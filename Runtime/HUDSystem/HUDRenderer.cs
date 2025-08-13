@@ -78,7 +78,7 @@ namespace Modules.Utilities
         {
             for (int i = m_IndicatorViewList.Count - 1; i >= 0; i--)
             {
-                if (m_IndicatorViewList[i].m_Indicator == indicator)
+                if (m_IndicatorViewList[i].Indicator == indicator)
                 {
                     if (m_IndicatorViewList[i] != null && m_IndicatorViewList[i].gameObject != null)
                     {
@@ -94,7 +94,7 @@ namespace Modules.Utilities
         {
             foreach (var view in m_IndicatorViewList)
             {
-                if (view.m_Indicator == indicator)
+                if (view.Indicator == indicator)
                 {
                     return view;
                 }
@@ -167,9 +167,9 @@ namespace Modules.Utilities
                 var view = m_IndicatorViewList[i];
                 
                 // Check if the indicator GameObject is active
-                bool isIndicatorActive = view.m_Indicator.gameObject.activeInHierarchy;
+                bool isIndicatorActive = view.Indicator.gameObject.activeInHierarchy;
                 // Check if the indicator should be shown based on m_IsShow flag
-                bool shouldShow = view.m_Indicator.m_Visible && m_Visible;
+                bool shouldShow = view.Indicator.m_Visible && m_Visible;
 
                 if (!isIndicatorActive || !shouldShow)
                 {
@@ -177,7 +177,7 @@ namespace Modules.Utilities
                     continue;
                 }
 
-                Vector3 worldPos = view.m_Indicator.m_Transform.position;
+                Vector3 worldPos = view.Indicator.m_Transform.position;
                 Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
                 float distance = cameraToTarget.magnitude;
                 
@@ -209,16 +209,16 @@ namespace Modules.Utilities
                 float distance = _viewDistances[viewIndex];
                 
                 // Update sibling index only when sorting is updated
-                if (m_SortByDistance && shouldUpdateSorting && view.transform.GetSiblingIndex() != i)
+                if (m_SortByDistance && shouldUpdateSorting && view.RectTransform.GetSiblingIndex() != i)
                 {
-                    view.transform.SetSiblingIndex(i);
+                    view.RectTransform.SetSiblingIndex(i);
                 }
                 
                 // Calculate alpha based on distance
                 float alpha = CalculateAlphaFromDistance(distance);
 
                 // Reuse already calculated world position
-                Vector3 worldPos = view.m_Indicator.m_Transform.position;
+                Vector3 worldPos = view.Indicator.m_Transform.position;
                 Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
 
                 // Check if the target is in front of the camera
@@ -234,6 +234,15 @@ namespace Modules.Utilities
                 Vector3 screenPos = m_Camera.WorldToScreenPoint(worldPos);
                 Vector3 canvasPos = _RectTransform.InverseTransformPoint(screenPos);
 
+
+                if (view.Indicator.m_IndicatorData.m_AutoSize && view.Indicator.m_IndicatorData.m_BoxCollider != null)
+                {
+                    // Automatically size the BoxCollider to fit the indicator
+                    var size = HelperUtilities.GetBoundingSizeInScreenView(view.Indicator.m_IndicatorData.m_BoxCollider.bounds, m_Camera);
+                    view.SetOnScreenSize(size);
+                }
+
+
                 // Get canvas rect bounds
                 Rect canvasRect = _RectTransform.rect;
 
@@ -242,12 +251,17 @@ namespace Modules.Utilities
                                  canvasPos.y >= (canvasRect.yMin + TotalMargin) && canvasPos.y <= (canvasRect.yMax - TotalMargin) &&
                                  screenPos.z > 0;
 
+              
+
                 if (isOnScreen)
                 {
                     // Show on-screen indicator
                     view.UpdateOnScreenPosition(new Vector2(canvasPos.x, canvasPos.y));
                     view.ShowOnScreen();
-                    view.m_CanvasGroup.alpha = alpha; // Apply distance-based alpha
+                    view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
+
+
+
                 }
                 else
                 {
@@ -264,7 +278,7 @@ namespace Modules.Utilities
                     view.SetArrowRotation(angle);
 
                     view.ShowOffScreen();
-                    view.m_CanvasGroup.alpha = alpha; // Apply distance-based alpha
+                    view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
                 }
             }
         }

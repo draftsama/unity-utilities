@@ -67,30 +67,30 @@ namespace Modules.Utilities.Editor
             object[] paramValues = methodParameters[methodKey];
 
             // Draw parameter fields if method has parameters
-          
-                EditorGUILayout.BeginVertical("box");
-                EditorGUILayout.LabelField(buttonText, EditorStyles.boldLabel);
 
-                for (int i = 0; i < parameters.Length; i++)
+            EditorGUILayout.BeginVertical("box");
+            EditorGUILayout.LabelField(buttonText, EditorStyles.boldLabel);
+
+            for (int i = 0; i < parameters.Length; i++)
+            {
+                ParameterInfo param = parameters[i];
+                paramValues[i] = DrawParameterField(param.Name, param.ParameterType, paramValues[i]);
+            }
+
+            if (GUILayout.Button($"Execute"))
+            {
+                try
                 {
-                    ParameterInfo param = parameters[i];
-                    paramValues[i] = DrawParameterField(param.Name, param.ParameterType, paramValues[i]);
+                    method.Invoke(monoBehaviour, paramValues);
                 }
-
-                if (GUILayout.Button($"Execute"))
+                catch (System.Exception e)
                 {
-                    try
-                    {
-                        method.Invoke(monoBehaviour, paramValues);
-                    }
-                    catch (System.Exception e)
-                    {
-                        Debug.LogError($"Error invoking method {method.Name}: {e.Message}");
-                    }
+                    Debug.LogError($"Error invoking method {method.Name}: {e.Message}");
                 }
+            }
 
-                EditorGUILayout.EndVertical();
-           
+            EditorGUILayout.EndVertical();
+
         }
 
         private object DrawParameterField(string paramName, Type paramType, object currentValue)
@@ -162,7 +162,7 @@ namespace Modules.Utilities.Editor
     {
 
         int selectedIndex = 0;
-       
+
 
         public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
         {
@@ -171,7 +171,7 @@ namespace Modules.Utilities.Editor
                 // Create a dropdown with the predefined strings
                 // Debug.Log("m_Options: " + m_Options.Length);
 
-                Dictionary<string,string> fieldOptions = ((DropdownFieldAttribute)attribute).m_Options;
+                Dictionary<string, string> fieldOptions = ((DropdownFieldAttribute)attribute).m_Options;
 
                 string currentValue = property.stringValue;
 
@@ -220,7 +220,7 @@ namespace Modules.Utilities.Editor
             if (property.propertyType == SerializedPropertyType.Vector2)
             {
                 MinMaxSliderAttribute minMaxAttr = (MinMaxSliderAttribute)attribute;
-                
+
                 Vector2 range = property.vector2Value;
                 float minValue = range.x;
                 float maxValue = range.y;
@@ -239,7 +239,7 @@ namespace Modules.Utilities.Editor
                     {
                         actualMinLimit = minLimitProp.floatValue;
                     }
-                    
+
                     if (maxLimitProp != null && maxLimitProp.propertyType == SerializedPropertyType.Float)
                     {
                         actualMaxLimit = maxLimitProp.floatValue;
@@ -276,7 +276,7 @@ namespace Modules.Utilities.Editor
                 {
                     labelText += $" [{actualMinLimit:F1}-{actualMaxLimit:F1}]";
                 }
-                
+
                 // Draw label
                 EditorGUI.LabelField(labelRect, new GUIContent(labelText, label.tooltip));
 
@@ -322,6 +322,47 @@ namespace Modules.Utilities.Editor
         public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
         {
             return EditorGUIUtility.singleLineHeight;
+        }
+    }
+
+
+    [CustomPropertyDrawer(typeof(HelpBoxAttribute))]
+    public class HelpBoxAttributeDrawer : PropertyDrawer
+    {
+        public override void OnGUI(Rect position, SerializedProperty property, GUIContent label)
+        {
+            HelpBoxAttribute helpBoxAttr = (HelpBoxAttribute)attribute;
+            
+            // Calculate heights
+            float helpBoxHeight = GetHelpBoxHeight(helpBoxAttr.Message);
+            float propertyHeight = EditorGUI.GetPropertyHeight(property, label);
+            
+            // Create rects
+            Rect helpBoxRect = new Rect(position.x, position.y, position.width, helpBoxHeight);
+            Rect propertyRect = new Rect(position.x, position.y + helpBoxHeight + 2, position.width, propertyHeight);
+            
+            // Draw help box
+            EditorGUI.HelpBox(helpBoxRect, helpBoxAttr.Message, (MessageType)helpBoxAttr.MessageType);
+            
+            // Draw the property field
+            EditorGUI.PropertyField(propertyRect, property, label, true);
+        }
+        
+        public override float GetPropertyHeight(SerializedProperty property, GUIContent label)
+        {
+            HelpBoxAttribute helpBoxAttr = (HelpBoxAttribute)attribute;
+            float helpBoxHeight = GetHelpBoxHeight(helpBoxAttr.Message);
+            float propertyHeight = EditorGUI.GetPropertyHeight(property, label);
+            
+            return helpBoxHeight + propertyHeight + 2; // +2 for spacing
+        }
+        
+        private float GetHelpBoxHeight(string message)
+        {
+            // Calculate height needed for the help box based on message length
+            GUIStyle helpBoxStyle = GUI.skin.GetStyle("helpbox");
+            float width = EditorGUIUtility.currentViewWidth - 28; // Account for inspector padding
+            return helpBoxStyle.CalcHeight(new GUIContent(message), width);
         }
     }
 
