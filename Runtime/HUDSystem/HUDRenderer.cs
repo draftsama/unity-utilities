@@ -67,7 +67,7 @@ namespace Modules.Utilities
             go.transform.SetParent(_RectTransform, false);
             var indicatorView = go.AddComponent<HUDIndicatorView>();
 
-            indicatorView.Initialize(indicator);
+            indicatorView.Initialize(indicator,this);
 
             m_IndicatorViewList.Add(indicatorView);
 

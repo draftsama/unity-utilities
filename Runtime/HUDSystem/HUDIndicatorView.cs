@@ -12,6 +12,8 @@ namespace Modules.Utilities
 
         public HUDIndicator m_Indicator { get; private set; }
 
+        public HUDRenderer m_Renderer { get; private set; }
+
 
         RectTransform _OnScreenRectTransform;
         RectTransform _OffScreenRectTransform;
@@ -24,10 +26,10 @@ namespace Modules.Utilities
             m_CanvasGroup.alpha = 0f; // Start with invisible
         }
 
-        public void Initialize(HUDIndicator indicator)
+        public void Initialize( HUDIndicator indicator, HUDRenderer renderer)
         {
             var data = indicator.m_IndicatorData;
-
+            m_Renderer = renderer;
             if (data.m_UseOnScreen && data.m_OnScreenPrefab != null)
             {
                 var onScreenView = Instantiate(data.m_OnScreenPrefab, m_RectTransform);
