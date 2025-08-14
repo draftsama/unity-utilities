@@ -15,18 +15,14 @@ namespace Modules.Utilities.Editor
         [MenuItem("Utilities/Open Project Folder")]
         public static void OpenProjectFolder()
         {
-            OpenFolder(Environment.CurrentDirectory);
+           EditorUtility.RevealInFinder(Environment.CurrentDirectory);
         }
-        [MenuItem("Utilities/Open Resources Folder")]
-        public static void OpenResourcesFloder()
+        [MenuItem("Utilities/Open Persistent Data Folder")]
+        public static void OpenPersistentDataFolder()
         {
-
-            string folderPath = Path.Combine(Environment.CurrentDirectory, "Resources");
-            if (!Directory.Exists(folderPath))
-            {
-                Directory.CreateDirectory(folderPath);
-            }
-            OpenFolder(folderPath);
+            EditorUtility.RevealInFinder(Application.persistentDataPath);
+     
+            // OpenFolder(folderPath);
         }
 
    

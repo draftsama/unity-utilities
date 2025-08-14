@@ -302,6 +302,115 @@ namespace Modules.Utilities
 
 
 
+        /// <summary>
+    /// Clusters points based on proximity and returns the centroid of each cluster
+    /// </summary>
+    /// <param name="points">List of points to cluster</param>
+    /// <param name="radius">Distance threshold for clustering</param>
+    /// <returns>List of centroid points representing each cluster</returns>
+    public static List<Vector3> GetClusterCentroids(List<Vector3> points, float radius)
+    {
+        List<Vector3> centroids = new List<Vector3>();
+        List<Vector3> pointsToProcess = new List<Vector3>(points);
+
+        while (pointsToProcess.Count > 0)
+        {
+            // Start a new cluster with the first remaining point
+            List<Vector3> currentCluster = new List<Vector3>();
+            Queue<Vector3> queue = new Queue<Vector3>();
+
+            queue.Enqueue(pointsToProcess[0]);
+            pointsToProcess.RemoveAt(0);
+
+            while (queue.Count > 0)
+            {
+                Vector3 currentPoint = queue.Dequeue();
+                currentCluster.Add(currentPoint);
+
+                // Loop backwards to avoid index issues when removing elements
+                for (int i = pointsToProcess.Count - 1; i >= 0; i--)
+                {
+                    if (Vector3.Distance(currentPoint, pointsToProcess[i]) < radius)
+                    {
+                        // If a nearby point is found, move it from pointsToProcess to the queue
+                        queue.Enqueue(pointsToProcess[i]);
+                        pointsToProcess.RemoveAt(i);
+                    }
+                }
+            }
+
+            // Calculate the centroid of the completed cluster
+            Vector3 centroid = Vector3.zero;
+            foreach (Vector3 pointInCluster in currentCluster)
+            {
+                centroid += pointInCluster;
+            }
+            centroids.Add(centroid / currentCluster.Count);
+        }
+
+        return centroids;
+    }
+
+    /// <summary>
+    /// Clusters points based on proximity and returns the closest point to origin from each cluster
+    /// </summary>
+    /// <param name="points">List of points to cluster</param>
+    /// <param name="radius">Distance threshold for clustering</param>
+    /// <returns>List of closest points to origin representing each cluster</returns>
+    public static List<Vector3> GetClosestToOrigin(List<Vector3> points, float radius)
+    {
+        List<Vector3> closestPoints = new List<Vector3>();
+        List<Vector3> pointsToProcess = new List<Vector3>(points);
+
+        while (pointsToProcess.Count > 0)
+        {
+            // Start a new cluster with the first remaining point
+            List<Vector3> currentCluster = new List<Vector3>();
+            Queue<Vector3> queue = new Queue<Vector3>();
+
+            queue.Enqueue(pointsToProcess[0]);
+            pointsToProcess.RemoveAt(0);
+
+            while (queue.Count > 0)
+            {
+                Vector3 currentPoint = queue.Dequeue();
+                currentCluster.Add(currentPoint);
+
+                // Loop backwards to avoid index issues when removing elements
+                for (int i = pointsToProcess.Count - 1; i >= 0; i--)
+                {
+                    if (Vector3.Distance(currentPoint, pointsToProcess[i]) < radius)
+                    {
+                        // If a nearby point is found, move it from pointsToProcess to the queue
+                        queue.Enqueue(pointsToProcess[i]);
+                        pointsToProcess.RemoveAt(i);
+                    }
+                }
+            }
+
+            // Find the point closest to origin in the completed cluster
+            Vector3 closestToOrigin = currentCluster[0];
+            float closestDistance = Vector3.Distance(Vector3.zero, closestToOrigin);
+            
+            foreach (Vector3 pointInCluster in currentCluster)
+            {
+                float distance = Vector3.Distance(Vector3.zero, pointInCluster);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestToOrigin = pointInCluster;
+                }
+            }
+            
+            closestPoints.Add(closestToOrigin);
+        }
+
+        return closestPoints;
+    }
+
+
+
+
 
 
     }
