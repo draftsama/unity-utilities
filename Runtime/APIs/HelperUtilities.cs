@@ -408,6 +408,158 @@ namespace Modules.Utilities
         return closestPoints;
     }
 
+    /// <summary>
+    /// Clusters points based on proximity and returns the indices of centroid points from the original list
+    /// </summary>
+    /// <param name="points">List of points to cluster</param>
+    /// <param name="radius">Distance threshold for clustering</param>
+    /// <returns>List of indices representing the closest points to calculated centroids</returns>
+    public static List<int> GetClusterCentroidIndices(List<Vector3> points, float radius)
+    {
+        List<int> centroidIndices = new List<int>();
+        List<Vector3> pointsToProcess = new List<Vector3>(points);
+        List<int> indicesToProcess = new List<int>();
+        
+        // Initialize indices
+        for (int i = 0; i < points.Count; i++)
+        {
+            indicesToProcess.Add(i);
+        }
+
+        while (pointsToProcess.Count > 0)
+        {
+            // Start a new cluster with the first remaining point
+            List<Vector3> currentCluster = new List<Vector3>();
+            List<int> currentClusterIndices = new List<int>();
+            Queue<Vector3> queue = new Queue<Vector3>();
+            Queue<int> indexQueue = new Queue<int>();
+
+            queue.Enqueue(pointsToProcess[0]);
+            indexQueue.Enqueue(indicesToProcess[0]);
+            pointsToProcess.RemoveAt(0);
+            indicesToProcess.RemoveAt(0);
+
+            while (queue.Count > 0)
+            {
+                Vector3 currentPoint = queue.Dequeue();
+                int currentIndex = indexQueue.Dequeue();
+                currentCluster.Add(currentPoint);
+                currentClusterIndices.Add(currentIndex);
+
+                // Loop backwards to avoid index issues when removing elements
+                for (int i = pointsToProcess.Count - 1; i >= 0; i--)
+                {
+                    if (Vector3.Distance(currentPoint, pointsToProcess[i]) < radius)
+                    {
+                        // If a nearby point is found, move it from pointsToProcess to the queue
+                        queue.Enqueue(pointsToProcess[i]);
+                        indexQueue.Enqueue(indicesToProcess[i]);
+                        pointsToProcess.RemoveAt(i);
+                        indicesToProcess.RemoveAt(i);
+                    }
+                }
+            }
+
+            // Calculate the centroid of the completed cluster
+            Vector3 centroid = Vector3.zero;
+            foreach (Vector3 pointInCluster in currentCluster)
+            {
+                centroid += pointInCluster;
+            }
+            centroid /= currentCluster.Count;
+            
+            // Find the point closest to the calculated centroid
+            int closestToCentroidIndex = currentClusterIndices[0];
+            float closestDistance = Vector3.Distance(centroid, currentCluster[0]);
+            
+            for (int i = 1; i < currentCluster.Count; i++)
+            {
+                float distance = Vector3.Distance(centroid, currentCluster[i]);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestToCentroidIndex = currentClusterIndices[i];
+                }
+            }
+            
+            centroidIndices.Add(closestToCentroidIndex);
+        }
+
+        return centroidIndices;
+    }
+
+    /// <summary>
+    /// Clusters points based on proximity and returns the indices of points closest to origin from each cluster
+    /// </summary>
+    /// <param name="points">List of points to cluster</param>
+    /// <param name="radius">Distance threshold for clustering</param>
+    /// <returns>List of indices representing the closest points to origin from each cluster</returns>
+    public static List<int> GetClosestToOriginIndices(List<Vector3> points, float radius)
+    {
+        List<int> closestIndices = new List<int>();
+        List<Vector3> pointsToProcess = new List<Vector3>(points);
+        List<int> indicesToProcess = new List<int>();
+        
+        // Initialize indices
+        for (int i = 0; i < points.Count; i++)
+        {
+            indicesToProcess.Add(i);
+        }
+
+        while (pointsToProcess.Count > 0)
+        {
+            // Start a new cluster with the first remaining point
+            List<Vector3> currentCluster = new List<Vector3>();
+            List<int> currentClusterIndices = new List<int>();
+            Queue<Vector3> queue = new Queue<Vector3>();
+            Queue<int> indexQueue = new Queue<int>();
+
+            queue.Enqueue(pointsToProcess[0]);
+            indexQueue.Enqueue(indicesToProcess[0]);
+            pointsToProcess.RemoveAt(0);
+            indicesToProcess.RemoveAt(0);
+
+            while (queue.Count > 0)
+            {
+                Vector3 currentPoint = queue.Dequeue();
+                int currentIndex = indexQueue.Dequeue();
+                currentCluster.Add(currentPoint);
+                currentClusterIndices.Add(currentIndex);
+
+                // Loop backwards to avoid index issues when removing elements
+                for (int i = pointsToProcess.Count - 1; i >= 0; i--)
+                {
+                    if (Vector3.Distance(currentPoint, pointsToProcess[i]) < radius)
+                    {
+                        // If a nearby point is found, move it from pointsToProcess to the queue
+                        queue.Enqueue(pointsToProcess[i]);
+                        indexQueue.Enqueue(indicesToProcess[i]);
+                        pointsToProcess.RemoveAt(i);
+                        indicesToProcess.RemoveAt(i);
+                    }
+                }
+            }
+
+            // Find the point closest to origin in the completed cluster
+            int closestToOriginIndex = currentClusterIndices[0];
+            float closestDistance = Vector3.Distance(Vector3.zero, currentCluster[0]);
+            
+            for (int i = 1; i < currentCluster.Count; i++)
+            {
+                float distance = Vector3.Distance(Vector3.zero, currentCluster[i]);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closestToOriginIndex = currentClusterIndices[i];
+                }
+            }
+            
+            closestIndices.Add(closestToOriginIndex);
+        }
+
+        return closestIndices;
+    }
+
 
 
 
