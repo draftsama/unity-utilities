@@ -13,6 +13,7 @@ using UnityEngine.AddressableAssets;
 
 namespace Modules.Utilities
 {
+    [DefaultExecutionOrder(-10)]
     public class ResourceManager : MonoBehaviour
     {
         [SerializeField] public ResourceSettingAssets m_ResourceSettingAssets;
@@ -49,11 +50,11 @@ namespace Modules.Utilities
                     return;
                 }
 
-                
+
             }
 
 
-            
+
 
             //if mobile platform, use Addressable
             if (Application.platform == RuntimePlatform.Android ||
@@ -82,7 +83,7 @@ namespace Modules.Utilities
         public static ResourceManager GetInstance()
         {
 
-            
+
             if (_Instance == null)
             {
                 _Instance = FindFirstObjectByType<ResourceManager>();
@@ -514,6 +515,7 @@ namespace Modules.Utilities
         {
             var folderName = GetInstance().m_ResourceSettingAssets.m_ExternalResourcesFolderName;
             string externalResourcesPath = Path.Combine(Environment.CurrentDirectory, folderName);
+
             if (string.IsNullOrEmpty(folderName) || !Directory.Exists(externalResourcesPath))
             {
                 //default to Resources folder if not set

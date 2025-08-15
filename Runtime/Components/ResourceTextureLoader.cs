@@ -17,6 +17,9 @@ public class ResourceTextureLoader : MonoBehaviour
     [SerializeField] public bool m_GenerateMipMaps = false;
     [SerializeField] public TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
     [SerializeField] public FilterMode m_FilterMode = FilterMode.Bilinear;
+    [SerializeField] public int m_MaxTextureSize = 2048;
+    [SerializeField] public int m_TextureCompression = 0; // 0 = Uncompressed
+    [SerializeField] public int m_NPOTScale = 0; // 0 = None (keep original size)
     [SerializeField][HideInInspector] public int _CurrentMaterialIndex = 0;
     [SerializeField][HideInInspector] public int _CurrentTexturePropertyIndex = 0;
     [SerializeField] public ContentSizeMode m_ContentSizeMode = ContentSizeMode.None;

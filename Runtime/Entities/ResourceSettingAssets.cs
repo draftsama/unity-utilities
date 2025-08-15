@@ -1,4 +1,6 @@
 using UnityEngine;
+using System.IO;
+
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -11,6 +13,18 @@ namespace Modules.Utilities
     {
         public ResourceStoreType m_ResourceStoreType;
         public string m_ExternalResourcesFolderName = "";
+
+        public string GetExternalResourcesFolderPath()
+        {
+            if (string.IsNullOrEmpty(m_ExternalResourcesFolderName))
+            {
+                return "";
+            }
+            return Path.Combine(System.Environment.CurrentDirectory, m_ExternalResourcesFolderName);
+        }
+
+
+      
     }
 
 
@@ -33,17 +47,17 @@ namespace Modules.Utilities
             {
                 Debug.Log("ResourceSettingAssets already exists in Resources folder, selecting it");
 
-                
+
                 Selection.activeObject = resourceSettingAssets[0];
 
                 // show the object in the project view
                 EditorGUIUtility.PingObject(resourceSettingAssets[0]);
 
-                
+
                 return;
             }
 
-            
+
 
             // Create the asset in the "Resources" folder
             ResourceSettingAssets asset = ScriptableObject.CreateInstance<ResourceSettingAssets>();

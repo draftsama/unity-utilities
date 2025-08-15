@@ -33,6 +33,9 @@ namespace Modules.Utilities.Editor
 
         private SerializedProperty _FilterMode;
         private SerializedProperty _FileNameProperty;
+        private SerializedProperty _MaxTextureSizeProperty;
+        private SerializedProperty _TextureCompressionProperty;
+        private SerializedProperty _NPOTScaleProperty;
         private TextureImporterType _TextureType;
 
         private SerializedProperty _ContentSizeModeProperty;
@@ -68,6 +71,9 @@ namespace Modules.Utilities.Editor
             _TextureWrapMode = serializedObject.FindProperty(nameof(instance.m_TextureWrapMode));
             _GenerateMipMaps = serializedObject.FindProperty(nameof(instance.m_GenerateMipMaps));
             _FilterMode = serializedObject.FindProperty(nameof(instance.m_FilterMode));
+            _MaxTextureSizeProperty = serializedObject.FindProperty(nameof(instance.m_MaxTextureSize));
+            _TextureCompressionProperty = serializedObject.FindProperty(nameof(instance.m_TextureCompression));
+            _NPOTScaleProperty = serializedObject.FindProperty(nameof(instance.m_NPOTScale));
             _ContentSizeModeProperty = serializedObject.FindProperty(nameof(instance.m_ContentSizeMode));
 
             _RawImage = serializedObject.FindProperty(nameof(instance.m_RawImage));
@@ -176,6 +182,28 @@ namespace Modules.Utilities.Editor
             EditorGUILayout.PropertyField(_GenerateMipMaps);
             EditorGUILayout.PropertyField(_TextureWrapMode);
             EditorGUILayout.PropertyField(_FilterMode);
+            
+            // Texture Size Settings
+            EditorGUILayout.Space();
+            
+            // Max Texture Size dropdown
+            string[] textureSizeOptions = {"32", "64", "128", "256", "512", "1024", "2048", "4096", "8192"};
+            int[] textureSizeValues = {32, 64, 128, 256, 512, 1024, 2048, 4096, 8192};
+            int currentSizeIndex = System.Array.IndexOf(textureSizeValues, _MaxTextureSizeProperty.intValue);
+            if (currentSizeIndex == -1) currentSizeIndex = 6; // Default to 2048
+            
+            currentSizeIndex = EditorGUILayout.Popup("Max Texture Size", currentSizeIndex, textureSizeOptions);
+            _MaxTextureSizeProperty.intValue = textureSizeValues[currentSizeIndex];
+            
+            // Texture Compression
+            var compressionMode = (UnityEditor.TextureImporterCompression)_TextureCompressionProperty.intValue;
+            compressionMode = (UnityEditor.TextureImporterCompression)EditorGUILayout.EnumPopup("Compression", compressionMode);
+            _TextureCompressionProperty.intValue = (int)compressionMode;
+            
+            // Non Power of 2 handling
+            var npotScale = (UnityEditor.TextureImporterNPOTScale)_NPOTScaleProperty.intValue;
+            npotScale = (UnityEditor.TextureImporterNPOTScale)EditorGUILayout.EnumPopup("Non-Power of 2", npotScale);
+            _NPOTScaleProperty.intValue = (int)npotScale;
 
 
             if (_CurrentNameInput != _FileNameProperty.stringValue || _FileNameProperty.stringValue == string.Empty)
@@ -352,12 +380,10 @@ namespace Modules.Utilities.Editor
             //delay load image
             if (string.IsNullOrEmpty(_filename))
                 return;
-            Debug.Log($"load image: {_filename}");
 
             await Task.Delay(100);
 
             var folderName = ResourceManager.GetResourceSettingAssets().m_ExternalResourcesFolderName;
-            Debug.Log($"folderName: {folderName}");
             var relativeFolder = Path.Combine("ResourcesEditor", "Editor", folderName);
             var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
 
@@ -387,6 +413,12 @@ namespace Modules.Utilities.Editor
                 importer.wrapMode = (TextureWrapMode)_TextureWrapMode.intValue;
                 importer.filterMode = (FilterMode)_FilterMode.intValue;
                 importer.isReadable = true;
+                
+                // Set texture size/resolution settings
+                importer.maxTextureSize = _MaxTextureSizeProperty.intValue;
+                importer.textureCompression = (TextureImporterCompression)_TextureCompressionProperty.intValue;
+                importer.npotScale = (TextureImporterNPOTScale)_NPOTScaleProperty.intValue;
+                
                 importer.SaveAndReimport();
 
 
@@ -399,6 +431,7 @@ namespace Modules.Utilities.Editor
                 var instance = target as ResourceTextureLoader;
                 instance.SetEditorSource(texture);
                 instance.ApplyTexture(texture);
+                Debug.Log($"loaded image: {_filename} image size: {texture.width}x{texture.height}");
             }
         }
     }

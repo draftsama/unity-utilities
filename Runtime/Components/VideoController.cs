@@ -250,6 +250,11 @@ namespace Modules.Utilities
             else if (m_PathType == PathType.Absolute)
             {
                 filePath = Path.Combine(m_FolderName, m_FileName);
+            }else if (m_PathType == PathType.ExternalResources)
+            {
+                var externalResourcesPath = ResourceManager.GetResourceFolderPath();
+
+                filePath = Path.Combine(externalResourcesPath, m_FolderName, m_FileName);
             }
 
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
