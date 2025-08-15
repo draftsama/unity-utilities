@@ -273,6 +273,8 @@ namespace Modules.Utilities
                     if (!m_HandleOverlap || !_hiddenByOverlap[viewIndex])
                     {
                         view.ShowOnScreen();
+                        // Apply distance-based alpha only when visible
+                        view.CanvasGroup.alpha = alpha;
                     }
                     else
                     {
@@ -285,9 +287,9 @@ namespace Modules.Utilities
                         {
                             view.OffScreenArrowRectTransform.gameObject.SetActive(false);
                         }
+                        // Set alpha to 0 for hidden by overlap
+                        view.CanvasGroup.alpha = 0f;
                     }
-                    
-                    view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
 
 
 
