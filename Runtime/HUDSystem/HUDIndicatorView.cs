@@ -14,9 +14,9 @@ namespace Modules.Utilities
         public HUDRenderer Renderer { get; private set; }
 
 
-        RectTransform _OnScreenRectTransform;
-        RectTransform _OffScreenRectTransform;
-        RectTransform _OffScreenArrowRectTransform;
+        public RectTransform OnScreenRectTransform { get; private set; }
+        public RectTransform OffScreenRectTransform { get; private set; }
+        public RectTransform OffScreenArrowRectTransform { get; private set; }
 
         void Awake()
         {
@@ -25,6 +25,8 @@ namespace Modules.Utilities
             CanvasGroup.alpha = 0f; // Start with invisible
         }
 
+
+
         public void Initialize(HUDIndicator indicator, HUDRenderer renderer)
         {
             var data = indicator.m_IndicatorData;
@@ -32,10 +34,10 @@ namespace Modules.Utilities
             if (data.m_UseOnScreen && data.m_OnScreenPrefab != null)
             {
                 var onScreenView = Instantiate(data.m_OnScreenPrefab, RectTransform);
-                _OnScreenRectTransform = onScreenView.GetComponent<RectTransform>();
-                _OnScreenRectTransform.anchoredPosition = Vector2.zero;
-                _OnScreenRectTransform.localRotation = Quaternion.identity;
-                _OnScreenRectTransform.localScale = Vector3.one;
+                OnScreenRectTransform = onScreenView.GetComponent<RectTransform>();
+                OnScreenRectTransform.anchoredPosition = Vector2.zero;
+                OnScreenRectTransform.localRotation = Quaternion.identity;
+                OnScreenRectTransform.localScale = Vector3.one;
                 onScreenView.SetActive(false);
             }
 
@@ -44,10 +46,10 @@ namespace Modules.Utilities
                 if (data.m_OffScreenPrefab != null)
                 {
                     var offScreenView = Instantiate(data.m_OffScreenPrefab, RectTransform);
-                    _OffScreenRectTransform = offScreenView.GetComponent<RectTransform>();
-                    _OffScreenRectTransform.anchoredPosition = Vector2.zero;
-                    _OffScreenRectTransform.localRotation = Quaternion.identity;
-                    _OffScreenRectTransform.localScale = Vector3.one;
+                    OffScreenRectTransform = offScreenView.GetComponent<RectTransform>();
+                    OffScreenRectTransform.anchoredPosition = Vector2.zero;
+                    OffScreenRectTransform.localRotation = Quaternion.identity;
+                    OffScreenRectTransform.localScale = Vector3.one;
 
                     offScreenView.SetActive(false);
                 }
@@ -55,10 +57,10 @@ namespace Modules.Utilities
                 if (data.m_OffScreenArrowPrefab != null)
                 {
                     var offScreenArrowView = Instantiate(data.m_OffScreenArrowPrefab, RectTransform);
-                    _OffScreenArrowRectTransform = offScreenArrowView.GetComponent<RectTransform>();
-                    _OffScreenArrowRectTransform.anchoredPosition = Vector2.zero;
-                    _OffScreenArrowRectTransform.localRotation = Quaternion.identity;
-                    _OffScreenArrowRectTransform.localScale = Vector3.one;
+                    OffScreenArrowRectTransform = offScreenArrowView.GetComponent<RectTransform>();
+                    OffScreenArrowRectTransform.anchoredPosition = Vector2.zero;
+                    OffScreenArrowRectTransform.localRotation = Quaternion.identity;
+                    OffScreenArrowRectTransform.localScale = Vector3.one;
                     offScreenArrowView.SetActive(false);
 
                 }
@@ -74,102 +76,102 @@ namespace Modules.Utilities
 
         public void UpdateOnScreenPosition(Vector2 position)
         {
-            if (_OnScreenRectTransform != null)
+            if (OnScreenRectTransform != null)
             {
-                _OnScreenRectTransform.anchoredPosition = position;
+                OnScreenRectTransform.anchoredPosition = position;
             }
         }
 
         public void UpdateOffScreenPosition(Vector2 position)
         {
-            if (_OffScreenRectTransform != null)
+            if (OffScreenRectTransform != null)
             {
-                _OffScreenRectTransform.anchoredPosition = position;
+                OffScreenRectTransform.anchoredPosition = position;
             }
         }
 
         public void UpdateOffScreenArrowPosition(Vector2 position)
         {
-            if (_OffScreenArrowRectTransform != null)
+            if (OffScreenArrowRectTransform != null)
             {
-                _OffScreenArrowRectTransform.anchoredPosition = position;
+                OffScreenArrowRectTransform.anchoredPosition = position;
             }
         }
 
 
         public void ShowOnScreen()
         {
-            if (_OnScreenRectTransform != null)
+            if (OnScreenRectTransform != null)
             {
-                _OnScreenRectTransform.gameObject.SetActive(true);
+                OnScreenRectTransform.gameObject.SetActive(true);
             }
-            if (_OffScreenRectTransform != null)
+            if (OffScreenRectTransform != null)
             {
-                _OffScreenRectTransform.gameObject.SetActive(false);
+                OffScreenRectTransform.gameObject.SetActive(false);
             }
-            if (_OffScreenArrowRectTransform != null)
+            if (OffScreenArrowRectTransform != null)
             {
-                _OffScreenArrowRectTransform.gameObject.SetActive(false);
+                OffScreenArrowRectTransform.gameObject.SetActive(false);
             }
             // Alpha will be set by distance calculation in HUDRenderer
         }
 
         public void ShowOffScreen()
         {
-            if (_OnScreenRectTransform != null)
+            if (OnScreenRectTransform != null)
             {
-                _OnScreenRectTransform.gameObject.SetActive(false);
+                OnScreenRectTransform.gameObject.SetActive(false);
             }
-            if (_OffScreenRectTransform != null)
+            if (OffScreenRectTransform != null)
             {
-                _OffScreenRectTransform.gameObject.SetActive(true);
+                OffScreenRectTransform.gameObject.SetActive(true);
             }
-            if (_OffScreenArrowRectTransform != null)
+            if (OffScreenArrowRectTransform != null)
             {
-                _OffScreenArrowRectTransform.gameObject.SetActive(true);
+                OffScreenArrowRectTransform.gameObject.SetActive(true);
             }
             // Alpha will be set by distance calculation in HUDRenderer
         }
 
         public void ShowOffScreenArrow()
         {
-            if (_OnScreenRectTransform != null)
+            if (OnScreenRectTransform != null)
             {
-                _OnScreenRectTransform.gameObject.SetActive(false);
+                OnScreenRectTransform.gameObject.SetActive(false);
             }
-            if (_OffScreenRectTransform != null)
+            if (OffScreenRectTransform != null)
             {
-                _OffScreenRectTransform.gameObject.SetActive(false);
+                OffScreenRectTransform.gameObject.SetActive(false);
             }
-            if (_OffScreenArrowRectTransform != null)
+            if (OffScreenArrowRectTransform != null)
             {
-                _OffScreenArrowRectTransform.gameObject.SetActive(true);
+                OffScreenArrowRectTransform.gameObject.SetActive(true);
             }
             // Alpha will be set by distance calculation in HUDRenderer
         }
 
         public void Hide()
         {
-            if (_OnScreenRectTransform != null)
+            if (OnScreenRectTransform != null)
             {
-                _OnScreenRectTransform.gameObject.SetActive(false);
+                OnScreenRectTransform.gameObject.SetActive(false);
             }
-            if (_OffScreenRectTransform != null)
+            if (OffScreenRectTransform != null)
             {
-                _OffScreenRectTransform.gameObject.SetActive(false);
+                OffScreenRectTransform.gameObject.SetActive(false);
             }
-            if (_OffScreenArrowRectTransform != null)
+            if (OffScreenArrowRectTransform != null)
             {
-                _OffScreenArrowRectTransform.gameObject.SetActive(false);
+                OffScreenArrowRectTransform.gameObject.SetActive(false);
             }
             CanvasGroup.alpha = 0f; // Hide the indicator
         }
 
         public void SetArrowRotation(float angleDegrees)
         {
-            if (_OffScreenArrowRectTransform != null)
+            if (OffScreenArrowRectTransform != null)
             {
-                _OffScreenArrowRectTransform.rotation = Quaternion.AngleAxis(angleDegrees, Vector3.forward);
+                OffScreenArrowRectTransform.rotation = Quaternion.AngleAxis(angleDegrees, Vector3.forward);
             }
         }
 
@@ -184,19 +186,41 @@ namespace Modules.Utilities
 
         public void SetOnScreenSize(Vector2 size)
         {
-            if (_OnScreenRectTransform != null)
+            if (OnScreenRectTransform != null)
             {
-                _OnScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
-                _OnScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
+                OnScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
+                OnScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
             }
         }
         
         public void SetOffScreenSize(Vector2 size)
         {
-            if (_OffScreenRectTransform != null)
+            if (OffScreenRectTransform != null)
             {
-                _OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
-                _OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
+                OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
+                OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
+            }
+        }
+
+        /// <summary>
+        /// Hide only the OnScreen part due to overlap (keep CanvasGroup alpha intact)
+        /// </summary>
+        public void HideOnScreenByOverlap()
+        {
+            if (OnScreenRectTransform != null)
+            {
+                OnScreenRectTransform.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// Show OnScreen part when no longer overlapping
+        /// </summary>
+        public void ShowOnScreenFromOverlap()
+        {
+            if (OnScreenRectTransform != null)
+            {
+                OnScreenRectTransform.gameObject.SetActive(true);
             }
         }
 

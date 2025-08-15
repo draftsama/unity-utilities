@@ -28,9 +28,11 @@ namespace Modules.Utilities
         [Header("Performance")]
         [Tooltip("Update sorting every N frames (1 = every frame, 2 = every other frame)")]
         [Range(1, 10)]
-        public int m_SortUpdateFrequency = 1; 
+        public int m_SortUpdateFrequency = 1;
 
-      
+        [Header("Overlap Detection")]
+        [Tooltip("Hide indicators that are behind overlapping ones")]
+        public bool m_HandleOverlap = true;
 
         public List<HUDIndicatorView> m_IndicatorViewList = new List<HUDIndicatorView>();
 
@@ -40,6 +42,7 @@ namespace Modules.Utilities
         private List<HUDIndicatorView> _activeViews = new List<HUDIndicatorView>();
         private List<float> _viewDistances = new List<float>();
         private List<int> _sortedIndices = new List<int>();
+        private List<bool> _hiddenByOverlap = new List<bool>();
         private int _frameCounter = 0;
 
 
@@ -154,6 +157,7 @@ namespace Modules.Utilities
             // Clear and reuse existing collections to avoid GC allocation
             _activeViews.Clear();
             _viewDistances.Clear();
+            _hiddenByOverlap.Clear();
             
             // Only clear sorted indices if we're updating sorting this frame
             if (shouldUpdateSorting)
@@ -183,6 +187,7 @@ namespace Modules.Utilities
                 
                 _activeViews.Add(view);
                 _viewDistances.Add(distance);
+                _hiddenByOverlap.Add(false); // Initialize as not hidden
                 
                 if (shouldUpdateSorting)
                 {
@@ -196,6 +201,12 @@ namespace Modules.Utilities
                 // Farthest first (lower sibling index = renders behind)
                 // Closest last (higher sibling index = renders on top)
                 _sortedIndices.Sort((a, b) => _viewDistances[b].CompareTo(_viewDistances[a]));
+            }
+
+            // Handle overlap detection if enabled
+            if (m_HandleOverlap && _activeViews.Count > 1)
+            {
+                HandleOverlapDetection();
             }
 
             // Use existing sorted order if not updating sorting this frame
@@ -255,9 +266,27 @@ namespace Modules.Utilities
 
                 if (isOnScreen)
                 {
-                    // Show on-screen indicator
+                    // Show on-screen indicator (but check if hidden by overlap)
                     view.UpdateOnScreenPosition(new Vector2(canvasPos.x, canvasPos.y));
-                    view.ShowOnScreen();
+                    
+                    // Only show if not hidden by overlap
+                    if (!m_HandleOverlap || !_hiddenByOverlap[viewIndex])
+                    {
+                        view.ShowOnScreen();
+                    }
+                    else
+                    {
+                        // Show off-screen parts but keep OnScreen hidden due to overlap
+                        if (view.OffScreenRectTransform != null)
+                        {
+                            view.OffScreenRectTransform.gameObject.SetActive(false);
+                        }
+                        if (view.OffScreenArrowRectTransform != null)
+                        {
+                            view.OffScreenArrowRectTransform.gameObject.SetActive(false);
+                        }
+                    }
+                    
                     view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
 
 
@@ -336,6 +365,67 @@ namespace Modules.Utilities
             }
 
             return clampedPos;
+        }
+
+        /// <summary>
+        /// Handle overlap detection between UI indicators
+        /// </summary>
+        private void HandleOverlapDetection()
+        {
+            // First, reset all views to not hidden by overlap (allow them to show again)
+            for (int i = 0; i < _activeViews.Count; i++)
+            {
+                _hiddenByOverlap[i] = false;
+                // Reset OnScreen visibility if it exists
+                var view = _activeViews[i];
+                if (view.OnScreenRectTransform != null && !view.OnScreenRectTransform.gameObject.activeSelf)
+                {
+                    view.ShowOnScreenFromOverlap();
+                }
+            }
+
+            // Then check for overlaps and hide as needed
+            for (int i = 0; i < _activeViews.Count; i++)
+            {
+                if (_hiddenByOverlap[i]) continue; // Skip if already hidden
+                
+                var view = _activeViews[i];
+                var rt = view.OnScreenRectTransform;
+                
+                // Skip if no OnScreen component or not active
+                if (rt == null || !rt.gameObject.activeSelf) continue;
+                
+                int siblingIndex = view.RectTransform.GetSiblingIndex();
+
+                for (int j = i + 1; j < _activeViews.Count; j++)
+                {
+                    if (_hiddenByOverlap[j]) continue; // Skip if already hidden
+                    
+                    var otherView = _activeViews[j];
+                    var otherRt = otherView.OnScreenRectTransform;
+
+                    // Skip if no OnScreen component or not active
+                    if (otherRt == null || !otherRt.gameObject.activeSelf) continue;
+
+                    if (HelperUtilities.IsUIOverlapping(rt, otherRt))
+                    {
+                        int otherSiblingIndex = otherView.RectTransform.GetSiblingIndex();
+
+                        // Hide the one that's behind (lower sibling index)
+                        if (siblingIndex < otherSiblingIndex)
+                        {
+                            _hiddenByOverlap[i] = true;
+                            view.HideOnScreenByOverlap();
+                            break; // This view is hidden, no need to check further
+                        }
+                        else
+                        {
+                            _hiddenByOverlap[j] = true;
+                            otherView.HideOnScreenByOverlap();
+                        }
+                    }
+                }
+            }
         }
 
 
