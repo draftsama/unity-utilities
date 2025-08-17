@@ -21,6 +21,14 @@ namespace Modules.Utilities
         [MinMaxSlider("m_MinDistanceLimit", "m_MaxDistanceLimit", 0f, 200f)]
         public Vector2 m_FadeDistance = new Vector2(15f, 20f);
 
+        [Header("Edge Fade Settings")]
+        [Tooltip("Enable fade when indicators get close to screen edges (OnScreen only). Only works for indicators with UseOffScreen = false")]
+        public bool m_EnableEdgeFade = true;
+        
+        [Tooltip("Distance from edge where fade starts (in pixels). Fade calculated from effective boundary (canvas edge - margin)")]
+        [Range(0f, 200f)]
+        public float m_EdgeFadeDistance = 50f;
+
         [Header("Rendering Order")]
         [Tooltip("Sort indicators by distance")]
         public bool m_SortByDistance = true;
@@ -39,6 +47,7 @@ namespace Modules.Utilities
         // Performance optimization: reuse collections
         private List<HUDIndicatorView> _activeViews = new List<HUDIndicatorView>();
         private List<float> _viewDistances = new List<float>();
+        private List<Vector3> _worldPositions = new List<Vector3>(); // Cache world positions
         private List<int> _sortedIndices = new List<int>();
         private int _frameCounter = 0;
 
@@ -52,13 +61,6 @@ namespace Modules.Utilities
                 m_Camera = Camera.main;
             }
         }
-
-
-        void Start()
-        {
-
-        }
-
 
         public void RegisterIndicator(HUDIndicator indicator)
         {
@@ -146,6 +148,51 @@ namespace Modules.Utilities
             }
         }
 
+        /// <summary>
+        /// Calculate alpha value based on distance from screen edges
+        /// </summary>
+        /// <param name="canvasPos">Position on canvas</param>
+        /// <param name="canvasRect">Canvas rectangle bounds</param>
+        /// <param name="margin">Margin to consider as the effective edge</param>
+        /// <returns>Alpha value between 0 and 1</returns>
+        private float CalculateAlphaFromEdge(Vector2 canvasPos, Rect canvasRect, float margin)
+        {
+            if (!m_EnableEdgeFade || m_EdgeFadeDistance <= 0f)
+            {
+                return 1f;
+            }
+
+            // Calculate effective boundaries (considering margin as the real edge)
+            float leftEdge = canvasRect.xMin + margin;
+            float rightEdge = canvasRect.xMax - margin;
+            float topEdge = canvasRect.yMax - margin;
+            float bottomEdge = canvasRect.yMin + margin;
+
+            // Calculate distance to each effective edge
+            float leftDistance = canvasPos.x - leftEdge;
+            float rightDistance = rightEdge - canvasPos.x;
+            float topDistance = topEdge - canvasPos.y;
+            float bottomDistance = canvasPos.y - bottomEdge;
+
+            // Find the minimum distance to any edge
+            float minEdgeDistance = Mathf.Min(Mathf.Min(leftDistance, rightDistance), Mathf.Min(topDistance, bottomDistance));
+
+            // Calculate fade based on edge distance
+            if (minEdgeDistance >= m_EdgeFadeDistance)
+            {
+                return 1f; // Fully visible
+            }
+            else if (minEdgeDistance <= 0f)
+            {
+                return 0f; // Completely transparent (at or beyond edge)
+            }
+            else
+            {
+                // Linear interpolation
+                return minEdgeDistance / m_EdgeFadeDistance;
+            }
+        }
+
         void Update()
         {
             _frameCounter++;
@@ -154,6 +201,7 @@ namespace Modules.Utilities
             // Clear and reuse existing collections to avoid GC allocation
             _activeViews.Clear();
             _viewDistances.Clear();
+            _worldPositions.Clear();
             
             // Only clear sorted indices if we're updating sorting this frame
             if (shouldUpdateSorting)
@@ -183,6 +231,7 @@ namespace Modules.Utilities
                 
                 _activeViews.Add(view);
                 _viewDistances.Add(distance);
+                _worldPositions.Add(worldPos);
                 
                 if (shouldUpdateSorting)
                 {
@@ -217,8 +266,8 @@ namespace Modules.Utilities
                 // Calculate alpha based on distance
                 float alpha = CalculateAlphaFromDistance(distance);
 
-                // Reuse already calculated world position
-                Vector3 worldPos = view.Indicator.m_Transform.position;
+                // Use cached world position
+                Vector3 worldPos = _worldPositions[viewIndex];
                 Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
 
                 // Check if the target is in front of the camera
@@ -233,6 +282,7 @@ namespace Modules.Utilities
                 // Convert world position to screen position
                 Vector3 screenPos = m_Camera.WorldToScreenPoint(worldPos);
                 Vector3 canvasPos = _RectTransform.InverseTransformPoint(screenPos);
+                Vector2 canvasPos2D = new Vector2(canvasPos.x, canvasPos.y);
 
 
                 if (view.Indicator.m_IndicatorData.m_AutoSize && view.Indicator.m_IndicatorData.m_BoxCollider != null)
@@ -246,20 +296,31 @@ namespace Modules.Utilities
                 // Get canvas rect bounds
                 Rect canvasRect = _RectTransform.rect;
 
-                // Check if the object is within the canvas bounds (with margin)
-                bool isOnScreen = canvasPos.x >= (canvasRect.xMin + TotalMargin) && canvasPos.x <= (canvasRect.xMax - TotalMargin) &&
-                                 canvasPos.y >= (canvasRect.yMin + TotalMargin) && canvasPos.y <= (canvasRect.yMax - TotalMargin) &&
+                // Check if the object is within the canvas bounds (without margin for visibility check)
+                bool isOnScreen = canvasPos.x >= canvasRect.xMin && canvasPos.x <= canvasRect.xMax &&
+                                 canvasPos.y >= canvasRect.yMin && canvasPos.y <= canvasRect.yMax &&
                                  screenPos.z > 0;
 
-              
+                // Check if the object is within the display area (with margin for positioning)
+                bool isInDisplayArea = canvasPos.x >= (canvasRect.xMin + TotalMargin) && canvasPos.x <= (canvasRect.xMax - TotalMargin) &&
+                                      canvasPos.y >= (canvasRect.yMin + TotalMargin) && canvasPos.y <= (canvasRect.yMax - TotalMargin) &&
+                                      screenPos.z > 0;
 
-                if (isOnScreen)
+                if (isInDisplayArea || (isOnScreen && !view.Indicator.m_IndicatorData.m_UseOffScreen))
                 {
                     // Show on-screen indicator
-                    view.UpdateOnScreenPosition(new Vector2(canvasPos.x, canvasPos.y));
+                    view.UpdateOnScreenPosition(canvasPos2D);
                     view.ShowOnScreen();
-                    // Apply distance-based alpha
-                    view.CanvasGroup.alpha = alpha;
+                    
+                    // Calculate combined alpha from distance and edge proximity
+                    float distanceAlpha = CalculateAlphaFromDistance(distance);
+                    // Only apply edge fade if indicator doesn't use offscreen
+                    float edgeAlpha = view.Indicator.m_IndicatorData.m_UseOffScreen ? 1f : 
+                                     CalculateAlphaFromEdge(canvasPos2D, canvasRect, TotalMargin);
+                    
+                    // Use the minimum alpha (most restrictive)
+                    float finalAlpha = Mathf.Min(distanceAlpha, edgeAlpha);
+                    view.CanvasGroup.alpha = finalAlpha;
                 }
                 else
                 {
@@ -271,7 +332,7 @@ namespace Modules.Utilities
                     view.UpdateOffScreenArrowPosition(arrowPos);
 
                     // Calculate angle for arrow rotation (from view position to actual object position)
-                    Vector2 viewToObject = new Vector2(canvasPos.x, canvasPos.y) - onscreenPos;
+                    Vector2 viewToObject = canvasPos2D - onscreenPos;
                     float angle = Mathf.Atan2(viewToObject.y, viewToObject.x) * Mathf.Rad2Deg;
                     view.SetArrowRotation(angle);
 

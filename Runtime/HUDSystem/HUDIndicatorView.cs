@@ -29,49 +29,64 @@ namespace Modules.Utilities
 
         public void Initialize(HUDIndicator indicator, HUDRenderer renderer)
         {
-            var data = indicator.m_IndicatorData;
+            Indicator = indicator;
             Renderer = renderer;
+            
+            var data = indicator.m_IndicatorData;
+            
+            InitializeOnScreenView(data);
+            InitializeOffScreenViews(data);
+            
+            SetupTransform();
+        }
+
+        private void InitializeOnScreenView(HUDIndicator.HUDIndicatorData data)
+        {
             if (data.m_UseOnScreen && data.m_OnScreenPrefab != null)
             {
                 var onScreenView = Instantiate(data.m_OnScreenPrefab, RectTransform);
                 OnScreenRectTransform = onScreenView.GetComponent<RectTransform>();
-                OnScreenRectTransform.anchoredPosition = Vector2.zero;
-                OnScreenRectTransform.localRotation = Quaternion.identity;
-                OnScreenRectTransform.localScale = Vector3.one;
+                SetupChildTransform(OnScreenRectTransform);
                 onScreenView.SetActive(false);
             }
+        }
 
-            if (data.m_UseOffScreen)
+        private void InitializeOffScreenViews(HUDIndicator.HUDIndicatorData data)
+        {
+            if (!data.m_UseOffScreen) return;
+
+            if (data.m_OffScreenPrefab != null)
             {
-                if (data.m_OffScreenPrefab != null)
-                {
-                    var offScreenView = Instantiate(data.m_OffScreenPrefab, RectTransform);
-                    OffScreenRectTransform = offScreenView.GetComponent<RectTransform>();
-                    OffScreenRectTransform.anchoredPosition = Vector2.zero;
-                    OffScreenRectTransform.localRotation = Quaternion.identity;
-                    OffScreenRectTransform.localScale = Vector3.one;
-
-                    offScreenView.SetActive(false);
-                }
-
-                if (data.m_OffScreenArrowPrefab != null)
-                {
-                    var offScreenArrowView = Instantiate(data.m_OffScreenArrowPrefab, RectTransform);
-                    OffScreenArrowRectTransform = offScreenArrowView.GetComponent<RectTransform>();
-                    OffScreenArrowRectTransform.anchoredPosition = Vector2.zero;
-                    OffScreenArrowRectTransform.localRotation = Quaternion.identity;
-                    OffScreenArrowRectTransform.localScale = Vector3.one;
-                    offScreenArrowView.SetActive(false);
-
-                }
+                var offScreenView = Instantiate(data.m_OffScreenPrefab, RectTransform);
+                OffScreenRectTransform = offScreenView.GetComponent<RectTransform>();
+                SetupChildTransform(OffScreenRectTransform);
+                offScreenView.SetActive(false);
             }
 
-            Indicator = indicator;
+            if (data.m_OffScreenArrowPrefab != null)
+            {
+                var offScreenArrowView = Instantiate(data.m_OffScreenArrowPrefab, RectTransform);
+                OffScreenArrowRectTransform = offScreenArrowView.GetComponent<RectTransform>();
+                SetupChildTransform(OffScreenArrowRectTransform);
+                offScreenArrowView.SetActive(false);
+            }
+        }
+
+        private void SetupChildTransform(RectTransform childTransform)
+        {
+            if (childTransform != null)
+            {
+                childTransform.anchoredPosition = Vector2.zero;
+                childTransform.localRotation = Quaternion.identity;
+                childTransform.localScale = Vector3.one;
+            }
+        }
+
+        private void SetupTransform()
+        {
             RectTransform.localPosition = Vector3.zero;
             RectTransform.localRotation = Quaternion.identity;
             RectTransform.localScale = Vector3.one;
-
-
         }
 
         public void UpdateOnScreenPosition(Vector2 position)
@@ -133,23 +148,6 @@ namespace Modules.Utilities
             // Alpha will be set by distance calculation in HUDRenderer
         }
 
-        public void ShowOffScreenArrow()
-        {
-            if (OnScreenRectTransform != null)
-            {
-                OnScreenRectTransform.gameObject.SetActive(false);
-            }
-            if (OffScreenRectTransform != null)
-            {
-                OffScreenRectTransform.gameObject.SetActive(false);
-            }
-            if (OffScreenArrowRectTransform != null)
-            {
-                OffScreenArrowRectTransform.gameObject.SetActive(true);
-            }
-            // Alpha will be set by distance calculation in HUDRenderer
-        }
-
         public void Hide()
         {
             if (OnScreenRectTransform != null)
@@ -175,15 +173,6 @@ namespace Modules.Utilities
             }
         }
 
-        /// <summary>
-        /// Set the alpha transparency of the indicator
-        /// </summary>
-        /// <param name="alpha">Alpha value between 0 and 1</param>
-        public void SetAlpha(float alpha)
-        {
-            CanvasGroup.alpha = Mathf.Clamp01(alpha);
-        }
-
         public void SetOnScreenSize(Vector2 size)
         {
             if (OnScreenRectTransform != null)
@@ -201,36 +190,5 @@ namespace Modules.Utilities
                 OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
             }
         }
-
-        /// <summary>
-        /// Hide only the OnScreen part due to overlap (keep CanvasGroup alpha intact)
-        /// </summary>
-        public void HideOnScreenByOverlap()
-        {
-            if (OnScreenRectTransform != null)
-            {
-                OnScreenRectTransform.gameObject.SetActive(false);
-            }
-        }
-
-        /// <summary>
-        /// Show OnScreen part when no longer overlapping
-        /// </summary>
-        public void ShowOnScreenFromOverlap()
-        {
-            if (OnScreenRectTransform != null)
-            {
-                OnScreenRectTransform.gameObject.SetActive(true);
-            }
-        }
-
-
-
-
-
-
-
     }
-
-
 }

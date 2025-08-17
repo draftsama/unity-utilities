@@ -1,6 +1,4 @@
-using JetBrains.Annotations;
 using UnityEngine;
-using UnityEngine.UIElements;
 
 namespace Modules.Utilities
 {
@@ -39,22 +37,27 @@ namespace Modules.Utilities
         void Start()
         {
             m_Transform = transform;
-            if(m_IndicatorData.m_AutoSize && m_IndicatorData.m_BoxCollider == null)
+            
+            // Auto-assign BoxCollider if using AutoSize
+            if (m_IndicatorData.m_AutoSize && m_IndicatorData.m_BoxCollider == null)
             {
-                m_IndicatorData.m_BoxCollider = gameObject.GetComponent<BoxCollider>();
+                m_IndicatorData.m_BoxCollider = GetComponent<BoxCollider>();
             }
 
+            // Find renderers if not assigned
             if (m_Renderers == null || m_Renderers.Length == 0)
             {
                 m_Renderers = FindObjectsByType<HUDRenderer>(FindObjectsSortMode.None);
-
             }
 
+            // Register with all renderers
             foreach (var renderer in m_Renderers)
             {
-                renderer.RegisterIndicator(this);
+                if (renderer != null)
+                {
+                    renderer.RegisterIndicator(this);
+                }
             }
-
         }
 
         public HUDRenderer[] GetRenderers()
@@ -64,6 +67,8 @@ namespace Modules.Utilities
 
         public HUDIndicatorView GetView(HUDRenderer renderer)
         {
+            if (renderer == null) return null;
+            
             foreach (var view in renderer.m_IndicatorViewList)
             {
                 if (view.Indicator == this)
@@ -76,6 +81,8 @@ namespace Modules.Utilities
 
         public HUDIndicatorView[] GetAllViews()
         {
+            if (m_Renderers == null) return new HUDIndicatorView[0];
+            
             var views = new HUDIndicatorView[m_Renderers.Length];
             for (int i = 0; i < m_Renderers.Length; i++)
             {
@@ -84,12 +91,17 @@ namespace Modules.Utilities
             return views;
         }
 
-
         void OnDestroy()
         {
-            foreach (var renderer in m_Renderers)
+            if (m_Renderers != null)
             {
-                renderer.UnregisterIndicator(this);
+                foreach (var renderer in m_Renderers)
+                {
+                    if (renderer != null)
+                    {
+                        renderer.UnregisterIndicator(this);
+                    }
+                }
             }
         }
 
