@@ -3,32 +3,47 @@ using UnityEngine;
 using Modules.Utilities;
 using System.Linq;
 using UnityEngine.UI;
+using Cysharp.Threading.Tasks;
 
 public class ResourceTextureLoader : MonoBehaviour
 {
+    public enum SpritePivot
+    {
+        Center,
+        TopLeft,
+        Top,
+        TopRight,
+        BottomLeft,
+        Bottom,
+        BottomRight,
+        Left,
+        Right
+    }
 
     [SerializeField] public string m_FileName;
     [SerializeField] public OutputType m_OutputType = OutputType.None;
 
     [SerializeField] public Texture2D m_EditorSource;
 
-    [SerializeField] public int m_TextureTypeValue = 0;
-    [SerializeField] public bool m_AlphaIsTransparency = false;
-    [SerializeField] public bool m_GenerateMipMaps = false;
     [SerializeField] public TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
     [SerializeField] public FilterMode m_FilterMode = FilterMode.Bilinear;
-    [SerializeField] public int m_MaxTextureSize = 2048;
-    [SerializeField] public int m_TextureCompression = 0; // 0 = Uncompressed
-    [SerializeField] public int m_NPOTScale = 0; // 0 = None (keep original size)
     [SerializeField][HideInInspector] public int _CurrentMaterialIndex = 0;
     [SerializeField][HideInInspector] public int _CurrentTexturePropertyIndex = 0;
     [SerializeField] public ContentSizeMode m_ContentSizeMode = ContentSizeMode.None;
 
+    [SerializeField] public bool m_SpriteFitScreen = false;
+
+    [SerializeField] public float m_PixelPerUnit = 100;
+    [SerializeField] public SpritePivot m_SpritePivot = SpritePivot.Center;
 
     [SerializeField] public RawImage m_RawImage;
     [SerializeField] public Image m_Image;
     [SerializeField] public AspectRatioFitter m_AspectRatioFitter;
     [SerializeField] public SpriteRenderer m_SpriteRenderer;
+
+
+
+
 
     private RectTransform _RectTransform;
 
@@ -44,24 +59,25 @@ public class ResourceTextureLoader : MonoBehaviour
 
         if (string.IsNullOrEmpty(m_FileName)) return;
         _RectTransform = GetComponent<RectTransform>();
+
+        await LoadTexture();
+    }
+
+  
+
+    public async UniTask<Texture2D> LoadTexture()
+    {
         var texture = await ResourceManager.GetTextureAsync(m_FileName);
 
         ApplyTexture(texture);
-
+        return texture;
     }
-    private void OnDisable()
-    {
-#if UNITY_EDITOR
 
-        if (m_EditorSource != null)
-        {
-            ApplyTexture(m_EditorSource);
-        }
-#endif
-    }
+
+
     public void ApplyTextureToMesh(Texture2D _texture)
     {
-       var renderers = GetComponentsInChildren<Renderer>();
+        var renderers = GetComponentsInChildren<Renderer>();
 
         //  Debug.Log($"Apply Texture : {_texture.width}x{_texture.height}");
         if (m_ContentSizeMode == ContentSizeMode.WidthControlHeight)
@@ -108,6 +124,8 @@ public class ResourceTextureLoader : MonoBehaviour
 
 
 
+
+
         switch (m_OutputType)
         {
             case OutputType.Image:
@@ -115,7 +133,7 @@ public class ResourceTextureLoader : MonoBehaviour
                 {
                     m_Image = gameObject.AddComponent<Image>();
                 }
-                m_Image.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), Vector2.zero);
+                m_Image.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), GetPivotVector(m_SpritePivot), m_PixelPerUnit);
                 ApplyCanvasSize(_texture);
                 break;
             case OutputType.RawImage:
@@ -131,7 +149,15 @@ public class ResourceTextureLoader : MonoBehaviour
                 {
                     m_SpriteRenderer = gameObject.AddComponent<SpriteRenderer>();
                 }
-                m_SpriteRenderer.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), Vector2.zero);
+
+                if (m_SpriteFitScreen)
+                {
+                    float cameraHeight = Camera.main.orthographicSize * 2;
+                    float idealPixelPerUnit = _texture.height / cameraHeight;
+                    m_PixelPerUnit = idealPixelPerUnit;
+                }
+                
+                m_SpriteRenderer.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), GetPivotVector(m_SpritePivot), m_PixelPerUnit);
                 break;
             case OutputType.Material:
                 ApplyTextureToMesh(_texture);
@@ -140,6 +166,23 @@ public class ResourceTextureLoader : MonoBehaviour
 
 
 
+    }
+
+    Vector2 GetPivotVector(SpritePivot pivot)
+    {
+        return pivot switch
+        {
+            SpritePivot.Center => new Vector2(0.5f, 0.5f),
+            SpritePivot.TopLeft => new Vector2(0, 1),
+            SpritePivot.Top => new Vector2(0.5f, 1),
+            SpritePivot.TopRight => new Vector2(1, 1),
+            SpritePivot.BottomLeft => new Vector2(0, 0),
+            SpritePivot.Bottom => new Vector2(0.5f, 0),
+            SpritePivot.BottomRight => new Vector2(1, 0),
+            SpritePivot.Left => new Vector2(0, 0.5f),
+            SpritePivot.Right => new Vector2(1, 0.5f),
+            _ => new Vector2(0.5f, 0.5f)
+        };
     }
 
     void ApplyCanvasSize(Texture2D _texture)

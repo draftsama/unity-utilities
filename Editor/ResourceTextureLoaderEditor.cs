@@ -5,6 +5,7 @@ using System.Text.RegularExpressions;
 using System.Linq;
 using System.Threading.Tasks;
 using UnityEngine.UI;
+using Cysharp.Threading.Tasks;
 
 namespace Modules.Utilities.Editor
 {
@@ -24,23 +25,20 @@ namespace Modules.Utilities.Editor
 
         private SerializedProperty _OutputTypeProperty;
 
-        private SerializedProperty _TextureTypeValueProperty;
-        private SerializedProperty _AlphaIsTransparency;
 
         private SerializedProperty _TextureWrapMode;
 
-        private SerializedProperty _GenerateMipMaps;
 
         private SerializedProperty _FilterMode;
         private SerializedProperty _FileNameProperty;
-        private SerializedProperty _MaxTextureSizeProperty;
-        private SerializedProperty _TextureCompressionProperty;
-        private SerializedProperty _NPOTScaleProperty;
-        private TextureImporterType _TextureType;
+
 
         private SerializedProperty _ContentSizeModeProperty;
 
+        private SerializedProperty _SpriteFitScreenProperty;
+        private SerializedProperty _PixelPerUnitProperty;
 
+        private SerializedProperty _SpritePivotProperty;
 
 
 
@@ -65,22 +63,20 @@ namespace Modules.Utilities.Editor
             var instance = target as ResourceTextureLoader;
 
 
-            _TextureTypeValueProperty = serializedObject.FindProperty(nameof(instance.m_TextureTypeValue));
             _OutputTypeProperty = serializedObject.FindProperty(nameof(instance.m_OutputType));
-            _AlphaIsTransparency = serializedObject.FindProperty(nameof(instance.m_AlphaIsTransparency));
             _TextureWrapMode = serializedObject.FindProperty(nameof(instance.m_TextureWrapMode));
-            _GenerateMipMaps = serializedObject.FindProperty(nameof(instance.m_GenerateMipMaps));
             _FilterMode = serializedObject.FindProperty(nameof(instance.m_FilterMode));
-            _MaxTextureSizeProperty = serializedObject.FindProperty(nameof(instance.m_MaxTextureSize));
-            _TextureCompressionProperty = serializedObject.FindProperty(nameof(instance.m_TextureCompression));
-            _NPOTScaleProperty = serializedObject.FindProperty(nameof(instance.m_NPOTScale));
+
+
             _ContentSizeModeProperty = serializedObject.FindProperty(nameof(instance.m_ContentSizeMode));
 
             _RawImage = serializedObject.FindProperty(nameof(instance.m_RawImage));
             _Image = serializedObject.FindProperty(nameof(instance.m_Image));
             _SpriteRenderer = serializedObject.FindProperty(nameof(instance.m_SpriteRenderer));
             _AspectRatioFitter = serializedObject.FindProperty(nameof(instance.m_AspectRatioFitter));
-
+            _PixelPerUnitProperty = serializedObject.FindProperty(nameof(instance.m_PixelPerUnit));
+            _SpritePivotProperty = serializedObject.FindProperty(nameof(instance.m_SpritePivot));
+            _SpriteFitScreenProperty = serializedObject.FindProperty(nameof(instance.m_SpriteFitScreen));
 
             _FileNameProperty = serializedObject.FindProperty(nameof(instance.m_FileName));
 
@@ -174,37 +170,14 @@ namespace Modules.Utilities.Editor
 
 
 
-            _TextureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
-            _TextureType = (TextureImporterType)EditorGUILayout.EnumPopup("Texture Type", _TextureType);
-            _TextureTypeValueProperty.intValue = (int)_TextureType;
 
-            EditorGUILayout.PropertyField(_AlphaIsTransparency);
-            EditorGUILayout.PropertyField(_GenerateMipMaps);
             EditorGUILayout.PropertyField(_TextureWrapMode);
             EditorGUILayout.PropertyField(_FilterMode);
-            
+
             // Texture Size Settings
             EditorGUILayout.Space();
-            
-            // Max Texture Size dropdown
-            string[] textureSizeOptions = {"32", "64", "128", "256", "512", "1024", "2048", "4096", "8192"};
-            int[] textureSizeValues = {32, 64, 128, 256, 512, 1024, 2048, 4096, 8192};
-            int currentSizeIndex = System.Array.IndexOf(textureSizeValues, _MaxTextureSizeProperty.intValue);
-            if (currentSizeIndex == -1) currentSizeIndex = 6; // Default to 2048
-            
-            currentSizeIndex = EditorGUILayout.Popup("Max Texture Size", currentSizeIndex, textureSizeOptions);
-            _MaxTextureSizeProperty.intValue = textureSizeValues[currentSizeIndex];
-            
-            // Texture Compression
-            var compressionMode = (UnityEditor.TextureImporterCompression)_TextureCompressionProperty.intValue;
-            compressionMode = (UnityEditor.TextureImporterCompression)EditorGUILayout.EnumPopup("Compression", compressionMode);
-            _TextureCompressionProperty.intValue = (int)compressionMode;
-            
-            // Non Power of 2 handling
-            var npotScale = (UnityEditor.TextureImporterNPOTScale)_NPOTScaleProperty.intValue;
-            npotScale = (UnityEditor.TextureImporterNPOTScale)EditorGUILayout.EnumPopup("Non-Power of 2", npotScale);
-            _NPOTScaleProperty.intValue = (int)npotScale;
 
+          
 
             if (_CurrentNameInput != _FileNameProperty.stringValue || _FileNameProperty.stringValue == string.Empty)
             {
@@ -245,6 +218,9 @@ namespace Modules.Utilities.Editor
 
             EditorGUILayout.PropertyField(_ContentSizeModeProperty);
 
+
+            EditorGUILayout.BeginVertical("box");
+
             EditorGUILayout.PropertyField(_OutputTypeProperty);
 
             var outputMode = (OutputType)_OutputTypeProperty.enumValueIndex;
@@ -265,6 +241,12 @@ namespace Modules.Utilities.Editor
             }
             else if (outputMode == OutputType.SpriteRenderer)
             {
+
+                EditorGUILayout.PropertyField(_SpriteFitScreenProperty);
+                GUI.enabled = !_SpriteFitScreenProperty.boolValue;
+                EditorGUILayout.PropertyField(_PixelPerUnitProperty);
+                GUI.enabled = true;
+                EditorGUILayout.PropertyField(_SpritePivotProperty);
                 EditorGUIHelper.DrawComponentProperty(instance.gameObject, _SpriteRenderer, typeof(SpriteRenderer));
             }
 
@@ -361,6 +343,12 @@ namespace Modules.Utilities.Editor
                 }
 
             }
+
+
+
+            EditorGUILayout.EndVertical();
+
+
             GUI.color = Color.green;
             if (GUILayout.Button("Load"))
             {
@@ -395,7 +383,6 @@ namespace Modules.Utilities.Editor
 
             var path = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
                   .FirstOrDefault(file => Path.GetFileName(file) == _filename);
-            Texture2D texture = null;
             if (!string.IsNullOrEmpty(path))
             {
                 if (!Directory.Exists(assetfolder))
@@ -405,34 +392,38 @@ namespace Modules.Utilities.Editor
                 AssetDatabase.Refresh();
 
                 //modify texture import setting
-                var importer = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
-                importer.textureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
-                importer.mipmapEnabled = _GenerateMipMaps.boolValue;
-                importer.alphaSource = TextureImporterAlphaSource.FromInput;
-                importer.alphaIsTransparency = _AlphaIsTransparency.boolValue;
-                importer.wrapMode = (TextureWrapMode)_TextureWrapMode.intValue;
-                importer.filterMode = (FilterMode)_FilterMode.intValue;
-                importer.isReadable = true;
-                
-                // Set texture size/resolution settings
-                importer.maxTextureSize = _MaxTextureSizeProperty.intValue;
-                importer.textureCompression = (TextureImporterCompression)_TextureCompressionProperty.intValue;
-                importer.npotScale = (TextureImporterNPOTScale)_NPOTScaleProperty.intValue;
-                
-                importer.SaveAndReimport();
+                //  var importer = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
+                // importer.textureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
+                // importer.mipmapEnabled = _GenerateMipMaps.boolValue;
+                // importer.alphaSource = TextureImporterAlphaSource.FromInput;
+                // importer.alphaIsTransparency = _AlphaIsTransparency.boolValue;
+                // importer.wrapMode = (TextureWrapMode)_TextureWrapMode.intValue;
+                // importer.filterMode = (FilterMode)_FilterMode.intValue;
+                // importer.isReadable = true;
+                // importer.spritePixelsPerUnit = _PixelPerUnitProperty.floatValue;
+
+                // // Set texture size/resolution settings
+                // importer.maxTextureSize = _MaxTextureSizeProperty.intValue;
+                // importer.textureCompression = (TextureImporterCompression)_TextureCompressionProperty.intValue;
+                // importer.npotScale = (TextureImporterNPOTScale)_NPOTScaleProperty.intValue;
+
+                // importer.SaveAndReimport();
 
 
 
-                texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
-            }
-            if (texture != null)
-            {
-                _PreviewTexture = texture;
+                // texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+
                 var instance = target as ResourceTextureLoader;
-                instance.SetEditorSource(texture);
-                instance.ApplyTexture(texture);
-                Debug.Log($"loaded image: {_filename} image size: {texture.width}x{texture.height}");
+                instance.LoadTexture().ContinueWith(t =>
+                {
+                    _PreviewTexture = t;
+                    instance.SetEditorSource(t);
+                    Debug.Log($"loaded image: {_filename} image size: {t.width}x{t.height}");
+
+                }).Forget();
+
             }
+
         }
     }
 }
