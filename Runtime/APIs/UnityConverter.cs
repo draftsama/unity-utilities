@@ -867,11 +867,7 @@ namespace Modules.Utilities
         /// </summary>
         private static byte[] SerializeAsJson<T>(T data)
         {
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
             string jsonString = Newtonsoft.Json.JsonConvert.SerializeObject(data);
-#else
-            string jsonString = JsonUtility.ToJson(data);
-#endif
             return GetBytes(jsonString);
         }
 
@@ -882,11 +878,8 @@ namespace Modules.Utilities
         {
             string jsonString = GetString(data);
 
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
             return Newtonsoft.Json.JsonConvert.DeserializeObject<T>(jsonString);
-#else
-            return JsonUtility.FromJson<T>(jsonString);
-#endif
+
         }
 
 

@@ -10,9 +10,7 @@ using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Events;
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
 using Newtonsoft.Json;
-#endif
 
 #if UNITY_EDITOR
 using UnityEditor;
@@ -1860,11 +1858,7 @@ namespace Modules.Utilities
         {
             string jsonString;
 
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
             jsonString = JsonConvert.SerializeObject(data);
-#else
-            jsonString = JsonUtility.ToJson(data);
-#endif
 
             var bytes = Encoding.UTF8.GetBytes(jsonString);
             // Log removed for performance - was logging every JSON serialization
@@ -2014,11 +2008,7 @@ namespace Modules.Utilities
                 }
                 else
                 {
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
                     serializedData = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(data));
-#else
-                    serializedData = Encoding.UTF8.GetBytes(JsonUtility.ToJson(data));
-#endif
                 }
             }
             catch (Exception ex)
@@ -2140,11 +2130,8 @@ namespace Modules.Utilities
                     // Fallback to JSON deserialization for complex objects
                     try
                     {
-#if PACKAGE_NEWTONSOFT_JSON_INSTALLED
                         return JsonConvert.DeserializeObject<T>(UnityConverter.GetString(data));
-#else
-                        return JsonUtility.FromJson<T>(UnityConverter.GetString(data));
-#endif
+
                     }
                     catch (Exception jsonEx)
                     {
