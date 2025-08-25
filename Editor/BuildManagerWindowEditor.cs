@@ -276,7 +276,8 @@ namespace Modules.Utilities.Editor
 
             //copy folder support for windows only
             if (EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows ||
-               EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows64)
+               EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneWindows64 ||
+               EditorUserBuildSettings.activeBuildTarget == BuildTarget.StandaloneOSX)
             {
                 // Display copy folder paths
                 GUILayout.BeginVertical("box");
@@ -772,63 +773,81 @@ namespace Modules.Utilities.Editor
 
         public void OnPostprocessBuild(BuildReport report)
         {
-            Application.logMessageReceived -= OnBuildError;
 
+        Application.logMessageReceived -= OnBuildError;
 
-            if (report.summary.result == BuildResult.Cancelled || report.summary.result == BuildResult.Failed)
+        if (report.summary.result == BuildResult.Cancelled || report.summary.result == BuildResult.Failed)
+        {
+            Debug.LogError("Build failed: " + report.summary.result);
+            return;
+        }
+
+        // Sync selectedBuildProfileIndex with active profile
+        var activeProfile = GetActiveProfileAndSyncIndex();
+        var profileSettings = settings?.GetOrCreateProfileSettings(activeProfile.name);
+        var enableCopy = profileSettings?.enableCopyFolders ?? false;
+        var copyFolders = profileSettings?.copyFolderPaths ?? new List<string>();
+        var buildFileFolder = Path.GetDirectoryName(report.summary.outputPath);
+
+        if (IsStandaloneBuild(report.summary.platform) && enableCopy && copyFolders.Count > 0)
+        {
+            foreach (var folderPath in copyFolders)
             {
-
-                Debug.LogError("Build failed: " + report.summary.result);
-                return;
-            }
-
-
-
-            var buildFileFolder = Path.GetDirectoryName(report.summary.outputPath);
-
-            if (report.summary.platform == BuildTarget.StandaloneWindows ||
-                  report.summary.platform == BuildTarget.StandaloneWindows64)
-            {
-                if (enableCopyFolders && copyFolderPaths != null && copyFolderPaths.Count > 0)
+                if (Directory.Exists(folderPath))
                 {
-                    foreach (var folderPath in copyFolderPaths)
-                    {
-                        if (Directory.Exists(folderPath))
-                        {
-                            var folderName = Path.GetFileName(folderPath);
-                            var targetPath = Path.Combine(buildFileFolder, folderName);
-
-                            CopyDirectory(folderPath, targetPath, true);
-                            Debug.Log($"Copied folder: {folderPath} to {targetPath}");
-                        }
-                        else
-                        {
-                            Debug.LogWarning($"Folder does not exist: {folderPath}");
-                        }
-                    }
+                    var folderName = Path.GetFileName(folderPath);
+                    var targetPath = Path.Combine(buildFileFolder, folderName);
+                    CopyDirectory(folderPath, targetPath, true);
+                    Debug.Log($"Copied folder: {folderPath} to {targetPath}");
+                }
+                else
+                {
+                    Debug.LogWarning($"Folder does not exist: {folderPath}");
                 }
             }
-            var profile = buildProfiles[selectedBuildProfileIndex];
-            if (isNotify)
-            {
-                // Notify via Telegram
-                SendMessage(
-                    $"[Build Success!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
-            }
+        }
 
-            // Play success sound if enabled
-            if (isSoundNotify)
-            {
+        if (isNotify)
+        {
+            SendMessage($"[Build Success!]\nProfile Name: {activeProfile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
+        }
+
+        if (isSoundNotify)
+        {
 #if UNITY_EDITOR_WIN
-                RunCommand("rundll32 user32.dll,MessageBeep");
+            RunCommand("rundll32 user32.dll,MessageBeep");
 #elif UNITY_EDITOR_OSX
-                RunCommand("afplay /System/Library/Sounds/Glass.aiff");
+            RunCommand("afplay /System/Library/Sounds/Glass.aiff");
 #endif
-            }
+        }
 
-            // Optionally, you can reveal the build folder in the file explorer
-            EditorUtility.RevealInFinder(buildFileFolder);
-            Debug.Log("Build completed successfully!");
+        EditorUtility.RevealInFinder(buildFileFolder);
+        Debug.Log("Build completed successfully!");
+    }
+
+    private BuildProfile GetActiveProfileAndSyncIndex()
+    {
+        BuildProfile activeProfile = null;
+        try { activeProfile = BuildProfile.GetActiveBuildProfile(); } catch { }
+        if (activeProfile != null && buildProfiles != null)
+        {
+            for (int i = 0; i < buildProfiles.Length; i++)
+            {
+                if (buildProfiles[i] == activeProfile)
+                {
+                    selectedBuildProfileIndex = i;
+                    break;
+                }
+            }
+        }
+        return buildProfiles[selectedBuildProfileIndex];
+    }
+
+    private bool IsStandaloneBuild(BuildTarget target)
+    {
+        return target == BuildTarget.StandaloneWindows ||
+               target == BuildTarget.StandaloneWindows64 ||
+               target == BuildTarget.StandaloneOSX;
 
         }
 
