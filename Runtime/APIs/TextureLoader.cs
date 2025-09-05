@@ -86,15 +86,15 @@ public class TextureLoader : MonoBehaviour
 
     }
 
-    public static void RemoveLoader(string path)
+    public static void RemoveLoader(string path, bool destroyTexture = true)
     {
         var loader = m_Loaders.Find(x => x.m_Path == path);
         if (loader != null)
-            RemoveLoader(loader);
+            RemoveLoader(loader , destroyTexture);
     }
-    public static void RemoveLoader(TextureLoader loader)
+    public static void RemoveLoader(TextureLoader loader, bool destroyTexture = true)
     {
-        if (loader.m_Texture != null)
+        if (loader.m_Texture != null && destroyTexture)
             DestroyImmediate(loader.m_Texture);
 
         m_Loaders.Remove(loader);
@@ -105,11 +105,11 @@ public class TextureLoader : MonoBehaviour
 
     }
 
-    public static void RemoveAllLoaders()
+    public static void RemoveAllLoaders(bool destroyTextures = true)
     {
         foreach (var loader in m_Loaders)
         {
-            if (loader.m_Texture != null)
+            if (loader.m_Texture != null && destroyTextures)
                 DestroyImmediate(loader.m_Texture);
             if (loader.gameObject != null)
                 DestroyImmediate(loader.gameObject);
