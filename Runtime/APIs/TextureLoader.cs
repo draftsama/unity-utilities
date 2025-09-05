@@ -106,7 +106,7 @@ public class TextureLoader : MonoBehaviour
     }
 
     public static void RemoveAllLoaders()
-    {˝
+    {
         foreach (var loader in m_Loaders)
         {
             if (loader.m_Texture != null)
