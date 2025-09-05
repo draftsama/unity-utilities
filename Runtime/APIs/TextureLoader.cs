@@ -5,10 +5,10 @@ using UnityEngine;
 using UnityEngine.Networking;
 
 public class TextureLoader : MonoBehaviour
-{   
+{
 
-    [SerializeField]private string m_Path;
-    [SerializeField]private Texture2D m_Texture;
+    [SerializeField] private string m_Path;
+    [SerializeField] private Texture2D m_Texture;
 
     private bool _IsFinished = false;
 
@@ -37,11 +37,11 @@ public class TextureLoader : MonoBehaviour
             throw e;
         }
 
-         return m_Texture;
+        return m_Texture;
 
     }
 
-    
+
 
 
 
@@ -86,28 +86,33 @@ public class TextureLoader : MonoBehaviour
 
     }
 
-    public static void RemoveLoader(string path){
+    public static void RemoveLoader(string path)
+    {
         var loader = m_Loaders.Find(x => x.m_Path == path);
-        if(loader != null)
+        if (loader != null)
             RemoveLoader(loader);
     }
     public static void RemoveLoader(TextureLoader loader)
     {
-        if(loader.m_Texture != null)
+        if (loader.m_Texture != null)
             DestroyImmediate(loader.m_Texture);
 
         m_Loaders.Remove(loader);
 
-        DestroyImmediate(loader.gameObject);
+        if (loader.gameObject != null)
+            DestroyImmediate(loader.gameObject);
+
+
     }
 
     public static void RemoveAllLoaders()
-    {
+    {˝
         foreach (var loader in m_Loaders)
         {
-            if(loader.m_Texture != null)
+            if (loader.m_Texture != null)
                 DestroyImmediate(loader.m_Texture);
-            DestroyImmediate(loader.gameObject);
+            if (loader.gameObject != null)
+                DestroyImmediate(loader.gameObject);
         }
 
         m_Loaders.Clear();
