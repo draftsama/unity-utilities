@@ -218,6 +218,19 @@ namespace Modules.Utilities
             return res != null ? res.m_AudioClip : null;
         }
 
+        public static string GetPathByNameAsync(string _fileName)
+        {
+            var extension = Path.GetExtension(_fileName);
+
+            DirectoryInfo directoryInfo = new DirectoryInfo(GetResourceFolderPath());
+
+            var fileInfo = directoryInfo
+                .GetFiles("*" + extension, SearchOption.AllDirectories)
+                .FirstOrDefault(_file => _file.Name.Equals(_fileName));
+
+            return fileInfo != null ? fileInfo.FullName : "";
+        }
+
 
         public static async UniTask<ResourceResponse> GetResourceAsync(string _name)
         {
@@ -486,24 +499,28 @@ namespace Modules.Utilities
             if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.Texture)
             {
                 //get texture
-                var reqTexture = await UnityWebRequestTexture.GetTexture(filePath).SendWebRequest();
-                var texture = DownloadHandlerTexture.GetContent(reqTexture);
-                texture.wrapMode = TextureWrapMode.Clamp;
-                texture.name = _dataInfo.m_Name;
-                texture.Apply();
-                _dataInfo.m_Texture = texture;
-
+                using (var reqTexture = UnityWebRequestTexture.GetTexture(filePath))
+                {
+                    await reqTexture.SendWebRequest();
+                    var texture = DownloadHandlerTexture.GetContent(reqTexture);
+                    texture.wrapMode = TextureWrapMode.Clamp;
+                    texture.name = _dataInfo.m_Name;
+                    texture.Apply();
+                    _dataInfo.m_Texture = texture;
+                }
 
                 return _dataInfo;
             }
             else if (_dataInfo.m_ResourceType == ResourceResponse.ResourceType.AudioClip)
             {
                 //get audio
-                var req = await UnityWebRequestMultimedia.GetAudioClip(filePath, _dataInfo.m_AudioType)
-                    .SendWebRequest();
-                var audio = DownloadHandlerAudioClip.GetContent(req);
-                audio.name = _dataInfo.m_Name;
-                _dataInfo.m_AudioClip = audio;
+                using (var req = UnityWebRequestMultimedia.GetAudioClip(filePath, _dataInfo.m_AudioType))
+                {
+                    await req.SendWebRequest();
+                    var audio = DownloadHandlerAudioClip.GetContent(req);
+                    audio.name = _dataInfo.m_Name;
+                    _dataInfo.m_AudioClip = audio;
+                }
 
                 return _dataInfo;
             }

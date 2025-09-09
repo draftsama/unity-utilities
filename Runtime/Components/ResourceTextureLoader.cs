@@ -4,6 +4,7 @@ using Modules.Utilities;
 using System.Linq;
 using UnityEngine.UI;
 using Cysharp.Threading.Tasks;
+using System.IO;
 
 public class ResourceTextureLoader : MonoBehaviour
 {
@@ -63,11 +64,38 @@ public class ResourceTextureLoader : MonoBehaviour
         await LoadTexture();
     }
 
-  
+
 
     public async UniTask<Texture2D> LoadTexture()
     {
-        var texture = await ResourceManager.GetTextureAsync(m_FileName);
+
+        Texture2D texture = null;
+        if (Application.isPlaying)
+        {
+            texture = await ResourceManager.GetTextureAsync(m_FileName);
+
+        }
+        else
+        {
+
+            var path = ResourceManager.GetPathByNameAsync(m_FileName);
+            if (string.IsNullOrEmpty(path))
+            {
+                Debug.LogWarning($"File not found : {m_FileName}");
+                return null;
+            }
+            Debug.Log($"Load Texture : {path}");
+
+            using (var reqTexture = UnityEngine.Networking.UnityWebRequestTexture.GetTexture("file://"+path))
+            {
+                await reqTexture.SendWebRequest();
+                texture = UnityEngine.Networking.DownloadHandlerTexture.GetContent(reqTexture);
+                texture.wrapMode = TextureWrapMode.Clamp;
+                texture.name = Path.GetFileName(m_FileName);
+                texture.Apply();
+            }
+
+        }
 
         ApplyTexture(texture);
         return texture;
@@ -156,7 +184,7 @@ public class ResourceTextureLoader : MonoBehaviour
                     float idealPixelPerUnit = _texture.height / cameraHeight;
                     m_PixelPerUnit = idealPixelPerUnit;
                 }
-                
+
                 m_SpriteRenderer.sprite = Sprite.Create(_texture, new Rect(0, 0, _texture.width, _texture.height), GetPivotVector(m_SpritePivot), m_PixelPerUnit);
                 break;
             case OutputType.Material:
