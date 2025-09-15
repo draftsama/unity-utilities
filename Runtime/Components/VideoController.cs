@@ -134,7 +134,10 @@ namespace Modules.Utilities
                 {
                     UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
                     {
-
+                        if(gameObject.activeInHierarchy == false)
+                        {
+                            return;
+                        }
 
                         if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
                         {
