@@ -17,11 +17,14 @@ public class TextureLoader : MonoBehaviour
 
         try
         {
+            _IsFinished = false;
+
             using (var request = UnityWebRequestTexture.GetTexture(path))
             {
                 await request.SendWebRequest();
                 if (request.isDone)
                 {
+                    if (m_Texture) DestroyImmediate(m_Texture);
                     m_Texture = DownloadHandlerTexture.GetContent(request);
                     m_Texture.name = System.IO.Path.GetFileName(path);
                     _IsFinished = true;
@@ -53,17 +56,23 @@ public class TextureLoader : MonoBehaviour
     public static Transform m_Parent = null;
 
 
-    public static async UniTask<Texture2D> GetTextureAsync(string path)
+    public static async UniTask<Texture2D> GetTextureAsync(string path, bool reload = false)
     {
 
         //find in list
         var loader = m_Loaders.Find(x => x.m_Path == path);
         if (loader != null)
         {
+            if (reload)
+            {
+                return await loader.LoadTextureAsync(path);
+            }
+
             //wait for loading
             await UniTask.WaitUntil(() => loader._IsFinished);
 
             return await UniTask.FromResult(loader.m_Texture);
+
         }
 
 
@@ -90,7 +99,7 @@ public class TextureLoader : MonoBehaviour
     {
         var loader = m_Loaders.Find(x => x.m_Path == path);
         if (loader != null)
-            RemoveLoader(loader , destroyTexture);
+            RemoveLoader(loader, destroyTexture);
     }
     public static void RemoveLoader(TextureLoader loader, bool destroyTexture = true)
     {
