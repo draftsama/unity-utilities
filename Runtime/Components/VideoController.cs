@@ -230,6 +230,13 @@ namespace Modules.Utilities
 
         public bool SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
         {
+
+            if (string.IsNullOrEmpty(_filename))
+            {
+                Debug.Log($"[{name}] Video filename is empty.");
+                return false;
+            }
+
             m_FileName = _filename;
             m_PathType = _pathType;
             m_FolderName = _foldername;
