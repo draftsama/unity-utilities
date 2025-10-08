@@ -406,11 +406,11 @@ namespace Modules.Utilities
 
 
                 Debug.Log("Play Video : " + _VideoPlayer.url);
-                m_IsPlaying = true;
                 _VideoPlayer.frame = _frame;
                 _VideoPlayer.Play();
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: token);
+                m_IsPlaying = true;
 
                 m_Progress = _frame / (float)_VideoPlayer.frameCount;
 
