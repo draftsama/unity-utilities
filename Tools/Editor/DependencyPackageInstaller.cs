@@ -1,3 +1,4 @@
+#if UNITY_EDITOR
 using UnityEngine;
 using UnityEditor;
 using UnityEditor.PackageManager;
@@ -158,10 +159,10 @@ namespace Modules.Utilities.Editor
         {
             // Don't ask again in the same session
             if (hasAlreadyAskedInThisSession) return;
-            
+
             bool hasAnyMissingPackage = false;
             int checkedPackages = 0;
-            
+
             for (int i = 0; i < packagesToInstall.Count; i++)
             {
                 string packageName = packagesToInstall[i].name;
@@ -170,7 +171,7 @@ namespace Modules.Utilities.Editor
                 IsPackageInstalled(packagesToInstall[i], (isInstalled, pkgInfo) =>
                 {
                     checkedPackages++;
-                    
+
                     if (!isInstalled)
                     {
                         hasAnyMissingPackage = true;
@@ -247,3 +248,4 @@ namespace Modules.Utilities.Editor
 
 
 }
+#endif
