@@ -243,6 +243,7 @@ namespace Modules.Utilities
 
             var filePath = string.Empty;
 
+
             if (m_PathType == PathType.StreamingAssets)
             {
                 if (string.IsNullOrEmpty(m_FolderName))
@@ -269,7 +270,7 @@ namespace Modules.Utilities
 
             if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
             {
-                Debug.Log($"[{name}] Video file not found: {filePath}");
+                Debug.LogWarning($"[{name}] Video file not found: {filePath}");
                 return false;
             }
 
@@ -402,10 +403,14 @@ namespace Modules.Utilities
             try
             {
 
-                await Prepare(token);
+                var isPrepared = await Prepare(token);
+                if (!isPrepared)
+                {
+                    Debug.LogWarning($"[{name}] Video not prepared with invalid url: " + _VideoPlayer.url);
+                    return;
+                }
 
-
-                Debug.Log("Play Video : " + _VideoPlayer.url);
+                Debug.Log($"[{name}] Play Video : " + _VideoPlayer.url);
                 _VideoPlayer.frame = _frame;
                 _VideoPlayer.Play();
 
@@ -452,7 +457,7 @@ namespace Modules.Utilities
                             if (_FadeOutProgress >= 1f)
                             {
                                 Seek(_VideoPlayer.frameCount - 1);
-                                Debug.Log("Video End :" + _VideoPlayer.url);
+                                Debug.Log($"[{name}] Video End :" + _VideoPlayer.url);
 
                                 _OnEndEventHandler.Invoke();
                                 break;
@@ -465,7 +470,7 @@ namespace Modules.Utilities
                             _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
                             if (_FadeOutProgress >= 1f)
                             {
-                                Debug.Log("Video End :" + _VideoPlayer.url);
+                                Debug.Log($"[{name}] Video End :" + _VideoPlayer.url);
                                 _OnEndEventHandler.Invoke();
                                 break;
                             }
@@ -619,7 +624,7 @@ namespace Modules.Utilities
         {
             if (!_VideoPlayer.isPrepared)
             {
-                Debug.Log("Video Not Prepared.");
+                Debug.Log($"[{name}] Video Not Prepared.");
                 return;
             }
 
@@ -634,7 +639,7 @@ namespace Modules.Utilities
         {
             if (!_VideoPlayer.isPrepared)
             {
-                Debug.Log("Video Not Prepared.");
+                Debug.Log($"[{name}] Video Not Prepared.");
                 return;
             }
 
@@ -647,7 +652,7 @@ namespace Modules.Utilities
         {
             if (!_VideoPlayer.isPrepared)
             {
-                Debug.Log("Video Not Prepared.");
+                Debug.Log($"[{name}] Video Not Prepared.");
                 return 0;
             }
 
