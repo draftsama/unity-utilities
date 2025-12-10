@@ -29,6 +29,7 @@ namespace Modules.Utilities.Editor
             }
         }
     }
+    [InitializeOnLoad]
     public class DependencyPackageInstaller
     {
         static int currentPackageIndex = 0;

@@ -414,7 +414,7 @@ namespace Modules.Utilities
 
                 m_Progress = _frame / (float)_VideoPlayer.frameCount;
 
-
+                m_FadeTime = Mathf.Clamp(m_FadeTime, 100, int.MaxValue);
 
                 while (!token.IsCancellationRequested)
                 {
@@ -444,6 +444,7 @@ namespace Modules.Utilities
                         _FadeOutProgress = Mathf.Clamp01(_FadeOutProgress);
                         var valueProgress = EasingFormula.EasingFloat(Easing.Ease.EaseOutQuad, 1f, 0f,
                                 _FadeOutProgress);
+
                         //fade out
                         if (m_KeepLastframe)
                         {
