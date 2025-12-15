@@ -60,6 +60,15 @@ namespace Modules.Utilities
             OpenPage(_overrideTransitionInfo: null, _token: token);
         }
 
+        public async UniTask OpenPageAsync(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
+        {
+            if (m_IsOpened) return;
+            if(_token == default)
+                _token = this.GetCancellationTokenOnDestroy();
+            await UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, _token);
+
+        }
+
 
 
         public void OpenPage(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
