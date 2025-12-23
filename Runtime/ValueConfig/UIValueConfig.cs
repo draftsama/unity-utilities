@@ -385,7 +385,7 @@ public class UIValueConfigEditor : Editor
         base.OnInspectorGUI();
         serializedObject.Update();
 
-        GUI.color = Color.teal;
+        GUI.color = Color.gray;
         EditorGUILayout.BeginVertical("box");
         GUI.color = Color.white;
         EditorGUILayout.LabelField("Variables", EditorStyles.boldLabel);
@@ -398,7 +398,7 @@ public class UIValueConfigEditor : Editor
             var title = element.FindPropertyRelative("title");
             var requireRestart = element.FindPropertyRelative("requireRestart");
             var variable = element.FindPropertyRelative("variable");
-            GUI.color = Color.gray3;
+            GUI.color = Color.gray;
             EditorGUILayout.BeginVertical("box");
             GUI.color = Color.white;
 
