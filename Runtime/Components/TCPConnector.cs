@@ -3,7 +3,6 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
-using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
@@ -18,6 +17,7 @@ using UnityEditor;
 
 namespace Modules.Utilities
 {
+
     /// <summary>
     /// A networking connector using TCP for reliable communication,
     /// with an optional UDP-based auto-discovery feature for local networks.
@@ -105,6 +105,7 @@ namespace Modules.Utilities
         [SerializeField] public UnityEvent<PacketResponse> m_OnDataReceived = new UnityEvent<PacketResponse>();
         [SerializeField] public UnityEvent<PacketResponse> m_OnRealTimeDataReceived = new UnityEvent<PacketResponse>(); // Separate real-time event
         [SerializeField] public UnityEvent<ErrorInfo> m_OnError = new UnityEvent<ErrorInfo>();
+        [SerializeField] public UnityEvent<List<ConnectorInfo>> m_OnClientListUpdated = new UnityEvent<List<ConnectorInfo>>();
 
         private CancellationTokenSource _cts;
 
@@ -126,6 +127,17 @@ namespace Modules.Utilities
         // --- Packet Structure ---
         private const int PACKET_HEADER_SIZE = 6; // 4-messageId, 2-action
 
+        // --- Client Sync Protocol ---
+        private const ushort ACTION_CLIENT_LIST_FULL = 65530;
+        private const ushort ACTION_CLIENT_JOINED = 65531;
+        private const ushort ACTION_CLIENT_LEFT = 65532;
+        private const ushort ACTION_RELAY_MESSAGE = 65529; // Client-to-client relay via server
+
+        // --- Client List Tracking ---
+        private List<ConnectorInfo> m_SyncedClientList = new List<ConnectorInfo>();
+        private readonly object _syncedClientListLock = new object();
+        private int m_MyClientId = -1; // Client's own server-assigned ID (received from server sync)
+
         #endregion
 
         #region Public Variables
@@ -135,6 +147,7 @@ namespace Modules.Utilities
         public int ConnectedClientCount => m_Clients.Count;
         public int ActiveRealTimeClientCount => m_RealTimeClients.Count;
         public ConnectorInfo ServerInfo => m_ServerInfo;
+        public int MyClientId => m_MyClientId; // Client's server-assigned ID (for self-filtering)
 
 
 
@@ -148,7 +161,20 @@ namespace Modules.Utilities
                 return m_Clients.Values.ToList();
             }
         }
-        
+
+        /// <summary>
+        /// Gets the synchronized list of all connected clients.
+        /// In server mode, returns current server's client list.
+        /// In client mode, returns the synced list received from server.
+        /// </summary>
+        public List<ConnectorInfo> GetAllConnectedClientsInfo()
+        {
+            lock (_syncedClientListLock)
+            {
+                return new List<ConnectorInfo>(m_SyncedClientList);
+            }
+        }
+
 
         public bool TryGetClientInfoById(int id, out ConnectorInfo clientInfo)
         {
@@ -166,7 +192,7 @@ namespace Modules.Utilities
                 return false;
             }
         }
-      
+
 
         /// <summary>
         /// Gets list of real-time clients (creates new list each call - use sparingly)
@@ -277,7 +303,7 @@ namespace Modules.Utilities
         {
             if (!m_IsDebug) return;
             var prefix = m_IsServer ? "Server" : "Client";
-            var logMessage = $"[{prefix}] {message}";       
+            var logMessage = $"[{prefix}][{name}] {message}";
             Debug.Log(logMessage);
 
         }
@@ -544,6 +570,10 @@ namespace Modules.Utilities
                 Log($"Warning: Could not switch to main thread for event: {ex.Message}");
                 // Events will be invoked when possible - continue operation
             }
+
+            // Sync: Send full client list to newly connected client
+            await BroadcastClientListSync(clientInfo.id, isFullSync: true);
+
             var stream = client.GetStream();
             try
             {
@@ -585,6 +615,9 @@ namespace Modules.Utilities
                 {
                     // Ignore thread switch errors
                 }
+
+                // Sync: Broadcast client left to all remaining clients
+                await BroadcastClientListSync(clientInfo.id, isFullSync: false);
             }
         }
 
@@ -1471,6 +1504,18 @@ namespace Modules.Utilities
                             {
                                 Log($"Warning: Could not switch to main thread for final data received: {ex.Message}");
                             }
+
+                            // Process client sync messages (client mode only)
+                            if (!m_IsServer)
+                            {
+                                await ProcessClientSyncMessage(finalPacketResponse);
+                            }
+
+                            // Process relay messages (server mode only)
+                            if (m_IsServer)
+                            {
+                                await ProcessRelayMessage(finalPacketResponse, connectorInfo);
+                            }
                         }
                     }
                     finally
@@ -1834,6 +1879,56 @@ namespace Modules.Utilities
         }
 
         /// <summary>
+        /// Sends a relay message to other clients via server.
+        /// Client-only method - the server will forward the message to target clients.
+        /// </summary>
+        /// <param name="targetClientIds">Target client IDs to send to. Null or empty for broadcast to all other clients.</param>
+        /// <param name="action">The action ID for the message</param>
+        /// <param name="data">Message data (will be serialized to JSON)</param>
+        public async UniTask<bool> SendRelayMessageAsync<T>(int[] targetClientIds, ushort action, T data, CancellationToken token = default)
+        {
+            if (m_IsServer)
+            {
+                Log("SendRelayMessageAsync is only available for clients. Use SendDataToClientsAsync for server.");
+                return false;
+            }
+
+            if (!m_IsConnected)
+            {
+                Log("Cannot send relay message - not connected to server");
+                return false;
+            }
+
+            try
+            {
+                string jsonData = data == null ? "" : JsonConvert.SerializeObject(data);
+                var relayMessage = new RelayMessage(m_MyClientId, targetClientIds, action, jsonData);
+                return await SendDataAsync(ACTION_RELAY_MESSAGE, relayMessage, token);
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to send relay message: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Sends a relay message to a specific client via server.
+        /// </summary>
+        public async UniTask<bool> SendRelayMessageToClientAsync<T>(int targetClientId, ushort action, T data, CancellationToken token = default)
+        {
+            return await SendRelayMessageAsync(new[] { targetClientId }, action, data, token);
+        }
+
+        /// <summary>
+        /// Broadcasts a relay message to all other clients via server.
+        /// </summary>
+        public async UniTask<bool> BroadcastRelayMessageAsync<T>(ushort action, T data, CancellationToken token = default)
+        {
+            return await SendRelayMessageAsync(null, action, data, token);
+        }
+
+        /// <summary>
         /// Serializes data based on type - primitives directly, complex objects via JSON
         /// </summary>
         private byte[] SerializeData<T>(T data)
@@ -1892,7 +1987,7 @@ namespace Modules.Utilities
         public async UniTask<bool> SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
             if (!m_IsRunning) return false;
-            
+
 
             // Only servers can target specific clients
             if (!m_IsServer)
@@ -2059,7 +2154,7 @@ namespace Modules.Utilities
         /// - For TCP connections: id is set when connection is established
         /// - For Real-time UDP: id = IPEndPoint.GetHashCode()
         /// </summary>
-        [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; public IPEndPoint remoteEndPoint; }
+        [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; [JsonIgnore] public IPEndPoint remoteEndPoint; }
 
         /// <summary>
         /// Extended information for real-time clients with timeout tracking
@@ -2144,6 +2239,216 @@ namespace Modules.Utilities
         }
 
         [Serializable]
+        public class SyncedClientList
+        {
+            public int yourId; // The recipient client's own ID (for self-filtering)
+            public List<ConnectorInfo> clients;
+
+            public SyncedClientList()
+            {
+                yourId = -1;
+                clients = new List<ConnectorInfo>();
+            }
+
+            public SyncedClientList(int recipientId, List<ConnectorInfo> clientList)
+            {
+                yourId = recipientId;
+                clients = clientList ?? new List<ConnectorInfo>();
+            }
+        }
+
+        /// <summary>
+        /// Message structure for client-to-client relay via server
+        /// </summary>
+        [Serializable]
+        public class RelayMessage
+        {
+            public int senderId;      // Original sender's client ID
+            public int[] targetIds;   // Target client IDs (null or empty = broadcast to all)
+            public ushort action;     // Original action
+            public string data;       // Message data (JSON string)
+
+            public RelayMessage()
+            {
+                senderId = -1;
+                targetIds = null;
+                action = 0;
+                data = "";
+            }
+
+            public RelayMessage(int sender, int[] targets, ushort actionId, string messageData)
+            {
+                senderId = sender;
+                targetIds = targets;
+                action = actionId;
+                data = messageData;
+            }
+        }
+
+        /// <summary>
+        /// Broadcasts client list synchronization to all connected clients.
+        /// Server-only method.
+        /// </summary>
+        /// <param name="excludeClientId">Client ID to exclude from broadcast (typically newly joined client for initial sync)</param>
+        /// <param name="isFullSync">If true, sends full client list. If false, assumes this is a disconnect notification.</param>
+        private async UniTask BroadcastClientListSync(int excludeClientId = -1, bool isFullSync = true)
+        {
+            if (!m_IsServer) return;
+
+            List<ConnectorInfo> currentClients;
+            lock (m_Clients)
+            {
+                currentClients = m_Clients.Values.ToList();
+            }
+
+            // Update server's own synced list
+            lock (_syncedClientListLock)
+            {
+                m_SyncedClientList = new List<ConnectorInfo>(currentClients);
+            }
+
+            ushort action = ACTION_CLIENT_LIST_FULL;
+
+            // Send personalized sync data to each client (with their own ID)
+            foreach (var client in currentClients)
+            {
+                // Create personalized sync payload with client's own ID
+                var syncData = new SyncedClientList(client.id, currentClients);
+
+                try
+                {
+                    await SendDataToClientsAsync(action, syncData, new[] { client.id });
+                    if (client.id == excludeClientId)
+                    {
+                        Log($"Sent initial full client list to new client {client.id}");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"Failed to send sync to client {client.id}: {ex.Message}");
+                }
+            }
+
+            Log($"Broadcasted client list sync to {currentClients.Count} clients");
+
+            // Fire local event on main thread
+            try
+            {
+                await UniTask.SwitchToMainThread();
+                m_OnClientListUpdated?.Invoke(new List<ConnectorInfo>(currentClients));
+            }
+            catch (Exception ex)
+            {
+                Log($"Warning: Could not invoke OnClientListUpdated event: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Processes client sync messages received from server.
+        /// Client-only method.
+        /// </summary>
+        private async UniTask ProcessClientSyncMessage(PacketResponse packet)
+        {
+            if (m_IsServer) return;
+
+            // Check if this is a sync action
+            if (packet.action != ACTION_CLIENT_LIST_FULL &&
+                packet.action != ACTION_CLIENT_JOINED &&
+                packet.action != ACTION_CLIENT_LEFT)
+            {
+                return; // Not a sync message
+            }
+
+            try
+            {
+                // Deserialize the client list
+                var syncData = packet.GetData<SyncedClientList>();
+                if (syncData == null || syncData.clients == null)
+                {
+                    Log("Received invalid client sync data");
+                    return;
+                }
+
+                // Store client's own server-assigned ID
+                m_MyClientId = syncData.yourId;
+
+                // Update local synced list
+                lock (_syncedClientListLock)
+                {
+                    m_SyncedClientList = new List<ConnectorInfo>(syncData.clients);
+                }
+
+                Log($"Client list synced: {syncData.clients.Count} clients connected (my ID: {m_MyClientId})");
+
+                // Fire event on main thread
+                try
+                {
+                    await UniTask.SwitchToMainThread();
+                    m_OnClientListUpdated?.Invoke(new List<ConnectorInfo>(syncData.clients));
+                }
+                catch (Exception ex)
+                {
+                    Log($"Warning: Could not invoke OnClientListUpdated event: {ex.Message}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to process client sync message: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Processes relay messages on server side - forwards messages to target clients
+        /// Server-only method.
+        /// </summary>
+        private async UniTask ProcessRelayMessage(PacketResponse packet, ConnectorInfo senderInfo)
+        {
+            if (!m_IsServer) return;
+            if (packet.action != ACTION_RELAY_MESSAGE) return;
+
+            try
+            {
+                var relayData = packet.GetData<RelayMessage>();
+                if (relayData == null)
+                {
+                    Log("Received invalid relay message data");
+                    return;
+                }
+
+                // Set sender ID from connection info
+                relayData.senderId = senderInfo.id;
+
+                int[] targetIds;
+                if (relayData.targetIds == null || relayData.targetIds.Length == 0)
+                {
+                    // Broadcast to all clients except sender
+                    lock (m_Clients)
+                    {
+                        targetIds = m_Clients.Values
+                            .Where(c => c.id != senderInfo.id)
+                            .Select(c => c.id)
+                            .ToArray();
+                    }
+                }
+                else
+                {
+                    // Send to specific targets (excluding sender)
+                    targetIds = relayData.targetIds.Where(id => id != senderInfo.id).ToArray();
+                }
+
+                if (targetIds.Length > 0)
+                {
+                    await SendDataToClientsAsync(ACTION_RELAY_MESSAGE, relayData, targetIds);
+                    Log($"Relayed message from client {senderInfo.id} to {targetIds.Length} clients, action={relayData.action}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"Failed to process relay message: {ex.Message}");
+            }
+        }
+
+        [Serializable]
         public class ErrorInfo
         {
             public enum ErrorType
@@ -2199,6 +2504,7 @@ namespace Modules.Utilities
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnClientDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnClientDisconnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerConnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerConnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerDisconnected, token);
+        public IUniTaskAsyncEnumerable<List<ConnectorInfo>> OnClientListUpdated(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<List<ConnectorInfo>>(m_OnClientListUpdated, token);
 
         public IUniTaskAsyncEnumerable<ErrorInfo> OnError(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ErrorInfo>(m_OnError, token);
 
@@ -2243,13 +2549,18 @@ namespace Modules.Utilities
         // Test message variables
         private string testMessage = "Hello World!";
         private ushort testAction = 1;
-        private string targetClientIdsText = ""; // For comma-separated client IDs
 
         // Foldout states
         private bool eventsExpanded = false;
         private bool settingsExpanded = true;
         private bool performanceExpanded = false;
         private bool udpExpanded = false;
+
+        // Force inspector to repaint during play mode to show live status updates
+        public override bool RequiresConstantRepaint()
+        {
+            return Application.isPlaying;
+        }
 
         public override void OnInspectorGUI()
         {
@@ -2371,6 +2682,65 @@ namespace Modules.Utilities
                 if (!isServer.boolValue)
                 {
                     EditorGUILayout.Toggle("Is Connected", isConnectedProp.boolValue);
+
+                    // Show connected server info and synced client list for client mode
+                    if (tcpConnector.IsConnected)
+                    {
+                        EditorGUILayout.Space();
+                        EditorGUILayout.LabelField("Connected Server:", EditorStyles.miniLabel);
+                        var serverInfo = tcpConnector.ServerInfo;
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField($"• Server: {serverInfo.ipAddress}:{serverInfo.port}", EditorStyles.miniLabel, GUILayout.ExpandWidth(true));
+                        GUI.backgroundColor = Color.cyan;
+                        if (GUILayout.Button("Send", GUILayout.Width(50)))
+                        {
+                            // Send message directly to server
+                            tcpConnector.SendDataAsync(testAction, testMessage).Forget();
+                            Debug.Log($"[TCPConnector] Sent message to server: Action={testAction}, Message='{testMessage}'");
+                        }
+                        GUI.backgroundColor = Color.white;
+                        EditorGUILayout.EndHorizontal();
+
+                        // Show client's own ID
+                        if (tcpConnector.MyClientId != -1)
+                        {
+                            EditorGUILayout.LabelField($"My Client ID: {tcpConnector.MyClientId}", EditorStyles.miniLabel);
+                        }
+
+                        // Show synced client list (other clients connected to same server, excluding self)
+                        var syncedClients = tcpConnector.GetAllConnectedClientsInfo();
+                        var otherClients = syncedClients.Where(c => c.id != tcpConnector.MyClientId).ToList();
+                        if (otherClients.Count > 0)
+                        {
+                            EditorGUILayout.Space();
+                            EditorGUILayout.LabelField($"Other Connected Clients ({otherClients.Count}):", EditorStyles.miniLabel);
+                            foreach (var client in otherClients)
+                            {
+                                EditorGUILayout.BeginHorizontal();
+                                EditorGUILayout.LabelField($"• ID: {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel, GUILayout.ExpandWidth(true));
+                                GUI.backgroundColor = Color.yellow;
+                                if (GUILayout.Button("Send", GUILayout.Width(50)))
+                                {
+                                    // Send relay message to specific client via server
+                                    tcpConnector.SendRelayMessageToClientAsync(client.id, testAction, testMessage).Forget();
+                                    Debug.Log($"[TCPConnector] Sent relay message to client {client.id}: Action={testAction}, Message='{testMessage}'");
+                                }
+                                GUI.backgroundColor = Color.white;
+                                EditorGUILayout.EndHorizontal();
+                            }
+
+                            // Broadcast to All other clients button
+                            EditorGUILayout.Space();
+                            GUI.backgroundColor = Color.green;
+                            if (GUILayout.Button("📢 Broadcast to All Other Clients"))
+                            {
+                                // Broadcast relay message to all other clients via server
+                                tcpConnector.BroadcastRelayMessageAsync(testAction, testMessage).Forget();
+                                Debug.Log($"[TCPConnector] Broadcast relay message to {otherClients.Count} clients: Action={testAction}, Message='{testMessage}'");
+                            }
+                            GUI.backgroundColor = Color.white;
+                        }
+                    }
                 }
 
                 if (isServer.boolValue && tcpConnector.ConnectedClientCount > 0)
@@ -2378,16 +2748,38 @@ namespace Modules.Utilities
                     EditorGUILayout.LabelField($"TCP Clients: {tcpConnector.ConnectedClientCount}");
                     EditorGUILayout.LabelField($"Real-time Clients: {tcpConnector.ActiveRealTimeClientCount}");
 
-                    // Show client details
+                    // Show client details with individual Send buttons
                     EditorGUILayout.Space();
-                    EditorGUILayout.LabelField("TCP Client Details:", EditorStyles.miniLabel);
-                    foreach (var client in tcpConnector.GetClientInfoList())
+                    EditorGUILayout.LabelField("Clients:", EditorStyles.miniLabel);
+                    var clientList = tcpConnector.GetClientInfoList();
+                    foreach (var client in clientList)
                     {
-                        EditorGUILayout.LabelField($"• TCP {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
+                        EditorGUILayout.BeginHorizontal();
+                        EditorGUILayout.LabelField($"• ID: {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel, GUILayout.ExpandWidth(true));
+                        GUI.backgroundColor = Color.yellow;
+                        if (GUILayout.Button("Send", GUILayout.Width(50)))
+                        {
+                            tcpConnector.SendDataToClientsAsync(testAction, testMessage, new[] { client.id }).Forget();
+                            Debug.Log($"[TCPConnector] Sent message to client {client.id}: Action={testAction}, Message='{testMessage}'");
+                        }
+                        GUI.backgroundColor = Color.white;
+                        EditorGUILayout.EndHorizontal();
                     }
+
+                    // Broadcast to All button
+                    EditorGUILayout.Space();
+                    GUI.backgroundColor = Color.green;
+                    if (GUILayout.Button("📢 Broadcast to All Clients"))
+                    {
+                        int[] allClientIds = clientList.Select(c => c.id).ToArray();
+                        tcpConnector.SendDataToClientsAsync(testAction, testMessage, allClientIds).Forget();
+                        Debug.Log($"[TCPConnector] Broadcast message to {allClientIds.Length} clients: Action={testAction}, Message='{testMessage}'");
+                    }
+                    GUI.backgroundColor = Color.white;
 
                     if (tcpConnector.ActiveRealTimeClientCount > 0)
                     {
+                        EditorGUILayout.Space();
                         EditorGUILayout.LabelField("Real-time Client Details:", EditorStyles.miniLabel);
                         foreach (var client in tcpConnector.GetRealTimeClientInfoList())
                         {
@@ -2396,106 +2788,6 @@ namespace Modules.Utilities
                     }
                 }
                 EditorGUILayout.EndVertical();
-
-                // --- Test Message Box (only show when connected) ---
-                bool canSendMessage = (isServer.boolValue && tcpConnector.ConnectedClientCount > 0) ||
-                                     (!isServer.boolValue && tcpConnector.IsConnected);
-
-                if (canSendMessage)
-                {
-                    EditorGUILayout.Space();
-                    EditorGUILayout.BeginVertical("box");
-                    EditorGUILayout.LabelField("Test Message", EditorStyles.boldLabel);
-
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.LabelField("Action ID:", GUILayout.Width(70));
-                    testAction = (ushort)EditorGUILayout.IntField(testAction, GUILayout.Width(60));
-                    EditorGUILayout.EndHorizontal();
-
-                    EditorGUILayout.BeginHorizontal();
-                    EditorGUILayout.LabelField("Message:", GUILayout.Width(70));
-                    testMessage = EditorGUILayout.TextField(testMessage);
-                    EditorGUILayout.EndHorizontal();
-
-                    EditorGUILayout.Space();
-
-                    EditorGUILayout.BeginHorizontal();
-                    GUI.backgroundColor = Color.yellow;
-                    if (GUILayout.Button("Send TCP Message"))
-                    {
-                        tcpConnector.SendDataAsync(testAction, testMessage).Forget();
-                        Debug.Log($"[TCPConnector] Sent TCP test message: Action={testAction}, Message='{testMessage}'");
-                    }
-
-                    // Real-time Test Button
-                    EditorGUI.BeginDisabledGroup(!tcpConnector.IsRealTimeEnabled);
-                    GUI.backgroundColor = Color.cyan;
-                    if (GUILayout.Button("Send Real-time Message"))
-                    {
-                        tcpConnector.SendRealTimeData(testAction, testMessage);
-                        Debug.Log($"[TCPConnector] Sent Real-time test message: Action={testAction}, Message='{testMessage}'");
-                    }
-                    EditorGUI.EndDisabledGroup();
-
-                    GUI.backgroundColor = Color.green;
-                    if (GUILayout.Button("Send Raw Bytes"))
-                    {
-                        byte[] rawData = System.Text.Encoding.UTF8.GetBytes(testMessage);
-                        tcpConnector.SendDataAsync(testAction, rawData).Forget();
-                        Debug.Log($"[TCPConnector] Sent raw bytes: Action={testAction}, Bytes={rawData.Length}");
-                    }
-                    GUI.backgroundColor = Color.white;
-                    EditorGUILayout.EndHorizontal();
-
-                    // Server-only targeting section
-                    if (isServer.boolValue && tcpConnector.ConnectedClientCount > 0)
-                    {
-                        EditorGUILayout.Space();
-                        EditorGUILayout.LabelField("Target Specific Clients (Server Only)", EditorStyles.boldLabel);
-
-                        EditorGUILayout.BeginHorizontal();
-                        EditorGUILayout.LabelField("Client IDs:", GUILayout.Width(70));
-                        targetClientIdsText = EditorGUILayout.TextField(targetClientIdsText, GUILayout.ExpandWidth(true));
-                        EditorGUILayout.EndHorizontal();
-
-                        EditorGUILayout.LabelField("Available clients:", EditorStyles.miniLabel);
-                        foreach (var client in tcpConnector.GetClientInfoList())
-                        {
-                            EditorGUILayout.LabelField($"• ID: {client.id} ({client.ipAddress}:{client.port})", EditorStyles.miniLabel);
-                        }
-
-                        EditorGUILayout.BeginHorizontal();
-                        GUI.backgroundColor = Color.magenta;
-                        if (GUILayout.Button("Send to Targeted Clients"))
-                        {
-                            try
-                            {
-                                int[] targetIds = targetClientIdsText.Split(',')
-                                    .Where(s => !string.IsNullOrWhiteSpace(s))
-                                    .Select(s => int.Parse(s.Trim()))
-                                    .ToArray();
-
-                                if (targetIds.Length > 0)
-                                {
-                                    tcpConnector.SendDataToClientsAsync(testAction, testMessage, targetIds).Forget();
-                                    Debug.Log($"[TCPConnector] Sent targeted message: Action={testAction}, Targets=[{string.Join(", ", targetIds)}], Message='{testMessage}'");
-                                }
-                                else
-                                {
-                                    Debug.LogWarning("[TCPConnector] No valid client IDs specified");
-                                }
-                            }
-                            catch (System.Exception ex)
-                            {
-                                Debug.LogError($"[TCPConnector] Failed to parse client IDs: {ex.Message}");
-                            }
-                        }
-                        GUI.backgroundColor = Color.white;
-                        EditorGUILayout.EndHorizontal();
-                    }
-
-                    EditorGUILayout.EndVertical();
-                }
 
                 EditorGUILayout.Space();
 
@@ -2547,4 +2839,5 @@ namespace Modules.Utilities
         }
     }
 }
+
 #endif
