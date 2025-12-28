@@ -50,8 +50,9 @@ namespace Modules.Utilities
     /// <param name="remoteFileName">The name of the file to save on the server (e.g., image.png).</param>
     /// <param name="remoteFolder">The target folder path on the server (e.g., public_html/qrcode).</param>
     /// <param name="progress">Optional: Progress reporter (0.0 to 1.0).</param>
+    /// <param name="cancellationToken">Optional: Token to cancel the upload operation.</param>
     /// <returns>The generated public URL of the uploaded file, or null if the upload fails or base URL is missing.</returns>
-    public async UniTask<string> UploadFileAsync(string localFilePath, string remoteFileName, string remoteFolder = "", IProgress<float> progress = null)
+    public async UniTask<string> UploadFileAsync(string localFilePath, string remoteFileName = "", string remoteFolder = "", IProgress<float> progress = null, System.Threading.CancellationToken cancellationToken = default)
     {
         // 1. Validation: Check if the local file exists
         if (!File.Exists(localFilePath))
@@ -66,9 +67,14 @@ namespace Modules.Utilities
         string currentPass = password;
         string currentBaseUrl = httpBaseUrl;
 
-        // Clean the remote folder path (remove leading/trailing slashes)
-        string cleanFolder = remoteFolder.Trim('/');
+            // Clean the remote folder path (remove leading/trailing slashes)
+            string cleanFolder = remoteFolder.Trim('/');
         
+        if (string.IsNullOrEmpty(remoteFileName))
+        {
+            remoteFileName = Path.GetFileName(localFilePath);
+        }
+
         // Construct the full FTP path: ftp://host:port/folder/filename
         string uploadPath = string.IsNullOrEmpty(cleanFolder) ? remoteFileName : $"{cleanFolder}/{remoteFileName}";
         string targetUri = $"{currentHost}/{uploadPath}";
@@ -80,6 +86,8 @@ namespace Modules.Utilities
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                
                 FtpWebRequest request = (FtpWebRequest)WebRequest.Create(targetUri);
                 request.Method = WebRequestMethods.Ftp.UploadFile;
                 request.Credentials = new NetworkCredential(currentUser, currentPass);
@@ -98,6 +106,8 @@ namespace Modules.Utilities
                     // Write file data to the request stream
                     while ((read = fs.Read(buffer, 0, buffer.Length)) > 0)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
                         await requestStream.WriteAsync(buffer, 0, read);
                         uploadedBytes += read;
 
@@ -105,7 +115,14 @@ namespace Modules.Utilities
                         progress?.Report((float)uploadedBytes / totalBytes);
                     }
                 }
+                
+                cancellationToken.ThrowIfCancellationRequested();
                 Debug.Log($"[FTP] Upload Complete: {remoteFileName}");
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.LogWarning($"[FTP] Upload Cancelled: {remoteFileName}");
+                throw;
             }
             catch (Exception ex)
             {
@@ -136,7 +153,8 @@ namespace Modules.Utilities
     /// <param name="remotePath">The full path of the file on the FTP server (e.g., public_html/qrcode/image.png).</param>
     /// <param name="localSavePath">Full local path where the file will be saved.</param>
     /// <param name="progress">Optional: Progress reporter (0.0 to 1.0).</param>
-    public async UniTask DownloadFileAsync(string remotePath, string localSavePath, IProgress<float> progress = null)
+    /// <param name="cancellationToken">Optional: Token to cancel the download operation.</param>
+    public async UniTask DownloadFileAsync(string remotePath, string localSavePath, IProgress<float> progress = null, System.Threading.CancellationToken cancellationToken = default)
     {
         string currentHost = host;
         string currentUser = username;
@@ -146,6 +164,8 @@ namespace Modules.Utilities
         {
             try
             {
+                cancellationToken.ThrowIfCancellationRequested();
+                
                 string targetUri = $"{currentHost}/{remotePath}";
                 FtpWebRequest request = (FtpWebRequest)WebRequest.Create(targetUri);
                 request.Method = WebRequestMethods.Ftp.DownloadFile;
@@ -153,7 +173,7 @@ namespace Modules.Utilities
                 request.UseBinary = true;
 
                 // Attempt to get file size for progress calculation
-                long totalBytes = await GetFileSizeAsync(targetUri, currentUser, currentPass);
+                long totalBytes = await GetFileSizeAsync(targetUri, currentUser, currentPass, cancellationToken);
 
                 using (FtpWebResponse response = (FtpWebResponse)await request.GetResponseAsync())
                 using (Stream responseStream = response.GetResponseStream())
@@ -165,6 +185,8 @@ namespace Modules.Utilities
 
                     while ((read = await responseStream.ReadAsync(buffer, 0, buffer.Length)) > 0)
                     {
+                        cancellationToken.ThrowIfCancellationRequested();
+                        
                         await fs.WriteAsync(buffer, 0, read);
                         downloadedBytes += read;
 
@@ -174,8 +196,15 @@ namespace Modules.Utilities
                         }
                     }
                 }
+                
+                cancellationToken.ThrowIfCancellationRequested();
 
                 Debug.Log($"[FTP] Download Complete: {localSavePath}");
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.LogWarning($"[FTP] Download Cancelled: {localSavePath}");
+                throw;
             }
             catch (Exception ex)
             {
@@ -188,10 +217,12 @@ namespace Modules.Utilities
     /// <summary>
     /// Helper method to retrieve the file size from the FTP server.
     /// </summary>
-    private async UniTask<long> GetFileSizeAsync(string targetUri, string user, string pass)
+    private async UniTask<long> GetFileSizeAsync(string targetUri, string user, string pass, System.Threading.CancellationToken cancellationToken = default)
     {
         try
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            
             FtpWebRequest request = (FtpWebRequest)WebRequest.Create(targetUri);
             request.Method = WebRequestMethods.Ftp.GetFileSize;
             request.Credentials = new NetworkCredential(user, pass);
