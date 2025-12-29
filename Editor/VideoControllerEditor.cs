@@ -7,6 +7,7 @@ namespace Modules.Utilities.Editor
 {
 
     [CustomEditor(typeof(VideoController))]
+    [CanEditMultipleObjects]
     public class VideoControllerEditor : UnityEditor.Editor
     {
         private SerializedProperty _RawImage;

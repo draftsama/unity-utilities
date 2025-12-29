@@ -42,9 +42,8 @@ namespace Modules.Utilities.Editor
         [MenuItem("Utilities/Build Manager")]
         public static void ShowWindow()
         {
-            var window = GetWindow<BuildManagerWindowEditor>(false, "Build Manager", false);
-            window.Show(true);
-
+            var window = GetWindow<BuildManagerWindowEditor>("Build Manager");
+            window.Show();
         }
 
         void OnEnable()
@@ -192,7 +191,9 @@ namespace Modules.Utilities.Editor
             GUILayout.Label("Build Name: ", EditorStyles.label);
             buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
             GUILayout.EndHorizontal();
-            if (GUI.changed)
+            
+            EditorGUI.BeginChangeCheck();
+            if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
@@ -204,7 +205,9 @@ namespace Modules.Utilities.Editor
             GUILayout.Label("Build Suffix: ", EditorStyles.label);
             buildSuffix = GUILayout.TextField(buildSuffix, GUILayout.Width(200));
             GUILayout.EndHorizontal();
-            if (GUI.changed)
+            
+            EditorGUI.BeginChangeCheck();
+            if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
@@ -216,8 +219,9 @@ namespace Modules.Utilities.Editor
             GUILayout.BeginHorizontal();
             GUILayout.Label("Version: ", EditorStyles.label);
 
+            EditorGUI.BeginChangeCheck();
             buildVersion = GUILayout.TextField(buildVersion, GUILayout.Width(100));
-            if (GUI.changed)
+            if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
@@ -284,9 +288,11 @@ namespace Modules.Utilities.Editor
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("Copy Folders:", EditorStyles.label);
                 GUILayout.FlexibleSpace();
+                
+                EditorGUI.BeginChangeCheck();
                 enableCopyFolders = GUILayout.Toggle(enableCopyFolders, "Enable Copy Folders", GUILayout.Width(150));
                 // Save toggle state to settings
-                if (GUI.changed)
+                if (EditorGUI.EndChangeCheck())
                 {
                     var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
                     profileSettings.enableCopyFolders = enableCopyFolders;
@@ -299,16 +305,14 @@ namespace Modules.Utilities.Editor
                     int indexToRemove = -1;
                     for (int i = 0; i < copyFolderPaths.Count; i++)
                     {
-                        EditorGUI.indentLevel++;
-
                         GUILayout.BeginHorizontal();
+                        GUILayout.Space(20);
                         GUILayout.Label(copyFolderPaths[i], EditorStyles.label);
                         if (GUILayout.Button("DEL", GUILayout.Width(60)))
                         {
                             indexToRemove = i;
                         }
                         GUILayout.EndHorizontal();
-                        EditorGUI.indentLevel--;
                     }
 
                     if (indexToRemove >= 0)
@@ -344,23 +348,20 @@ namespace Modules.Utilities.Editor
 
                 GUILayout.EndVertical();
             }
-            else
-            {
-                copyFolderPaths.Clear();
-                enableCopyFolders = false;
-            }
 
             //draw checkbox for isNotify
+            EditorGUI.BeginChangeCheck();
             isNotify = GUILayout.Toggle(isNotify, "Enable Message Notify", GUILayout.Width(150));
-            if (GUI.changed)
+            if (EditorGUI.EndChangeCheck())
             {
                 settings.isNotify = isNotify;
                 SaveSettings();
             }
 
             //draw checkbox for isSoundNotify
+            EditorGUI.BeginChangeCheck();
             isSoundNotify = GUILayout.Toggle(isSoundNotify, "Enable Sound Notify", GUILayout.Width(150));
-            if (GUI.changed)
+            if (EditorGUI.EndChangeCheck())
             {
                 settings.isSoundNotify = isSoundNotify;
                 SaveSettings();
@@ -380,12 +381,6 @@ namespace Modules.Utilities.Editor
             GUILayout.EndHorizontal();
 
             GUILayout.EndVertical();
-
-            // Auto-save any changes
-            if (GUI.changed)
-            {
-                UpdateCurrentProfileSettings();
-            }
         }
 
         void SaveSettings()

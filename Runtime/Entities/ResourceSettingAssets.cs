@@ -29,8 +29,46 @@ namespace Modules.Utilities
 
 
 #if UNITY_EDITOR
-    public class ResourceSettingAssetsEditor
+    [CustomEditor(typeof(ResourceSettingAssets))]
+    public class ResourceSettingAssetsEditor : UnityEditor.Editor
     {
+        public override void OnInspectorGUI()
+        {
+            ResourceSettingAssets settings = (ResourceSettingAssets)target;
+
+            EditorGUI.BeginChangeCheck();
+
+            // Show m_ResourceStoreType
+            settings.m_ResourceStoreType = (ResourceStoreType)EditorGUILayout.EnumPopup("Resource Store Type", settings.m_ResourceStoreType);
+
+            // Conditionally show m_ExternalResourcesFolderName
+            if (settings.m_ResourceStoreType == ResourceStoreType.ExternalResources)
+            {
+                settings.m_ExternalResourcesFolderName = EditorGUILayout.TextField("External Resources Folder Name", settings.m_ExternalResourcesFolderName);
+                
+                // Show the full path as a help box
+                if (!string.IsNullOrEmpty(settings.m_ExternalResourcesFolderName))
+                {
+                    string fullPath = settings.GetExternalResourcesFolderPath();
+                    
+                    // Check if directory exists
+                    if (Directory.Exists(fullPath))
+                    {
+                        EditorGUILayout.HelpBox($"Full Path: {fullPath}", MessageType.Info);
+                    }
+                    else
+                    {
+                        EditorGUILayout.HelpBox($"Directory does not exist!\nPath: {fullPath}", MessageType.Error);
+                    }
+                }
+            }
+
+            if (EditorGUI.EndChangeCheck())
+            {
+                EditorUtility.SetDirty(settings);
+            }
+        }
+
         [MenuItem("Assets/Create/[Draft Utility]/Create ResourceSettingAssets", priority = 0)]
         public static void CreateResourceSettingAsset()
         {
@@ -70,6 +108,10 @@ namespace Modules.Utilities
             Selection.activeObject = asset;
         }
     }
+
+
+   
+
 #endif
 
 }
