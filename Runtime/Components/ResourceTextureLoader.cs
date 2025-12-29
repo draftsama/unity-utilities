@@ -24,7 +24,7 @@ public class ResourceTextureLoader : MonoBehaviour
     [SerializeField] public string m_FileName;
     [SerializeField] public OutputType m_OutputType = OutputType.None;
 
-    [SerializeField] public Texture2D m_EditorSource;
+    [SerializeField] public Texture2D m_PreviewSource;
 
     [SerializeField] public TextureWrapMode m_TextureWrapMode = TextureWrapMode.Clamp;
     [SerializeField] public FilterMode m_FilterMode = FilterMode.Bilinear;
@@ -50,10 +50,6 @@ public class ResourceTextureLoader : MonoBehaviour
 
 
 
-    public void SetEditorSource(Texture2D _texture)
-    {
-        m_EditorSource = _texture;
-    }
 
     async void Start()
     {
@@ -69,44 +65,17 @@ public class ResourceTextureLoader : MonoBehaviour
     public async UniTask<Texture2D> LoadTexture()
     {
 
-        Texture2D texture = null;
-        if (Application.isPlaying)
+
+        var texture = await ResourceManager.GetTextureAsync(m_FileName);
+        if (texture == null)
         {
-            texture = await ResourceManager.GetTextureAsync(m_FileName);
-
+            Debug.LogError($"Failed to load texture: {m_FileName}");
+            return null;
         }
-        else
-        {
-            var path = ResourceManager.GetPathByNameAsync(m_FileName);
-            if (string.IsNullOrEmpty(path))
-            {
-                Debug.LogWarning($"File not found : {m_FileName}");
-                return null;
-            }
-            
-            Debug.Log($"Load Texture : {path}");
-
-            // Convert file path to proper URI format
-            var fileUri = new System.Uri(path).AbsoluteUri;
-            using (var reqTexture = UnityEngine.Networking.UnityWebRequestTexture.GetTexture(fileUri))
-            {
-                await reqTexture.SendWebRequest();
-                
-                if (reqTexture.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
-                {
-                    Debug.LogError($"Failed to load texture: {reqTexture.error}");
-                    return null;
-                }
-                
-                texture = UnityEngine.Networking.DownloadHandlerTexture.GetContent(reqTexture);
-                texture.wrapMode = TextureWrapMode.Clamp;
-                texture.name = Path.GetFileName(m_FileName);
-                texture.Apply();
-            }
-        }
-
         ApplyTexture(texture);
+
         return texture;
+
     }
 
 
@@ -157,9 +126,6 @@ public class ResourceTextureLoader : MonoBehaviour
         _texture.wrapMode = m_TextureWrapMode;
         _texture.filterMode = m_FilterMode;
         _texture.Apply();
-
-
-
 
 
         switch (m_OutputType)

@@ -14,7 +14,6 @@ namespace Modules.Utilities.Editor
     {
         private string _ResourceFolder;
         private ResourceManager _ResourceManager;
-        private Texture2D _PreviewTexture;
         private EditorGUIHelper.FileSearchState _FileSearchState = new EditorGUIHelper.FileSearchState();
 
         private SerializedProperty _OutputTypeProperty;
@@ -25,6 +24,8 @@ namespace Modules.Utilities.Editor
         private SerializedProperty _SpriteFitScreenProperty;
         private SerializedProperty _PixelPerUnitProperty;
         private SerializedProperty _SpritePivotProperty;
+
+        private SerializedProperty _PreviewSource;
 
         //output property
         private SerializedProperty _RawImage,
@@ -53,9 +54,7 @@ namespace Modules.Utilities.Editor
             _SpritePivotProperty = serializedObject.FindProperty(nameof(instance.m_SpritePivot));
             _SpriteFitScreenProperty = serializedObject.FindProperty(nameof(instance.m_SpriteFitScreen));
             _FileNameProperty = serializedObject.FindProperty(nameof(instance.m_FileName));
-
-            var editorSource = serializedObject.FindProperty(nameof(instance.m_EditorSource));
-            _PreviewTexture = editorSource.objectReferenceValue as Texture2D;
+            _PreviewSource = serializedObject.FindProperty(nameof(instance.m_PreviewSource));
         }
         public override void OnInspectorGUI()
         {
@@ -94,13 +93,14 @@ namespace Modules.Utilities.Editor
 
             //Preview Texture2D
 
-            if (instance.m_EditorSource != null)
+            if (_PreviewSource.objectReferenceValue != null)
             {
                 GUILayout.Label("Preview", GUILayout.ExpandWidth(true));
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                var aspectRatio = (float)_PreviewTexture.height / (float)_PreviewTexture.width;
-                GUILayout.Box(_PreviewTexture, GUILayout.Width(240), GUILayout.Height(aspectRatio * 240f));
+                var previewTexture = (Texture2D)_PreviewSource.objectReferenceValue;
+                var aspectRatio = (float)previewTexture.height / (float)previewTexture.width;
+                GUILayout.Box(previewTexture, GUILayout.Width(240), GUILayout.Height(aspectRatio * 240f));
                 GUILayout.FlexibleSpace();
                 GUILayout.EndHorizontal();
 
@@ -292,7 +292,7 @@ namespace Modules.Utilities.Editor
 
             // Use ResourceManager to find the file path (already searched in autocomplete)
             var path = ResourceManager.GetPathByNameAsync(_filename);
-            
+
             if (string.IsNullOrEmpty(path))
             {
                 Debug.LogWarning($"File not found: {_filename}");
@@ -312,36 +312,36 @@ namespace Modules.Utilities.Editor
                 File.Copy(path, filePath, true);
                 AssetDatabase.Refresh();
 
+               // Debug.Log($"Copied file to: {filePath}");
+
+
                 //modify texture import setting
-                //  var importer = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
-                // importer.textureType = (TextureImporterType)_TextureTypeValueProperty.intValue;
-                // importer.mipmapEnabled = _GenerateMipMaps.boolValue;
-                // importer.alphaSource = TextureImporterAlphaSource.FromInput;
-                // importer.alphaIsTransparency = _AlphaIsTransparency.boolValue;
-                // importer.wrapMode = (TextureWrapMode)_TextureWrapMode.intValue;
-                // importer.filterMode = (FilterMode)_FilterMode.intValue;
-                // importer.isReadable = true;
-                // importer.spritePixelsPerUnit = _PixelPerUnitProperty.floatValue;
-
-                // // Set texture size/resolution settings
-                // importer.maxTextureSize = _MaxTextureSizeProperty.intValue;
-                // importer.textureCompression = (TextureImporterCompression)_TextureCompressionProperty.intValue;
-                // importer.npotScale = (TextureImporterNPOTScale)_NPOTScaleProperty.intValue;
-
-                // importer.SaveAndReimport();
+                var importer = AssetImporter.GetAtPath(fileAssetPath) as TextureImporter;
+                importer.textureType = TextureImporterType.Default;
+                importer.wrapMode = (TextureWrapMode)_TextureWrapMode.enumValueIndex;
+                importer.filterMode = (FilterMode)_FilterMode.enumValueIndex;
+                importer.mipmapEnabled = false;
+                importer.isReadable = true;
+                importer.alphaIsTransparency = true;
 
 
+                importer.maxTextureSize = 4096;
+                importer.textureCompression = TextureImporterCompression.Uncompressed;
+                importer.npotScale = TextureImporterNPOTScale.None;
 
-                // texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+                importer.SaveAndReimport();
+
+                var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+
+                _PreviewSource.objectReferenceValue = texture;
+                serializedObject.ApplyModifiedProperties();
+
+                Debug.Log($"Loaded texture: {_filename} size: {texture.width}x{texture.height}");
 
                 var instance = target as ResourceTextureLoader;
-                instance.LoadTexture().ContinueWith(t =>
-                {
-                    _PreviewTexture = t;
-                    instance.SetEditorSource(t);
-                    Debug.Log($"loaded image: {_filename} image size: {t.width}x{t.height}");
+                instance.ApplyTexture(texture);
 
-                }).Forget();
+               
 
             }
 
