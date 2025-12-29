@@ -40,30 +40,53 @@ public class EditorGUIHelper
             state.InputNameID = GUIUtility.keyboardControl;
         }
 
-        // Show autocomplete dropdown
-        if (state.FilePathsFilter != null && state.FilePathsFilter.Length > 0 && 
-            GUIUtility.keyboardControl == state.InputNameID)
+        // Show autocomplete dropdown when field is focused
+        if (GUIUtility.keyboardControl == state.InputNameID)
         {
-            EditorGUILayout.BeginVertical("box");
-            GUI.color = Color.cyan;
-            
-            foreach (var file in state.FilePathsFilter)
+            // Check if current value matches any file in the list
+            bool valueMatchesFile = false;
+            if (!string.IsNullOrEmpty(fileNameProperty.stringValue))
             {
-                var name = Path.GetFileName(file);
-                if (GUILayout.Button(name))
-                {
-                    fileNameProperty.stringValue = name;
-                    fileNameProperty.serializedObject.ApplyModifiedProperties();
-                    
-                    // Invoke callback
-                    onFileSelected?.Invoke(name);
-                    
-                    GUIUtility.keyboardControl = 0;
-                }
+                valueMatchesFile = state.FilePathsFilter.Any(f => 
+                    Path.GetFileName(f).Equals(fileNameProperty.stringValue, StringComparison.OrdinalIgnoreCase));
             }
             
-            GUI.color = Color.white;
-            EditorGUILayout.EndVertical();
+            // Show dropdown if: empty, has results, or doesn't match any file
+            bool shouldShowDropdown = string.IsNullOrEmpty(fileNameProperty.stringValue) || 
+                                     state.FilePathsFilter.Length > 0 || 
+                                     !valueMatchesFile;
+            
+            if (shouldShowDropdown)
+            {
+                EditorGUILayout.BeginVertical("box");
+                
+                if (state.FilePathsFilter.Length > 0)
+                {
+                    GUI.color = Color.cyan;
+                    foreach (var file in state.FilePathsFilter)
+                    {
+                        var name = Path.GetFileName(file);
+                        if (GUILayout.Button(name))
+                        {
+                            fileNameProperty.stringValue = name;
+                            fileNameProperty.serializedObject.ApplyModifiedProperties();
+                            
+                            // Invoke callback
+                            onFileSelected?.Invoke(name);
+                            
+                            GUIUtility.keyboardControl = 0;
+                        }
+                    }
+                    GUI.color = Color.white;
+                }
+                else if (!string.IsNullOrEmpty(fileNameProperty.stringValue))
+                {
+                    // Show "no results" message if user typed something but nothing matched
+                    EditorGUILayout.HelpBox($"No files found matching '{fileNameProperty.stringValue}'", MessageType.Info);
+                }
+                
+                EditorGUILayout.EndVertical();
+            }
         }
 
         // Update file search results
@@ -76,10 +99,20 @@ public class EditorGUIHelper
             {
                 if (string.IsNullOrEmpty(state.CurrentNameInput))
                 {
-                    state.FilePathsFilter = new string[0];
+                    // Show recent files when empty (sorted by last write time)
+                    state.FilePathsFilter = Directory.GetFiles(resourceFolder, "*.*", SearchOption.AllDirectories)
+                                        .Where(file =>
+                                        {
+                                            var ext = Path.GetExtension(file).ToLowerInvariant();
+                                            return validExtensions.Contains(ext);
+                                        })
+                                        .OrderByDescending(f => File.GetLastWriteTime(f))
+                                        .Take(maxResults)
+                                        .ToArray();
                 }
                 else
                 {
+                    // Search by pattern
                     Regex regexPattern = new Regex(Regex.Escape(state.CurrentNameInput), RegexOptions.IgnoreCase);
 
                     state.FilePathsFilter = Directory.GetFiles(resourceFolder, "*.*", SearchOption.AllDirectories)
@@ -95,7 +128,6 @@ public class EditorGUIHelper
             }
             else
             {
-                EditorGUILayout.HelpBox("Search folder not found: " + resourceFolder, MessageType.Warning);
                 state.FilePathsFilter = new string[0];
             }
         }
