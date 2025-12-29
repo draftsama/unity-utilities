@@ -77,24 +77,32 @@ public class ResourceTextureLoader : MonoBehaviour
         }
         else
         {
-
             var path = ResourceManager.GetPathByNameAsync(m_FileName);
             if (string.IsNullOrEmpty(path))
             {
                 Debug.LogWarning($"File not found : {m_FileName}");
                 return null;
             }
+            
             Debug.Log($"Load Texture : {path}");
 
-            using (var reqTexture = UnityEngine.Networking.UnityWebRequestTexture.GetTexture("file://"+path))
+            // Convert file path to proper URI format
+            var fileUri = new System.Uri(path).AbsoluteUri;
+            using (var reqTexture = UnityEngine.Networking.UnityWebRequestTexture.GetTexture(fileUri))
             {
                 await reqTexture.SendWebRequest();
+                
+                if (reqTexture.result != UnityEngine.Networking.UnityWebRequest.Result.Success)
+                {
+                    Debug.LogError($"Failed to load texture: {reqTexture.error}");
+                    return null;
+                }
+                
                 texture = UnityEngine.Networking.DownloadHandlerTexture.GetContent(reqTexture);
                 texture.wrapMode = TextureWrapMode.Clamp;
                 texture.name = Path.GetFileName(m_FileName);
                 texture.Apply();
             }
-
         }
 
         ApplyTexture(texture);

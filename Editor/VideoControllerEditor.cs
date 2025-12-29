@@ -2,6 +2,9 @@ using UnityEngine;
 using UnityEditor;
 using UnityEngine.UI;
 using Cysharp.Threading.Tasks;
+using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 
 namespace Modules.Utilities.Editor
 {
@@ -24,6 +27,14 @@ namespace Modules.Utilities.Editor
         private SerializedProperty _ContentSizeMode;
         private SerializedProperty _Progress;
 
+        // File search fields
+        private int _InputNameID;
+        private string _ResourceFolder;
+        private string _CurrentNameInput = string.Empty;
+        private string[] _FilePathsFilter;
+        private SerializedProperty _FileNameProperty;
+        private SerializedProperty _FolderNameProperty;
+        private SerializedProperty _PathTypeProperty;
 
         private VideoController instance;
         public void OnEnable()
@@ -44,6 +55,16 @@ namespace Modules.Utilities.Editor
 
             _ContentSizeMode = serializedObject.FindProperty("_ContentSizeMode");
             _Progress = serializedObject.FindProperty("m_Progress");
+
+            // Initialize file search properties
+            _FileNameProperty = serializedObject.FindProperty("m_FileName");
+            _FolderNameProperty = serializedObject.FindProperty("m_FolderName");
+            _PathTypeProperty = serializedObject.FindProperty("m_PathType");
+            _InputNameID = GUIUtility.keyboardControl;
+            _CurrentNameInput = string.Empty;
+            
+            // Get resource folder based on PathType
+            UpdateResourceFolder();
         }
 
         // ReSharper disable Unity.PerformanceAnalysis
@@ -68,10 +89,26 @@ namespace Modules.Utilities.Editor
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
-            base.OnInspectorGUI();
-
+            
+            // Draw file name field with autocomplete
+            DrawFileSearchField();
+            
+            // Draw other properties manually (exclude m_FileName to avoid duplication)
             var outputType = serializedObject.FindProperty("m_OutputType");
             var startMode = serializedObject.FindProperty("m_StartMode");
+            var loop = serializedObject.FindProperty("m_Loop");
+            var fadeVideo = serializedObject.FindProperty("m_FadeVideo");
+            var fadeAudio = serializedObject.FindProperty("m_FadeAudio");
+            var fadeTime = serializedObject.FindProperty("m_FadeTime");
+            var keepLastFrame = serializedObject.FindProperty("m_KeepLastframe");
+            
+            EditorGUILayout.PropertyField(startMode);
+            EditorGUILayout.PropertyField(loop);
+            EditorGUILayout.PropertyField(fadeVideo);
+            EditorGUILayout.PropertyField(fadeAudio);
+            EditorGUILayout.PropertyField(fadeTime);
+            EditorGUILayout.PropertyField(keepLastFrame);
+            EditorGUILayout.PropertyField(outputType);
 
             EditorGUILayout.PropertyField(_ContentSizeMode);
 
@@ -162,6 +199,150 @@ namespace Modules.Utilities.Editor
                 }
 
             serializedObject.ApplyModifiedProperties();
+        }
+
+        private void UpdateResourceFolder()
+        {
+            var pathType = (PathType)_PathTypeProperty.enumValueIndex;
+            
+            switch (pathType)
+            {
+                case PathType.ExternalResources:
+                    _ResourceFolder = ResourceManager.GetResourceFolderPath();
+                    break;
+                case PathType.StreamingAssets:
+                    _ResourceFolder = Application.streamingAssetsPath;
+                    break;
+                case PathType.Relative:
+                    _ResourceFolder = System.Environment.CurrentDirectory;
+                    if (!string.IsNullOrEmpty(_FolderNameProperty.stringValue))
+                    {
+                        _ResourceFolder = Path.Combine(_ResourceFolder, _FolderNameProperty.stringValue);
+                    }
+                    break;
+                case PathType.Absolute:
+                    _ResourceFolder = _FolderNameProperty.stringValue;
+                    break;
+            }
+        }
+
+        private void DrawFileSearchField()
+        {
+            EditorGUILayout.BeginVertical("box");
+             // Show resource folder info
+            EditorGUILayout.BeginHorizontal();
+            GUI.enabled = false;
+            EditorGUILayout.TextField("Search Folder", _ResourceFolder);
+            GUI.enabled = true;
+            
+            if (GUILayout.Button("📁", GUILayout.Width(30)))
+            {
+                if (Directory.Exists(_ResourceFolder))
+                {
+                    EditorUtility.RevealInFinder(_ResourceFolder);
+                }
+                else
+                {
+                    EditorUtility.DisplayDialog("Folder Not Found", $"Folder does not exist:\n{_ResourceFolder}", "OK");
+                }
+            }
+            EditorGUILayout.EndHorizontal();
+            
+            // PathType field
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(_PathTypeProperty);
+            bool pathTypeChanged = EditorGUI.EndChangeCheck();
+            
+            // FolderName field with validation
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(_FolderNameProperty);
+            bool folderChanged = EditorGUI.EndChangeCheck();
+            
+            if (pathTypeChanged || folderChanged)
+            {
+                UpdateResourceFolder();
+            }
+            
+            // Show warning if folder doesn't exist
+            if (!string.IsNullOrEmpty(_ResourceFolder) && !Directory.Exists(_ResourceFolder))
+            {
+                EditorGUILayout.HelpBox($"Warning: Folder does not exist!\nPath: {_ResourceFolder}", MessageType.Warning);
+            }
+            
+           
+
+            // File name input with change detection
+            EditorGUI.BeginChangeCheck();
+            EditorGUILayout.PropertyField(_FileNameProperty);
+            
+            if (EditorGUI.EndChangeCheck())
+            {
+                _InputNameID = GUIUtility.keyboardControl;
+                UpdateResourceFolder();
+            }
+
+            // Show autocomplete dropdown
+            if (_FilePathsFilter != null && _FilePathsFilter.Length > 0 && GUIUtility.keyboardControl == _InputNameID)
+            {
+                EditorGUILayout.BeginVertical("box");
+                GUI.color = Color.cyan;
+                
+                foreach (var file in _FilePathsFilter)
+                {
+                    var name = Path.GetFileName(file);
+                    if (GUILayout.Button(name))
+                    {
+                        _FileNameProperty.stringValue = name;
+                        serializedObject.ApplyModifiedProperties();
+                        
+                        // Update URL in VideoController
+                        instance.SetupURL(name, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
+                        
+                        GUIUtility.keyboardControl = 0;
+                        EditorUtility.SetDirty(instance);
+                    }
+                }
+                
+                GUI.color = Color.white;
+                EditorGUILayout.EndVertical();
+            }
+
+            // Update file search results
+            if (_CurrentNameInput != _FileNameProperty.stringValue || _FileNameProperty.stringValue == string.Empty)
+            {
+                _CurrentNameInput = _FileNameProperty.stringValue;
+                UpdateResourceFolder();
+                
+                if (Directory.Exists(_ResourceFolder))
+                {
+                    if (string.IsNullOrEmpty(_CurrentNameInput))
+                    {
+                        _FilePathsFilter = new string[0];
+                    }
+                    else
+                    {
+                        Regex regexPattern = new Regex(Regex.Escape(_CurrentNameInput), RegexOptions.IgnoreCase);
+                        string[] validExtensions = { ".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv" };
+
+                        _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
+                                            .Where(file =>
+                                            {
+                                                var ext = Path.GetExtension(file).ToLowerInvariant();
+                                                return validExtensions.Contains(ext) &&
+                                                       regexPattern.IsMatch(Path.GetFileName(file));
+                                            })
+                                            .Take(10)
+                                            .ToArray();
+                    }
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox("Search folder not found: " + _ResourceFolder, MessageType.Warning);
+                    _FilePathsFilter = new string[0];
+                }
+            }
+            
+            EditorGUILayout.EndVertical();
         }
     }
 }

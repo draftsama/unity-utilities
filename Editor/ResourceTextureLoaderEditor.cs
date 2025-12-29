@@ -157,11 +157,11 @@ namespace Modules.Utilities.Editor
                     if (GUILayout.Button(name))
                     {
                         _FileNameProperty.stringValue = name;
-                        //delay load image
-
-                        LoadImage(_FileNameProperty.stringValue);
+                        serializedObject.ApplyModifiedProperties();
+                        
+                        // Use the selected filename directly
+                        LoadImage(name);
                         GUIUtility.keyboardControl = 0;
-
                     }
                 }
                 GUI.color = Color.white;
@@ -183,28 +183,34 @@ namespace Modules.Utilities.Editor
             {
                 _CurrentNameInput = _FileNameProperty.stringValue;
 
-                Regex regexPattern = new Regex(_CurrentNameInput, RegexOptions.IgnoreCase);
-
                 if (Directory.Exists(_ResourceFolder))
                 {
+                    if (string.IsNullOrEmpty(_CurrentNameInput))
+                    {
+                        _FilePathsFilter = new string[0];
+                    }
+                    else
+                    {
+                        Regex regexPattern = new Regex(Regex.Escape(_CurrentNameInput), RegexOptions.IgnoreCase);
+                        string[] validExtensions = { ".png", ".jpg", ".jpeg" };
 
-
-
-                    _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                                        .Where(file => new string[] { ".png", ".jpg", ".jpeg" }.Contains(Path.GetExtension(file)) && regexPattern.IsMatch(Path.GetFileName(file)))
-                                        .Take(10)
-                                        .ToArray();
-
-
+                        _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
+                                            .Where(file => 
+                                            {
+                                                var ext = Path.GetExtension(file).ToLowerInvariant();
+                                                return validExtensions.Contains(ext) && 
+                                                       regexPattern.IsMatch(Path.GetFileName(file));
+                                            })
+                                            .Take(10)
+                                            .ToArray();
+                    }
                 }
                 else
                 {
-
                     //HelpBox if folder not found
                     EditorGUILayout.HelpBox("Resource folder not found: " + _ResourceFolder, MessageType.Warning);
                     _FilePathsFilter = new string[0];
                 }
-
             }
             if (GUI.changed)
             {
@@ -363,26 +369,25 @@ namespace Modules.Utilities.Editor
             serializedObject.ApplyModifiedProperties();
         }
 
-        public async void LoadImage(string _filename)
+        public async Task LoadImage(string _filename)
         {
-            //delay load image
             if (string.IsNullOrEmpty(_filename))
                 return;
 
-            await Task.Delay(100);
+            // Use ResourceManager to find the file path (already searched in autocomplete)
+            var path = ResourceManager.GetPathByNameAsync(_filename);
+            
+            if (string.IsNullOrEmpty(path))
+            {
+                Debug.LogWarning($"File not found: {_filename}");
+                return;
+            }
 
             var folderName = ResourceManager.GetResourceSettingAssets().m_ExternalResourcesFolderName;
             var relativeFolder = Path.Combine("ResourcesEditor", "Editor", folderName);
             var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
-
-
-
-
             var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
             var filePath = Path.Combine(assetfolder, _filename);
-
-            var path = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                  .FirstOrDefault(file => Path.GetFileName(file) == _filename);
             if (!string.IsNullOrEmpty(path))
             {
                 if (!Directory.Exists(assetfolder))
