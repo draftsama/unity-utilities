@@ -28,10 +28,8 @@ namespace Modules.Utilities.Editor
         private SerializedProperty _Progress;
 
         // File search fields
-        private int _InputNameID;
         private string _ResourceFolder;
-        private string _CurrentNameInput = string.Empty;
-        private string[] _FilePathsFilter;
+        private EditorGUIHelper.FileSearchState _FileSearchState = new EditorGUIHelper.FileSearchState();
         private SerializedProperty _FileNameProperty;
         private SerializedProperty _FolderNameProperty;
         private SerializedProperty _PathTypeProperty;
@@ -60,8 +58,6 @@ namespace Modules.Utilities.Editor
             _FileNameProperty = serializedObject.FindProperty("m_FileName");
             _FolderNameProperty = serializedObject.FindProperty("m_FolderName");
             _PathTypeProperty = serializedObject.FindProperty("m_PathType");
-            _InputNameID = GUIUtility.keyboardControl;
-            _CurrentNameInput = string.Empty;
             
             // Get resource folder based on PathType
             UpdateResourceFolder();
@@ -229,7 +225,8 @@ namespace Modules.Utilities.Editor
         private void DrawFileSearchField()
         {
             EditorGUILayout.BeginVertical("box");
-             // Show resource folder info
+            
+            // Show resource folder info
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = false;
             EditorGUILayout.TextField("Search Folder", _ResourceFolder);
@@ -268,79 +265,21 @@ namespace Modules.Utilities.Editor
             {
                 EditorGUILayout.HelpBox($"Warning: Folder does not exist!\nPath: {_ResourceFolder}", MessageType.Warning);
             }
-            
-           
 
-            // File name input with change detection
-            EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(_FileNameProperty);
-            
-            if (EditorGUI.EndChangeCheck())
-            {
-                _InputNameID = GUIUtility.keyboardControl;
-                UpdateResourceFolder();
-            }
-
-            // Show autocomplete dropdown
-            if (_FilePathsFilter != null && _FilePathsFilter.Length > 0 && GUIUtility.keyboardControl == _InputNameID)
-            {
-                EditorGUILayout.BeginVertical("box");
-                GUI.color = Color.cyan;
-                
-                foreach (var file in _FilePathsFilter)
+            // File name input with autocomplete using EditorGUIHelper
+            string[] videoExtensions = { ".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv" };
+            EditorGUIHelper.DrawFileSearchField(
+                _FileNameProperty,
+                _ResourceFolder,
+                videoExtensions,
+                _FileSearchState,
+                (selectedFileName) =>
                 {
-                    var name = Path.GetFileName(file);
-                    if (GUILayout.Button(name))
-                    {
-                        _FileNameProperty.stringValue = name;
-                        serializedObject.ApplyModifiedProperties();
-                        
-                        // Update URL in VideoController
-                        instance.SetupURL(name, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
-                        
-                        GUIUtility.keyboardControl = 0;
-                        EditorUtility.SetDirty(instance);
-                    }
+                    // Update URL in VideoController
+                    instance.SetupURL(selectedFileName, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
+                    EditorUtility.SetDirty(instance);
                 }
-                
-                GUI.color = Color.white;
-                EditorGUILayout.EndVertical();
-            }
-
-            // Update file search results
-            if (_CurrentNameInput != _FileNameProperty.stringValue || _FileNameProperty.stringValue == string.Empty)
-            {
-                _CurrentNameInput = _FileNameProperty.stringValue;
-                UpdateResourceFolder();
-                
-                if (Directory.Exists(_ResourceFolder))
-                {
-                    if (string.IsNullOrEmpty(_CurrentNameInput))
-                    {
-                        _FilePathsFilter = new string[0];
-                    }
-                    else
-                    {
-                        Regex regexPattern = new Regex(Regex.Escape(_CurrentNameInput), RegexOptions.IgnoreCase);
-                        string[] validExtensions = { ".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv" };
-
-                        _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                                            .Where(file =>
-                                            {
-                                                var ext = Path.GetExtension(file).ToLowerInvariant();
-                                                return validExtensions.Contains(ext) &&
-                                                       regexPattern.IsMatch(Path.GetFileName(file));
-                                            })
-                                            .Take(10)
-                                            .ToArray();
-                    }
-                }
-                else
-                {
-                    EditorGUILayout.HelpBox("Search folder not found: " + _ResourceFolder, MessageType.Warning);
-                    _FilePathsFilter = new string[0];
-                }
-            }
+            );
             
             EditorGUILayout.EndVertical();
         }

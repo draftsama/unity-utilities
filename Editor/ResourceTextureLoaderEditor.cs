@@ -12,35 +12,19 @@ namespace Modules.Utilities.Editor
     [CustomEditor(typeof(ResourceTextureLoader))]
     public class ResourceTextureLoaderEditor : UnityEditor.Editor
     {
-        private int _InputNameID;
         private string _ResourceFolder;
-
         private ResourceManager _ResourceManager;
-
-        private string _CurrentNameInput;
-
-        private string[] _FilePathsFilter;
-
         private Texture2D _PreviewTexture;
+        private EditorGUIHelper.FileSearchState _FileSearchState = new EditorGUIHelper.FileSearchState();
 
         private SerializedProperty _OutputTypeProperty;
-
-
         private SerializedProperty _TextureWrapMode;
-
-
         private SerializedProperty _FilterMode;
         private SerializedProperty _FileNameProperty;
-
-
         private SerializedProperty _ContentSizeModeProperty;
-
         private SerializedProperty _SpriteFitScreenProperty;
         private SerializedProperty _PixelPerUnitProperty;
-
         private SerializedProperty _SpritePivotProperty;
-
-
 
         //output property
         private SerializedProperty _RawImage,
@@ -52,24 +36,15 @@ namespace Modules.Utilities.Editor
 
         private void OnEnable()
         {
-
-
-            _CurrentNameInput = string.Empty;
-            _InputNameID = GUIUtility.keyboardControl;
-
             _ResourceManager = ResourceManager.GetInstance();
             _ResourceFolder = ResourceManager.GetResourceFolderPath();
 
             var instance = target as ResourceTextureLoader;
 
-
             _OutputTypeProperty = serializedObject.FindProperty(nameof(instance.m_OutputType));
             _TextureWrapMode = serializedObject.FindProperty(nameof(instance.m_TextureWrapMode));
             _FilterMode = serializedObject.FindProperty(nameof(instance.m_FilterMode));
-
-
             _ContentSizeModeProperty = serializedObject.FindProperty(nameof(instance.m_ContentSizeMode));
-
             _RawImage = serializedObject.FindProperty(nameof(instance.m_RawImage));
             _Image = serializedObject.FindProperty(nameof(instance.m_Image));
             _SpriteRenderer = serializedObject.FindProperty(nameof(instance.m_SpriteRenderer));
@@ -77,7 +52,6 @@ namespace Modules.Utilities.Editor
             _PixelPerUnitProperty = serializedObject.FindProperty(nameof(instance.m_PixelPerUnit));
             _SpritePivotProperty = serializedObject.FindProperty(nameof(instance.m_SpritePivot));
             _SpriteFitScreenProperty = serializedObject.FindProperty(nameof(instance.m_SpriteFitScreen));
-
             _FileNameProperty = serializedObject.FindProperty(nameof(instance.m_FileName));
 
             var editorSource = serializedObject.FindProperty(nameof(instance.m_EditorSource));
@@ -135,41 +109,18 @@ namespace Modules.Utilities.Editor
 
 
             //name input field
-            EditorGUILayout.PropertyField(_FileNameProperty);
-
-
-
-            if (EditorGUI.EndChangeCheck())
-                _InputNameID = GUIUtility.keyboardControl;
-
-
-
-            if (_FilePathsFilter != null && _FilePathsFilter.Length > 0 && GUIUtility.keyboardControl == _InputNameID)
-            {
-
-                EditorGUILayout.BeginVertical("box");
-
-                GUI.color = Color.cyan;
-                foreach (var file in _FilePathsFilter)
+            string[] imageExtensions = { ".png", ".jpg", ".jpeg" };
+            EditorGUIHelper.DrawFileSearchField(
+                _FileNameProperty,
+                _ResourceFolder,
+                imageExtensions,
+                _FileSearchState,
+                (selectedFileName) =>
                 {
-                    var name = Path.GetFileName(file);
-
-                    if (GUILayout.Button(name))
-                    {
-                        _FileNameProperty.stringValue = name;
-                        serializedObject.ApplyModifiedProperties();
-                        
-                        // Use the selected filename directly
-                        LoadImage(name);
-                        GUIUtility.keyboardControl = 0;
-                    }
+                    LoadImage(selectedFileName);
+                    EditorUtility.SetDirty(target);
                 }
-                GUI.color = Color.white;
-                EditorGUILayout.EndVertical();
-            }
-
-
-
+            );
 
             EditorGUILayout.PropertyField(_TextureWrapMode);
             EditorGUILayout.PropertyField(_FilterMode);
@@ -177,41 +128,6 @@ namespace Modules.Utilities.Editor
             // Texture Size Settings
             EditorGUILayout.Space();
 
-          
-
-            if (_CurrentNameInput != _FileNameProperty.stringValue || _FileNameProperty.stringValue == string.Empty)
-            {
-                _CurrentNameInput = _FileNameProperty.stringValue;
-
-                if (Directory.Exists(_ResourceFolder))
-                {
-                    if (string.IsNullOrEmpty(_CurrentNameInput))
-                    {
-                        _FilePathsFilter = new string[0];
-                    }
-                    else
-                    {
-                        Regex regexPattern = new Regex(Regex.Escape(_CurrentNameInput), RegexOptions.IgnoreCase);
-                        string[] validExtensions = { ".png", ".jpg", ".jpeg" };
-
-                        _FilePathsFilter = Directory.GetFiles(_ResourceFolder, "*.*", SearchOption.AllDirectories)
-                                            .Where(file => 
-                                            {
-                                                var ext = Path.GetExtension(file).ToLowerInvariant();
-                                                return validExtensions.Contains(ext) && 
-                                                       regexPattern.IsMatch(Path.GetFileName(file));
-                                            })
-                                            .Take(10)
-                                            .ToArray();
-                    }
-                }
-                else
-                {
-                    //HelpBox if folder not found
-                    EditorGUILayout.HelpBox("Resource folder not found: " + _ResourceFolder, MessageType.Warning);
-                    _FilePathsFilter = new string[0];
-                }
-            }
             if (GUI.changed)
             {
                 EditorUtility.SetDirty(target);
