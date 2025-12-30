@@ -58,7 +58,7 @@ namespace Modules.Utilities.Editor
             _FileNameProperty = serializedObject.FindProperty("m_FileName");
             _FolderNameProperty = serializedObject.FindProperty("m_FolderName");
             _PathTypeProperty = serializedObject.FindProperty("m_PathType");
-            
+
             // Get resource folder based on PathType
             UpdateResourceFolder();
         }
@@ -85,10 +85,10 @@ namespace Modules.Utilities.Editor
         public override void OnInspectorGUI()
         {
             serializedObject.Update();
-            
+
             // Draw file name field with autocomplete
             DrawFileSearchField();
-            
+
             // Draw other properties manually (exclude m_FileName to avoid duplication)
             var outputType = serializedObject.FindProperty("m_OutputType");
             var startMode = serializedObject.FindProperty("m_StartMode");
@@ -97,7 +97,7 @@ namespace Modules.Utilities.Editor
             var fadeAudio = serializedObject.FindProperty("m_FadeAudio");
             var fadeTime = serializedObject.FindProperty("m_FadeTime");
             var keepLastFrame = serializedObject.FindProperty("m_KeepLastframe");
-            
+
             EditorGUILayout.PropertyField(startMode);
             EditorGUILayout.PropertyField(loop);
             EditorGUILayout.PropertyField(fadeVideo);
@@ -176,31 +176,32 @@ namespace Modules.Utilities.Editor
 
                 // slider for progress
                 var updateProgress = EditorGUILayout.Slider("Progress", _Progress.floatValue, 0f, 1f);
-                
+
                 if (GUI.changed && updateProgress != _Progress.floatValue)
                 {
                     _Progress.floatValue = updateProgress;
                     instance.Seek(updateProgress);
                 }
-               
+
 
                 //slider for volume
             }
-          
 
-            if (GUI.changed)
-                {
-                    instance.Init();
-                    EditorUtility.SetDirty(instance);
-                }
 
             serializedObject.ApplyModifiedProperties();
+
+
+            if (GUI.changed)
+            {
+                instance.Init();
+                EditorUtility.SetDirty(instance);
+            }
         }
 
         private void UpdateResourceFolder()
         {
             var pathType = (PathType)_PathTypeProperty.enumValueIndex;
-            
+
             switch (pathType)
             {
                 case PathType.ExternalResources:
@@ -225,13 +226,13 @@ namespace Modules.Utilities.Editor
         private void DrawFileSearchField()
         {
             EditorGUILayout.BeginVertical("box");
-            
+
             // Show resource folder info
             EditorGUILayout.BeginHorizontal();
             GUI.enabled = false;
             EditorGUILayout.TextField("Search Folder", _ResourceFolder);
             GUI.enabled = true;
-            
+
             if (GUILayout.Button("📁", GUILayout.Width(30)))
             {
                 if (Directory.Exists(_ResourceFolder))
@@ -244,22 +245,22 @@ namespace Modules.Utilities.Editor
                 }
             }
             EditorGUILayout.EndHorizontal();
-            
+
             // PathType field
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(_PathTypeProperty);
             bool pathTypeChanged = EditorGUI.EndChangeCheck();
-            
+
             // FolderName field with validation
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(_FolderNameProperty);
             bool folderChanged = EditorGUI.EndChangeCheck();
-            
+
             if (pathTypeChanged || folderChanged)
             {
                 UpdateResourceFolder();
             }
-            
+
             // Show warning if folder doesn't exist
             if (!string.IsNullOrEmpty(_ResourceFolder) && !Directory.Exists(_ResourceFolder))
             {
@@ -280,7 +281,7 @@ namespace Modules.Utilities.Editor
                     EditorUtility.SetDirty(instance);
                 }
             );
-            
+
             EditorGUILayout.EndVertical();
         }
     }

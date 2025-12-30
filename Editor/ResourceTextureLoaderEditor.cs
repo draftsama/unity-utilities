@@ -25,13 +25,16 @@ namespace Modules.Utilities.Editor
         private SerializedProperty _PixelPerUnitProperty;
         private SerializedProperty _SpritePivotProperty;
 
-        private SerializedProperty _PreviewSource;
+        private SerializedProperty _PreviewSourceProperty;
 
         //output property
         private SerializedProperty _RawImage,
         _Image,
         _AspectRatioFitter,
         _SpriteRenderer;
+
+        // Deferred load - to prevent disposed SerializedObject errors
+        private string _PendingLoadFileName = null;
 
 
 
@@ -54,7 +57,9 @@ namespace Modules.Utilities.Editor
             _SpritePivotProperty = serializedObject.FindProperty(nameof(instance.m_SpritePivot));
             _SpriteFitScreenProperty = serializedObject.FindProperty(nameof(instance.m_SpriteFitScreen));
             _FileNameProperty = serializedObject.FindProperty(nameof(instance.m_FileName));
-            _PreviewSource = serializedObject.FindProperty(nameof(instance.m_PreviewSource));
+            _PreviewSourceProperty = serializedObject.FindProperty(nameof(instance.m_PreviewSource));
+
+
         }
         public override void OnInspectorGUI()
         {
@@ -92,13 +97,12 @@ namespace Modules.Utilities.Editor
 
 
             //Preview Texture2D
-
-            if (_PreviewSource.objectReferenceValue != null)
+            if (_PreviewSourceProperty.objectReferenceValue != null)
             {
                 GUILayout.Label("Preview", GUILayout.ExpandWidth(true));
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
-                var previewTexture = (Texture2D)_PreviewSource.objectReferenceValue;
+                var previewTexture = (Texture2D)_PreviewSourceProperty.objectReferenceValue;
                 var aspectRatio = (float)previewTexture.height / (float)previewTexture.width;
                 GUILayout.Box(previewTexture, GUILayout.Width(240), GUILayout.Height(aspectRatio * 240f));
                 GUILayout.FlexibleSpace();
@@ -117,10 +121,31 @@ namespace Modules.Utilities.Editor
                 _FileSearchState,
                 (selectedFileName) =>
                 {
-                    LoadImage(selectedFileName);
-                    EditorUtility.SetDirty(target);
+                    // Defer loading to prevent disposed SerializedObject errors
+                    _PendingLoadFileName = selectedFileName;
                 }
             );
+
+            // Handle deferred load at end of GUI frame
+            if (!string.IsNullOrEmpty(_PendingLoadFileName))
+            {
+                var fileToLoad = _PendingLoadFileName;
+                _PendingLoadFileName = null;
+
+                // Use delayCall to load after GUI frame completes
+                EditorApplication.delayCall += () =>
+                {
+                    Debug.Log("Selected file: " + fileToLoad);
+                    LoadImage(fileToLoad);
+                    if (target != null)
+                    {
+                        EditorUtility.SetDirty(target);
+                    }
+                };
+
+                // Return early to prevent accessing disposed properties
+                return;
+            }
 
             EditorGUILayout.PropertyField(_TextureWrapMode);
             EditorGUILayout.PropertyField(_FilterMode);
@@ -283,6 +308,7 @@ namespace Modules.Utilities.Editor
                 EditorUtility.SetDirty(target);
             }
             serializedObject.ApplyModifiedProperties();
+
         }
 
         public async Task LoadImage(string _filename)
@@ -292,7 +318,7 @@ namespace Modules.Utilities.Editor
 
             // Use ResourceManager to find the file path (already searched in autocomplete)
             var path = ResourceManager.GetPathByNameAsync(_filename);
-
+            Debug.Log("Loading image from path: " + path);
             if (string.IsNullOrEmpty(path))
             {
                 Debug.LogWarning($"File not found: {_filename}");
@@ -304,6 +330,8 @@ namespace Modules.Utilities.Editor
             var fileAssetPath = Path.Combine("Assets", relativeFolder, _filename);
             var assetfolder = Path.Combine(Application.dataPath, relativeFolder);
             var filePath = Path.Combine(assetfolder, _filename);
+
+
             if (!string.IsNullOrEmpty(path))
             {
                 if (!Directory.Exists(assetfolder))
@@ -312,7 +340,7 @@ namespace Modules.Utilities.Editor
                 File.Copy(path, filePath, true);
                 AssetDatabase.Refresh();
 
-               // Debug.Log($"Copied file to: {filePath}");
+                //    Debug.Log($"Copied file to: {filePath}");
 
 
                 //modify texture import setting
@@ -330,18 +358,19 @@ namespace Modules.Utilities.Editor
                 importer.npotScale = TextureImporterNPOTScale.None;
 
                 importer.SaveAndReimport();
-
                 var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
+                var instance = target as ResourceTextureLoader;
+                serializedObject.Update();
+                _PreviewSourceProperty = serializedObject.FindProperty(nameof(instance.m_PreviewSource));
 
-                _PreviewSource.objectReferenceValue = texture;
+                _PreviewSourceProperty.objectReferenceValue = texture;
                 serializedObject.ApplyModifiedProperties();
 
                 Debug.Log($"Loaded texture: {_filename} size: {texture.width}x{texture.height}");
 
-                var instance = target as ResourceTextureLoader;
                 instance.ApplyTexture(texture);
 
-               
+
 
             }
 

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
@@ -7,11 +8,112 @@ using UnityEngine;
 
 public class EditorGUIHelper
 {
+    // Folders to exclude from file search to prevent performance issues
+    private static readonly string[] ExcludedFolders = new string[]
+    {
+        "Library", "Temp", "Logs", ".git", "Packages", "obj", "Build", "Builds"
+    };
+
     public class FileSearchState
     {
         public int InputNameID;
         public string CurrentNameInput = string.Empty;
         public string[] FilePathsFilter = new string[0];
+        public bool IsSearchDisabled = false;
+        public string DisabledReason = string.Empty;
+    }
+
+    /// <summary>
+    /// Checks if the folder is safe to search (not project root containing excluded folders)
+    /// </summary>
+    private static bool IsSafeToSearch(string folderPath, out string reason)
+    {
+        reason = string.Empty;
+
+        if (string.IsNullOrEmpty(folderPath))
+        {
+            reason = "Folder path is empty.";
+            return false;
+        }
+
+        if (!Directory.Exists(folderPath))
+        {
+            return true; // Let the caller handle non-existent folders
+        }
+
+        // Check if folder contains any excluded folders (likely project root)
+        foreach (var excludedFolder in ExcludedFolders)
+        {
+            var excludedPath = Path.Combine(folderPath, excludedFolder);
+            if (Directory.Exists(excludedPath))
+            {
+                reason = $"Search disabled: Folder appears to be project root (contains '{excludedFolder}'). Please specify a subfolder in 'Folder Name' to avoid performance issues.";
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Gets filtered files from directory, excluding Unity system folders
+    /// </summary>
+    private static IEnumerable<string> GetFilteredFiles(string folderPath, string[] validExtensions)
+    {
+        var files = new List<string>();
+
+        try
+        {
+            // Get files in current directory
+            foreach (var file in Directory.GetFiles(folderPath))
+            {
+                var ext = Path.GetExtension(file).ToLowerInvariant();
+                if (validExtensions.Contains(ext))
+                {
+                    files.Add(file);
+                }
+            }
+
+            // Recursively get files from subdirectories, excluding system folders
+            foreach (var dir in Directory.GetDirectories(folderPath))
+            {
+                var dirName = Path.GetFileName(dir);
+                if (!ExcludedFolders.Contains(dirName))
+                {
+                    files.AddRange(GetFilteredFiles(dir, validExtensions));
+                }
+            }
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Skip directories we can't access
+        }
+        catch (Exception)
+        {
+            // Skip any other errors
+        }
+
+        return files;
+    }
+
+    /// <summary>
+    /// Checks if a SerializedProperty is still valid and not disposed
+    /// </summary>
+    private static bool IsPropertyValid(SerializedProperty property)
+    {
+        if (property == null)
+            return false;
+
+        try
+        {
+            // Try to access the serializedObject to verify it's not disposed
+            var _ = property.serializedObject;
+            return _ != null;
+        }
+        catch (System.Exception)
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -31,13 +133,46 @@ public class EditorGUIHelper
         System.Action<string> onFileSelected = null,
         int maxResults = 10)
     {
+        // Safety check for disposed SerializedProperty
+        if (!IsPropertyValid(fileNameProperty))
+        {
+            return;
+        }
+
+        // Cache the string value to avoid multiple accesses
+        string currentValue;
+        try
+        {
+            currentValue = fileNameProperty.stringValue;
+        }
+        catch (System.Exception)
+        {
+            return;
+        }
+
         // File name input with change detection
         EditorGUI.BeginChangeCheck();
         EditorGUILayout.PropertyField(fileNameProperty);
-        
+
         if (EditorGUI.EndChangeCheck())
         {
             state.InputNameID = GUIUtility.keyboardControl;
+        }
+
+        // Re-check after PropertyField (may have been disposed)
+        if (!IsPropertyValid(fileNameProperty))
+        {
+            return;
+        }
+
+        // Update currentValue after PropertyField
+        try
+        {
+            currentValue = fileNameProperty.stringValue;
+        }
+        catch (System.Exception)
+        {
+            return;
         }
 
         // Show autocomplete dropdown when field is focused
@@ -45,21 +180,21 @@ public class EditorGUIHelper
         {
             // Check if current value matches any file in the list
             bool valueMatchesFile = false;
-            if (!string.IsNullOrEmpty(fileNameProperty.stringValue))
+            if (!string.IsNullOrEmpty(currentValue))
             {
-                valueMatchesFile = state.FilePathsFilter.Any(f => 
-                    Path.GetFileName(f).Equals(fileNameProperty.stringValue, StringComparison.OrdinalIgnoreCase));
+                valueMatchesFile = state.FilePathsFilter.Any(f =>
+                    Path.GetFileName(f).Equals(currentValue, StringComparison.OrdinalIgnoreCase));
             }
-            
+
             // Show dropdown if: empty, has results, or doesn't match any file
-            bool shouldShowDropdown = string.IsNullOrEmpty(fileNameProperty.stringValue) || 
-                                     state.FilePathsFilter.Length > 0 || 
+            bool shouldShowDropdown = string.IsNullOrEmpty(currentValue) ||
+                                     state.FilePathsFilter.Length > 0 ||
                                      !valueMatchesFile;
-            
+
             if (shouldShowDropdown)
             {
                 EditorGUILayout.BeginVertical("box");
-                
+
                 if (state.FilePathsFilter.Length > 0)
                 {
                     GUI.color = Color.cyan;
@@ -68,44 +203,69 @@ public class EditorGUIHelper
                         var name = Path.GetFileName(file);
                         if (GUILayout.Button(name))
                         {
-                            fileNameProperty.stringValue = name;
-                            fileNameProperty.serializedObject.ApplyModifiedProperties();
-                            
-                            // Invoke callback
+                            // Check property is still valid before modifying
+                            if (IsPropertyValid(fileNameProperty))
+                            {
+                                fileNameProperty.stringValue = name;
+                                fileNameProperty.serializedObject.ApplyModifiedProperties();
+                            }
+
+                            // Invoke callback (this may cause the property to be disposed)
                             onFileSelected?.Invoke(name);
-                            
+
                             GUIUtility.keyboardControl = 0;
+
+                            // Reset state after selection
+                            state.InputNameID = 0;
                         }
                     }
                     GUI.color = Color.white;
                 }
-                else if (!string.IsNullOrEmpty(fileNameProperty.stringValue))
+                else if (!string.IsNullOrEmpty(currentValue))
                 {
                     // Show "no results" message if user typed something but nothing matched
-                    EditorGUILayout.HelpBox($"No files found matching '{fileNameProperty.stringValue}'", MessageType.Info);
+                    EditorGUILayout.HelpBox($"No files found matching '{currentValue}'", MessageType.Info);
                 }
-                
+
                 EditorGUILayout.EndVertical();
             }
         }
 
-        // Update file search results
-        if (state.CurrentNameInput != fileNameProperty.stringValue || 
-            fileNameProperty.stringValue == string.Empty)
+        // Update file search results - use cached value or try to get new one
+        string valueForSearch = currentValue;
+        if (IsPropertyValid(fileNameProperty))
         {
-            state.CurrentNameInput = fileNameProperty.stringValue;
-            
-            if (Directory.Exists(resourceFolder))
+            try
             {
+                valueForSearch = fileNameProperty.stringValue;
+            }
+            catch (System.Exception)
+            {
+                // Use cached value
+            }
+        }
+
+        if (state.CurrentNameInput != valueForSearch ||
+            string.IsNullOrEmpty(valueForSearch))
+        {
+            state.CurrentNameInput = valueForSearch;
+
+            // Check if folder is safe to search (not project root or excluded)
+            if (!IsSafeToSearch(resourceFolder, out string disabledReason))
+            {
+                state.IsSearchDisabled = true;
+                state.DisabledReason = disabledReason;
+                state.FilePathsFilter = new string[0];
+            }
+            else if (Directory.Exists(resourceFolder))
+            {
+                state.IsSearchDisabled = false;
+                state.DisabledReason = string.Empty;
+
                 if (string.IsNullOrEmpty(state.CurrentNameInput))
                 {
                     // Show recent files when empty (sorted by last write time)
-                    state.FilePathsFilter = Directory.GetFiles(resourceFolder, "*.*", SearchOption.AllDirectories)
-                                        .Where(file =>
-                                        {
-                                            var ext = Path.GetExtension(file).ToLowerInvariant();
-                                            return validExtensions.Contains(ext);
-                                        })
+                    state.FilePathsFilter = GetFilteredFiles(resourceFolder, validExtensions)
                                         .OrderByDescending(f => File.GetLastWriteTime(f))
                                         .Take(maxResults)
                                         .ToArray();
@@ -115,21 +275,23 @@ public class EditorGUIHelper
                     // Search by pattern
                     Regex regexPattern = new Regex(Regex.Escape(state.CurrentNameInput), RegexOptions.IgnoreCase);
 
-                    state.FilePathsFilter = Directory.GetFiles(resourceFolder, "*.*", SearchOption.AllDirectories)
-                                        .Where(file =>
-                                        {
-                                            var ext = Path.GetExtension(file).ToLowerInvariant();
-                                            return validExtensions.Contains(ext) &&
-                                                   regexPattern.IsMatch(Path.GetFileName(file));
-                                        })
+                    state.FilePathsFilter = GetFilteredFiles(resourceFolder, validExtensions)
+                                        .Where(file => regexPattern.IsMatch(Path.GetFileName(file)))
                                         .Take(maxResults)
                                         .ToArray();
                 }
             }
             else
             {
+                state.IsSearchDisabled = false;
                 state.FilePathsFilter = new string[0];
             }
+        }
+
+        // Show warning if search is disabled
+        if (state.IsSearchDisabled)
+        {
+            EditorGUILayout.HelpBox(state.DisabledReason, MessageType.Warning);
         }
     }
 
