@@ -63,14 +63,8 @@ namespace Modules.Utilities.Editor
         }
         public override void OnInspectorGUI()
         {
-
             serializedObject.Update();
             var instance = target as ResourceTextureLoader;
-
-
-            EditorGUI.BeginChangeCheck();
-
-            //if _ResourceSettingAssetsProperty is null 
 
             if (ResourceManager.GetInstance().m_ResourceSettingAssets == null)
             {
@@ -132,6 +126,12 @@ namespace Modules.Utilities.Editor
                 var fileToLoad = _PendingLoadFileName;
                 _PendingLoadFileName = null;
 
+                // Apply any pending changes before loading
+                if (serializedObject.hasModifiedProperties)
+                {
+                    serializedObject.ApplyModifiedProperties();
+                }
+
                 // Use delayCall to load after GUI frame completes
                 EditorApplication.delayCall += () =>
                 {
@@ -153,22 +153,15 @@ namespace Modules.Utilities.Editor
             // Texture Size Settings
             EditorGUILayout.Space();
 
-            if (GUI.changed)
-            {
-                EditorUtility.SetDirty(target);
-            }
-            serializedObject.ApplyModifiedProperties();
-
-            GUI.color = Color.white;
-
-
-
             EditorGUILayout.PropertyField(_ContentSizeModeProperty);
 
 
             EditorGUILayout.BeginVertical("box");
+            // EditorGUILayout.PropertyField(_OutputTypeProperty);
 
+            //draw popup enum
             EditorGUILayout.PropertyField(_OutputTypeProperty);
+            
 
             var outputMode = (OutputType)_OutputTypeProperty.enumValueIndex;
             if (outputMode == OutputType.None)
@@ -303,12 +296,11 @@ namespace Modules.Utilities.Editor
             }
             GUI.color = Color.white;
 
-            if (GUI.changed)
+            if (serializedObject.hasModifiedProperties)
             {
+                serializedObject.ApplyModifiedProperties();
                 EditorUtility.SetDirty(target);
             }
-            serializedObject.ApplyModifiedProperties();
-
         }
 
         public async Task LoadImage(string _filename)
@@ -360,10 +352,11 @@ namespace Modules.Utilities.Editor
                 importer.SaveAndReimport();
                 var texture = AssetDatabase.LoadAssetAtPath<Texture2D>(fileAssetPath);
                 var instance = target as ResourceTextureLoader;
-                serializedObject.Update();
-                _PreviewSourceProperty = serializedObject.FindProperty(nameof(instance.m_PreviewSource));
-
-                _PreviewSourceProperty.objectReferenceValue = texture;
+                
+                // Don't use Update() here as it will discard any pending changes
+                // Just find and set the property directly
+                var previewProp = serializedObject.FindProperty(nameof(instance.m_PreviewSource));
+                previewProp.objectReferenceValue = texture;
                 serializedObject.ApplyModifiedProperties();
 
                 Debug.Log($"Loaded texture: {_filename} size: {texture.width}x{texture.height}");

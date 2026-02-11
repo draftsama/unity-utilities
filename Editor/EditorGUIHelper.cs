@@ -175,8 +175,8 @@ public class EditorGUIHelper
             return;
         }
 
-        // Show autocomplete dropdown when field is focused
-        if (GUIUtility.keyboardControl == state.InputNameID)
+        // Show autocomplete dropdown when field is focused (InputNameID != 0 means it has been set)
+        if (GUIUtility.keyboardControl == state.InputNameID && state.InputNameID != 0)
         {
             // Check if current value matches any file in the list
             bool valueMatchesFile = false;
@@ -210,13 +210,20 @@ public class EditorGUIHelper
                                 fileNameProperty.serializedObject.ApplyModifiedProperties();
                             }
 
+                            // Clear the filter to prevent dropdown from showing again
+                            state.FilePathsFilter = new string[0];
+                            
+                            // Unfocus the field
+                            GUIUtility.keyboardControl = 0;
+
+                            // Reset state after selection (use -1 to avoid 0 == 0 match)
+                            state.InputNameID = -1;
+
                             // Invoke callback (this may cause the property to be disposed)
                             onFileSelected?.Invoke(name);
 
-                            GUIUtility.keyboardControl = 0;
-
-                            // Reset state after selection
-                            state.InputNameID = 0;
+                            // Force GUI to repaint
+                            GUI.changed = true;
                         }
                     }
                     GUI.color = Color.white;
