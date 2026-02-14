@@ -21,6 +21,9 @@ namespace Modules.Utilities.Editor
 
         bool enableCopyFolders = true;
         List<string> copyFolderPaths = new List<string>();
+        
+        bool enableCopyFiles = true;
+        List<string> copyFilePaths = new List<string>();
 
         public int callbackOrder { get; }
         string buildVersion = string.Empty;
@@ -42,8 +45,9 @@ namespace Modules.Utilities.Editor
         [MenuItem("Utilities/Build Manager")]
         public static void ShowWindow()
         {
-            var window = GetWindow<BuildManagerWindowEditor>("Build Manager");
-            window.Show();
+            // Use GetWindow with utility=false to ensure only one instance exists
+            // This will focus existing window if already open, or create new one if not
+            var window = GetWindow<BuildManagerWindowEditor>(utility: false, title: "Build Manager", focus: true);
         }
 
         void OnEnable()
@@ -64,6 +68,9 @@ namespace Modules.Utilities.Editor
 
         void OnDisable()
         {
+            // Save current settings before closing
+            UpdateCurrentProfileSettings();
+            
             // Unsubscribe from compilation events
             CompilationPipeline.compilationStarted -= OnCompilationStarted;
             CompilationPipeline.compilationFinished -= OnCompilationFinished;
@@ -82,6 +89,8 @@ namespace Modules.Utilities.Editor
         void OnBecameInvisible()
         {
            // Debug.Log("Build Manager Window became invisible (lost focus)");
+           // Save current settings when losing focus
+           UpdateCurrentProfileSettings();
         }
 
         void OnWindowFocused()
@@ -164,6 +173,8 @@ namespace Modules.Utilities.Editor
             buildFolderPath = profileSettings.buildFolderPath;
             copyFolderPaths = new List<string>(profileSettings.copyFolderPaths);
             enableCopyFolders = profileSettings.enableCopyFolders;
+            copyFilePaths = new List<string>(profileSettings.copyFilePaths);
+            enableCopyFiles = profileSettings.enableCopyFiles;
             buildName = !string.IsNullOrEmpty(profileSettings.buildName) ? profileSettings.buildName : selectedProfile.name;
             buildSuffix = profileSettings.buildSuffix;
             buildVersion = !string.IsNullOrEmpty(profileSettings.buildVersion) ? profileSettings.buildVersion : PlayerSettings.bundleVersion;
@@ -189,10 +200,8 @@ namespace Modules.Utilities.Editor
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Build Name: ", EditorStyles.label);
-            buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
-            GUILayout.EndHorizontal();
-            
             EditorGUI.BeginChangeCheck();
+            buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
             if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
@@ -200,13 +209,12 @@ namespace Modules.Utilities.Editor
                 profileSettings.buildName = buildName;
                 SaveSettings();
             }
+            GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Build Suffix: ", EditorStyles.label);
-            buildSuffix = GUILayout.TextField(buildSuffix, GUILayout.Width(200));
-            GUILayout.EndHorizontal();
-            
             EditorGUI.BeginChangeCheck();
+            buildSuffix = GUILayout.TextField(buildSuffix, GUILayout.Width(200));
             if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
@@ -214,6 +222,7 @@ namespace Modules.Utilities.Editor
                 profileSettings.buildSuffix = buildSuffix;
                 SaveSettings();
             }
+            GUILayout.EndHorizontal();
 
             // Current version
             GUILayout.BeginHorizontal();
@@ -347,6 +356,71 @@ namespace Modules.Utilities.Editor
                 GUILayout.EndHorizontal();
 
                 GUILayout.EndVertical();
+                
+                // Display copy file paths
+                GUILayout.BeginVertical("box");
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("Copy Files:", EditorStyles.label);
+                GUILayout.FlexibleSpace();
+                
+                EditorGUI.BeginChangeCheck();
+                enableCopyFiles = GUILayout.Toggle(enableCopyFiles, "Enable Copy Files", GUILayout.Width(150));
+                // Save toggle state to settings
+                if (EditorGUI.EndChangeCheck())
+                {
+                    var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                    profileSettings.enableCopyFiles = enableCopyFiles;
+                    SaveSettings();
+                }
+                GUILayout.EndHorizontal();
+
+                if (copyFilePaths != null && copyFilePaths.Count > 0)
+                {
+                    int indexToRemove = -1;
+                    for (int i = 0; i < copyFilePaths.Count; i++)
+                    {
+                        GUILayout.BeginHorizontal();
+                        GUILayout.Space(20);
+                        GUILayout.Label(copyFilePaths[i], EditorStyles.label);
+                        if (GUILayout.Button("DEL", GUILayout.Width(60)))
+                        {
+                            indexToRemove = i;
+                        }
+                        GUILayout.EndHorizontal();
+                    }
+
+                    if (indexToRemove >= 0)
+                    {
+                        copyFilePaths.RemoveAt(indexToRemove);
+                        var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                        profileSettings.copyFilePaths = copyFilePaths;
+                        SaveSettings();
+                    }
+                }
+                else
+                {
+                    GUILayout.Label("No copy files specified.", EditorStyles.label);
+                }
+
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+                // Button to add a new copy file path
+                if (GUILayout.Button("Add Copy File"))
+                {
+                    string path = EditorUtility.OpenFilePanel("Select Copy File", System.Environment.CurrentDirectory, "");
+                    if (!string.IsNullOrEmpty(path))
+                    {
+                        copyFilePaths.Add(path);
+                        var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
+                        profileSettings.copyFilePaths = copyFilePaths;
+                        SaveSettings();
+                    }
+                    // Focus back to this window
+                    Focus();
+                }
+                GUILayout.EndHorizontal();
+
+                GUILayout.EndVertical();
             }
 
             //draw checkbox for isNotify
@@ -402,6 +476,8 @@ namespace Modules.Utilities.Editor
                 profileSettings.buildFolderPath = buildFolderPath;
                 profileSettings.copyFolderPaths = new List<string>(copyFolderPaths);
                 profileSettings.enableCopyFolders = enableCopyFolders;
+                profileSettings.copyFilePaths = new List<string>(copyFilePaths);
+                profileSettings.enableCopyFiles = enableCopyFiles;
                 profileSettings.buildName = buildName;
                 profileSettings.buildSuffix = buildSuffix;
                 profileSettings.buildVersion = buildVersion;
@@ -575,7 +651,9 @@ namespace Modules.Utilities.Editor
                 // Check if profile selection changed
                 if (previousIndex != selectedBuildProfileIndex)
                 {
-                    // Profile changed, reload settings for new profile
+                    // Profile changed, save current profile settings before switching
+                    UpdateCurrentProfileSettings();
+                    // Then reload settings for new profile
                     LoadProfileSpecificSettings();
                 }
 
@@ -780,11 +858,13 @@ namespace Modules.Utilities.Editor
         // Sync selectedBuildProfileIndex with active profile
         var activeProfile = GetActiveProfileAndSyncIndex();
         var profileSettings = settings?.GetOrCreateProfileSettings(activeProfile.name);
-        var enableCopy = profileSettings?.enableCopyFolders ?? false;
+        var enableCopyFolders = profileSettings?.enableCopyFolders ?? false;
         var copyFolders = profileSettings?.copyFolderPaths ?? new List<string>();
+        var enableCopyFiles = profileSettings?.enableCopyFiles ?? false;
+        var copyFiles = profileSettings?.copyFilePaths ?? new List<string>();
         var buildFileFolder = Path.GetDirectoryName(report.summary.outputPath);
 
-        if (IsStandaloneBuild(report.summary.platform) && enableCopy && copyFolders.Count > 0)
+        if (IsStandaloneBuild(report.summary.platform) && enableCopyFolders && copyFolders.Count > 0)
         {
             foreach (var folderPath in copyFolders)
             {
@@ -798,6 +878,24 @@ namespace Modules.Utilities.Editor
                 else
                 {
                     Debug.LogWarning($"Folder does not exist: {folderPath}");
+                }
+            }
+        }
+        
+        if (IsStandaloneBuild(report.summary.platform) && enableCopyFiles && copyFiles.Count > 0)
+        {
+            foreach (var filePath in copyFiles)
+            {
+                if (File.Exists(filePath))
+                {
+                    var fileName = Path.GetFileName(filePath);
+                    var targetPath = Path.Combine(buildFileFolder, fileName);
+                    File.Copy(filePath, targetPath, true);
+                    Debug.Log($"Copied file: {filePath} to {targetPath}");
+                }
+                else
+                {
+                    Debug.LogWarning($"File does not exist: {filePath}");
                 }
             }
         }

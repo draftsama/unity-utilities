@@ -35,6 +35,10 @@ namespace Modules.Utilities.Editor
             public bool enableCopyFolders = true;
             public List<string> copyFolderPaths = new List<string>();
             
+            [Header("Copy Files (Windows Only)")]
+            public bool enableCopyFiles = true;
+            public List<string> copyFilePaths = new List<string>();
+            
             public ProfileSettings(string name)
             {
                 profileName = name;
@@ -44,6 +48,8 @@ namespace Modules.Utilities.Editor
                 buildVersion = UnityEditor.PlayerSettings.bundleVersion;
                 enableCopyFolders = true;
                 copyFolderPaths = new List<string>();
+                enableCopyFiles = true;
+                copyFilePaths = new List<string>();
             }
             
             public bool IsValid()
