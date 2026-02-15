@@ -13,7 +13,6 @@ namespace Modules.Utilities.Editor
     public static class StartupScene
     {
 
-        [SerializeField]
         static StartupScene()
         {
             EditorApplication.playModeStateChanged -= StateChange;

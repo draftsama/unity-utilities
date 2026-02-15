@@ -18,7 +18,6 @@ namespace Modules.Utilities.Editor
 
         public string GetInstallationString()
         {
-            //if gitUrl null or empty, return name
             if (string.IsNullOrEmpty(gitUrl))
             {
                 return name;
@@ -29,6 +28,7 @@ namespace Modules.Utilities.Editor
             }
         }
     }
+
     [InitializeOnLoad]
     public class DependencyPackageInstaller
     {
@@ -36,78 +36,142 @@ namespace Modules.Utilities.Editor
         static AddRequest request;
         static bool hasAlreadyAskedInThisSession = false;
 
-        //  "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask",
-        //"com.unity.addressables"
         static List<PackageInfo> packagesToInstall = new List<PackageInfo>()
         {
-            // packageName, gitUrl
             new PackageInfo { name = "com.unity.addressables", gitUrl = "" , defineSymbols = new string[] { "PACKAGE_ADDRESSABLES_INSTALLED" } },
-            new PackageInfo { name = "com.unity.nuget.newtonsoft-json",gitUrl = "", defineSymbols = new string[] { "PACKAGE_NEWTONSOFT_JSON_INSTALLED" } },
-            // new PackageInfo { name = "com.cysharp.unitask", gitUrl = "https://github.com/Cysharp/UniTask.git?path=src/UniTask/Assets/Plugins/UniTask"},
+            new PackageInfo { name = "com.unity.nuget.newtonsoft-json", gitUrl = "", defineSymbols = new string[] { "PACKAGE_NEWTONSOFT_JSON_INSTALLED" } },
         };
 
+        // Constructor called on editor load
+        static DependencyPackageInstaller()
+        {
+            // Delay execution to avoid issues during compilation
+            EditorApplication.delayCall += DependencyRequire;
+        }
 
         [MenuItem("Utilities/Install Dependency Packages")]
         static void InstallDependencyPackages()
         {
-
             Debug.Log("Installing Dependency Packages...");
             currentPackageIndex = 0;
             InstallNextPackage();
-
         }
+
         [MenuItem("Utilities/Add All Define Symbols")]
         static void UpdateAllDefineSymbols()
         {
-            //get current build target group
             BuildTargetGroup buildTargetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
-
-            //get current define symbols
-            string defineSymbols = PlayerSettings.GetScriptingDefineSymbols(UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(buildTargetGroup));
-
-            //add new define symbols
-            foreach (var package in packagesToInstall)
+            
+            // Use reflection to handle API changes between Unity versions
+            try
             {
-                if (package.defineSymbols != null)
+                var namedBuildTargetType = Type.GetType("UnityEditor.Build.NamedBuildTarget, UnityEditor");
+                if (namedBuildTargetType != null)
                 {
-                    foreach (var symbol in package.defineSymbols)
+                    // Unity 2021.2+
+                    var fromBuildTargetGroupMethod = namedBuildTargetType.GetMethod("FromBuildTargetGroup");
+                    var namedBuildTarget = fromBuildTargetGroupMethod.Invoke(null, new object[] { buildTargetGroup });
+                    
+                    var getMethod = typeof(PlayerSettings).GetMethod("GetScriptingDefineSymbols", new[] { namedBuildTargetType });
+                    string defineSymbols = (string)getMethod.Invoke(null, new[] { namedBuildTarget });
+
+                    foreach (var package in packagesToInstall)
                     {
-                        if (!defineSymbols.Contains(symbol))
+                        if (package.defineSymbols != null)
                         {
-                            defineSymbols += ";" + symbol;
+                            foreach (var symbol in package.defineSymbols)
+                            {
+                                if (!defineSymbols.Contains(symbol))
+                                {
+                                    defineSymbols += ";" + symbol;
+                                }
+                            }
                         }
                     }
+
+                    var setMethod = typeof(PlayerSettings).GetMethod("SetScriptingDefineSymbols", new[] { namedBuildTargetType, typeof(string) });
+                    setMethod.Invoke(null, new[] { namedBuildTarget, defineSymbols });
+                }
+                else
+                {
+                    // Unity 2020.x and older - fallback
+#pragma warning disable CS0618
+                    string defineSymbols = PlayerSettings.GetScriptingDefineSymbolsForGroup(buildTargetGroup);
+                    
+                    foreach (var package in packagesToInstall)
+                    {
+                        if (package.defineSymbols != null)
+                        {
+                            foreach (var symbol in package.defineSymbols)
+                            {
+                                if (!defineSymbols.Contains(symbol))
+                                {
+                                    defineSymbols += ";" + symbol;
+                                }
+                            }
+                        }
+                    }
+                    
+                    PlayerSettings.SetScriptingDefineSymbolsForGroup(buildTargetGroup, defineSymbols);
+#pragma warning restore CS0618
                 }
             }
-
-            //set new define symbols
-            PlayerSettings.SetScriptingDefineSymbols(UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(buildTargetGroup), defineSymbols);
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to update define symbols: {e.Message}");
+            }
         }
 
         static void AddDefineSymbols(string[] defineSymbols)
         {
             BuildTargetGroup buildTargetGroup = EditorUserBuildSettings.selectedBuildTargetGroup;
 
-            //get current define symbols
-            string currentDefineSymbols = PlayerSettings.GetScriptingDefineSymbols(UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(buildTargetGroup));
-
-            //add new define symbols
-            foreach (var symbol in defineSymbols)
+            try
             {
-                if (!currentDefineSymbols.Contains(symbol))
+                var namedBuildTargetType = Type.GetType("UnityEditor.Build.NamedBuildTarget, UnityEditor");
+                if (namedBuildTargetType != null)
                 {
-                    Debug.Log("Adding define symbol: " + symbol);
+                    var fromBuildTargetGroupMethod = namedBuildTargetType.GetMethod("FromBuildTargetGroup");
+                    var namedBuildTarget = fromBuildTargetGroupMethod.Invoke(null, new object[] { buildTargetGroup });
+                    
+                    var getMethod = typeof(PlayerSettings).GetMethod("GetScriptingDefineSymbols", new[] { namedBuildTargetType });
+                    string currentDefineSymbols = (string)getMethod.Invoke(null, new[] { namedBuildTarget });
 
-                    currentDefineSymbols += ";" + symbol;
+                    foreach (var symbol in defineSymbols)
+                    {
+                        if (!currentDefineSymbols.Contains(symbol))
+                        {
+                            Debug.Log("Adding define symbol: " + symbol);
+                            currentDefineSymbols += ";" + symbol;
+                        }
+                    }
+
+                    var setMethod = typeof(PlayerSettings).GetMethod("SetScriptingDefineSymbols", new[] { namedBuildTargetType, typeof(string) });
+                    setMethod.Invoke(null, new[] { namedBuildTarget, currentDefineSymbols });
+                }
+                else
+                {
+#pragma warning disable CS0618
+                    string currentDefineSymbols = PlayerSettings.GetScriptingDefineSymbolsForGroup(buildTargetGroup);
+                    
+                    foreach (var symbol in defineSymbols)
+                    {
+                        if (!currentDefineSymbols.Contains(symbol))
+                        {
+                            Debug.Log("Adding define symbol: " + symbol);
+                            currentDefineSymbols += ";" + symbol;
+                        }
+                    }
+                    
+                    PlayerSettings.SetScriptingDefineSymbolsForGroup(buildTargetGroup, currentDefineSymbols);
+#pragma warning restore CS0618
                 }
             }
-
-            //set new define symbols
-            PlayerSettings.SetScriptingDefineSymbols(UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(buildTargetGroup), currentDefineSymbols);
+            catch (Exception e)
+            {
+                Debug.LogError($"Failed to add define symbols: {e.Message}");
+            }
         }
-
-
-
 
         static void InstallNextPackage()
         {
@@ -116,7 +180,6 @@ namespace Modules.Utilities.Editor
                 EditorUtility.ClearProgressBar();
                 Debug.Log("All packages installed.");
                 UpdateAllDefineSymbols();
-
                 return;
             }
 
@@ -132,7 +195,7 @@ namespace Modules.Utilities.Editor
                     float progress = (float)currentPackageIndex / packagesToInstall.Count;
                     EditorUtility.DisplayProgressBar(
                         "Installing Packages",
-                        $"Installing: {packagesToInstall[currentPackageIndex]}",
+                        $"Installing: {packagesToInstall[currentPackageIndex].name}",
                         progress
                     );
                     return;
@@ -143,22 +206,20 @@ namespace Modules.Utilities.Editor
                 if (request.Status == StatusCode.Success)
                 {
                     Debug.Log($"✅ Installed: {request.Result.packageId}");
-
                 }
                 else
                 {
-                    Debug.LogError($"❌ Failed to install {packagesToInstall[currentPackageIndex]}: {request.Error.message}");
+                    Debug.LogError($"❌ Failed to install {packagesToInstall[currentPackageIndex].name}: {request.Error.message}");
                 }
 
                 currentPackageIndex++;
                 EditorUtility.ClearProgressBar();
-
                 InstallNextPackage();
             }
         }
+
         static void DependencyRequire()
         {
-            // Don't ask again in the same session
             if (hasAlreadyAskedInThisSession) return;
 
             bool hasAnyMissingPackage = false;
@@ -166,9 +227,6 @@ namespace Modules.Utilities.Editor
 
             for (int i = 0; i < packagesToInstall.Count; i++)
             {
-                string packageName = packagesToInstall[i].name;
-                string[] defineSymbols = packagesToInstall[i].defineSymbols;
-
                 IsPackageInstalled(packagesToInstall[i], (isInstalled, pkgInfo) =>
                 {
                     checkedPackages++;
@@ -179,18 +237,15 @@ namespace Modules.Utilities.Editor
                     }
                     else
                     {
-                        // Debug.Log($"Package {pkgInfo.name} is already installed.");
-                        // Add define symbols 
                         if (pkgInfo.defineSymbols != null && pkgInfo.defineSymbols.Length > 0)
                             AddDefineSymbols(pkgInfo.defineSymbols);
                     }
 
-                    // Check if all packages have been checked
                     if (checkedPackages >= packagesToInstall.Count)
                     {
                         if (hasAnyMissingPackage)
                         {
-                            hasAlreadyAskedInThisSession = true; // Mark as asked
+                            hasAlreadyAskedInThisSession = true;
                             if (EditorUtility.DisplayDialog("Unity Utilities", "Some dependency packages are missing. Do you want to install them?", "Install", "Cancel"))
                             {
                                 InstallDependencyPackages();
@@ -199,22 +254,15 @@ namespace Modules.Utilities.Editor
                     }
                 });
             }
-
-            // Debug.Log("DependencyRequire");
         }
 
         private static ListRequest listRequest;
         private static Action<bool, PackageInfo> onCheckComplete;
 
-        /// <summary>
-        /// Checks if a specific package is installed.
-        /// </summary>
-        /// <param name="packageName">e.g. "com.unity.textmeshpro"</param>
-        /// <param name="callback">Callback returns true if installed, false otherwise</param>
         public static void IsPackageInstalled(PackageInfo packageInfo, Action<bool, PackageInfo> callback)
         {
             onCheckComplete = callback;
-            listRequest = Client.List(true); // true = include dependencies
+            listRequest = Client.List(true);
             EditorApplication.update += CheckProgress;
 
             void CheckProgress()
@@ -245,8 +293,5 @@ namespace Modules.Utilities.Editor
             }
         }
     }
-
-
-
 }
 #endif
