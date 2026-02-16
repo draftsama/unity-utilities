@@ -13,7 +13,7 @@ namespace Modules.Utilities
 {
 
     [RequireComponent(typeof(CanvasGroup))]
-    public abstract class UIPage : MonoBehaviour
+    public  class UIPage : MonoBehaviour
     {
 
 
