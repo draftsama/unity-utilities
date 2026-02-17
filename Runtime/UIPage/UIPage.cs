@@ -20,9 +20,9 @@ namespace Modules.Utilities
 
         [SerializeField][HideInInspector] public string m_GroupName = "Default";
         [SerializeField][HideInInspector] public bool m_IsDefault;
-        [SerializeField][ReadOnlyField] public bool m_IsOpened;
-        [SerializeField][ReadOnlyField] public bool m_IsTransitionPage;
-        [SerializeField] public TransitionInfo m_TransitionInfo;
+        [SerializeField][HideInInspector] public bool m_IsOpened;
+        [SerializeField][HideInInspector] public bool m_IsTransitionPage;
+        [SerializeField][HideInInspector] public TransitionInfo m_TransitionInfo;
 
 
 
@@ -126,15 +126,25 @@ namespace Modules.Utilities
                 .Where(_ => _.m_GroupName == _groupName).ToArray();
         }
 
+         public static bool ResetUIPagesWithoutNotify(string _groupName)
+        {
+            var uiPages = GetPages(_groupName);
+
+            foreach (var p in uiPages)
+            {
+                p.SetShow(p.m_IsDefault);
+
+            }
+
+            return true;
+        }
+
 
     }
 
 
     public static class UIPageHelper
     {
-
-
-
 
         public static async UniTask TransitionPageAsync(UIPage _target, TransitionInfo _overrideTransition = null, CancellationToken _token = default)
         {
@@ -431,8 +441,15 @@ namespace Modules.Utilities.Editor
 
 
 
-            serializedObject.ApplyModifiedProperties();
 
+
+            //
+            EditorGUILayout.Space(10);
+            EditorGUILayout.BeginVertical("box");
+            DrawPropertiesExcluding(serializedObject, "m_Script");
+            EditorGUILayout.EndVertical();
+
+            serializedObject.ApplyModifiedProperties();
 
 
             if (GUI.changed)
