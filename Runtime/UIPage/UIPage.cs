@@ -13,7 +13,7 @@ namespace Modules.Utilities
 {
 
     [RequireComponent(typeof(CanvasGroup))]
-    public  class UIPage : MonoBehaviour
+    public class UIPage : MonoBehaviour
     {
 
 
@@ -63,7 +63,7 @@ namespace Modules.Utilities
         public async UniTask OpenPageAsync(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
             if (m_IsOpened) return;
-            if(_token == default)
+            if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
             await UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, _token);
 
@@ -74,7 +74,7 @@ namespace Modules.Utilities
         public void OpenPage(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
             if (m_IsOpened) return;
-            if(_token == default)
+            if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
             UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, _token).Forget();
 
@@ -294,8 +294,59 @@ namespace Modules.Utilities.Editor
         {
             serializedObject.Update();
             var script = (UIPage)target;
+
             var groupName = serializedObject.FindProperty(nameof(script.m_GroupName));
             var isDefault = serializedObject.FindProperty(nameof(script.m_IsDefault));
+            var transitionInfo = serializedObject.FindProperty(nameof(script.m_TransitionInfo));
+            var isTransitionPage = serializedObject.FindProperty(nameof(script.m_IsTransitionPage));
+            var isOpened = serializedObject.FindProperty(nameof(script.m_IsOpened));
+
+
+
+            //draw script field
+            EditorGUILayout.LabelField("Script", EditorStyles.boldLabel);
+            var newScript = EditorGUILayout.ObjectField("Script", MonoScript.FromMonoBehaviour(script), typeof(MonoScript), false) as MonoScript;
+
+            // Check if script was changed and is valid
+            if (newScript != null && newScript != MonoScript.FromMonoBehaviour(script))
+            {
+                var scriptType = newScript.GetClass();
+                if (scriptType != null && scriptType.IsSubclassOf(typeof(UIPage)))
+                {
+                    var gameObject = script.gameObject;
+
+                    // Save current values
+                    var savedGroupName = script.m_GroupName;
+                    var savedIsDefault = script.m_IsDefault;
+                    var savedTransitionInfo = script.m_TransitionInfo;
+
+                    // Remove old component and add new one
+                    var index = gameObject.GetComponents<Component>().ToList().IndexOf(script);
+                    DestroyImmediate(script, true);
+                    var newComponent = gameObject.AddComponent(scriptType) as UIPage;
+
+                    // Restore values
+                    if (newComponent != null)
+                    {
+                        newComponent.m_GroupName = savedGroupName;
+                        newComponent.m_IsDefault = savedIsDefault;
+                        newComponent.m_TransitionInfo = savedTransitionInfo;
+
+                        // Move component to original position
+                        for (int i = 0; i < index; i++)
+                        {
+                            UnityEditorInternal.ComponentUtility.MoveComponentUp(newComponent);
+                        }
+
+                        // Select the new component
+                        Selection.activeObject = newComponent;
+                        EditorUtility.SetDirty(gameObject);
+                    }
+
+                    return;
+                }
+            }
+
 
             //draw properties
             EditorGUILayout.PropertyField(groupName);
@@ -370,12 +421,18 @@ namespace Modules.Utilities.Editor
 
             EditorGUILayout.EndHorizontal();
 
+            GUI.enabled = false;
+            EditorGUILayout.PropertyField(isTransitionPage);
+            EditorGUILayout.PropertyField(isOpened);
+            GUI.enabled = true;
+
+            EditorGUILayout.PropertyField(transitionInfo);
+
 
 
 
             serializedObject.ApplyModifiedProperties();
 
-            base.DrawDefaultInspector();
 
 
             if (GUI.changed)
@@ -396,6 +453,8 @@ namespace Modules.Utilities.Editor
                 //set dirty
                 EditorUtility.SetDirty(script);
             }
+
+
 
 
         }
