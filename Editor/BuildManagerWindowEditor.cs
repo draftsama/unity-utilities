@@ -15,105 +15,96 @@ namespace Modules.Utilities.Editor
 
     public class BuildManagerWindowEditor : EditorWindow, IPostprocessBuildWithReport, IPreprocessBuildWithReport
     {
+        // Singleton instance enforcement
+        private static BuildManagerWindowEditor instance;
+
         BuildProfile[] buildProfiles;
         int selectedBuildProfileIndex = 0;
-        string buildFolderPath = string.Empty;
 
-        bool enableCopyFolders = true;
-        List<string> copyFolderPaths = new List<string>();
-        
-        bool enableCopyFiles = true;
-        List<string> copyFilePaths = new List<string>();
+        // Data container - single source of truth
+        private BuildManagerData data = new BuildManagerData();
 
         public int callbackOrder { get; }
-        string buildVersion = string.Empty;
-        string buildName = string.Empty;
-        string buildSuffix = string.Empty;
-
-        bool isNotify = false;
-        bool isSoundNotify = false;
 
         // ScriptableObject settings
         private BuildManagerSettings settings;
         private const string SETTINGS_PATH = "Assets/Settings/BuildManagerSettings.asset";
         private const string SETTINGS_FOLDER = "Assets/Settings";
 
-        // Focus tracking
-        private bool hadFocusLastFrame = false;
+        // Dirty flag for settings tracking
+        private bool isDirty = false;
 
 
         [MenuItem("Utilities/Build Manager")]
         public static void ShowWindow()
         {
-            // Use GetWindow with utility=false to ensure only one instance exists
-            // This will focus existing window if already open, or create new one if not
-            var window = GetWindow<BuildManagerWindowEditor>(utility: false, title: "Build Manager", focus: true);
+           
+            
+            // utility: true makes window always on top but cannot be docked
+            var window = GetWindow<BuildManagerWindowEditor>(utility: true, title: "Build Manager", focus: true);
         }
 
         void OnEnable()
         {
-            // Debug.Log("Build Manager Window Enabled");
+            // Set singleton instance
+            instance = this;
+            
             // Subscribe to compilation events
             CompilationPipeline.compilationStarted += OnCompilationStarted;
             CompilationPipeline.compilationFinished += OnCompilationFinished;
 
-            // Enable mouse move events for focus detection
-            wantsMouseMove = true;
-            hadFocusLastFrame = false;
-
+            // Load settings once on enable
             LoadBuildProfiles();
-            LoadOrCreateSettings(); // Load settings after profiles are loaded
+            LoadOrCreateSettings();
             LoadProfileSpecificSettings();
         }
 
         void OnDisable()
         {
             // Save current settings before closing
-            UpdateCurrentProfileSettings();
+            SaveIfDirty();
             
             // Unsubscribe from compilation events
             CompilationPipeline.compilationStarted -= OnCompilationStarted;
             CompilationPipeline.compilationFinished -= OnCompilationFinished;
         }
 
-        void OnBecameVisible()
+        void OnDestroy()
         {
-            // Debug.Log("Build Manager Window became visible (focused)");
-            // Refresh data when window becomes visible/focused
-            LoadBuildProfiles();
-            LoadOrCreateSettings();
-            LoadProfileSpecificSettings();
-            Repaint();
+            // Clear singleton instance
+            if (instance == this)
+            {
+                instance = null;
+            }
         }
 
-        void OnBecameInvisible()
-        {
-           // Debug.Log("Build Manager Window became invisible (lost focus)");
-           // Save current settings when losing focus
-           UpdateCurrentProfileSettings();
-        }
-
-        void OnWindowFocused()
-        {
-           // Debug.Log("Build Manager Window gained focus");
-            Repaint();
-        }
-
-        void OnWindowLostFocus()
-        {
-           // Debug.Log("Build Manager Window lost focus");
-        }
+        // Removed redundant OnBecameVisible/Invisible and OnWindowFocused/LostFocus
+        // to prevent race conditions. Settings now load once in OnEnable
+        // and save once in OnDisable.
 
         void OnCompilationStarted(object obj)
         {
-            // Force repaint during compilation
             Repaint();
         }
 
         void OnCompilationFinished(object obj)
         {
-            // Just repaint - OnGUI will handle reloading if needed
+            // Only repaint, don't reload settings (prevents triple-load)
             Repaint();
+        }
+
+        void MarkDirty()
+        {
+            isDirty = true;
+        }
+
+        void SaveIfDirty()
+        {
+            if (isDirty)
+            {
+                UpdateCurrentProfileSettings();
+                isDirty = false;
+            }
         }
 
         void LoadOrCreateSettings()
@@ -164,24 +155,29 @@ namespace Modules.Utilities.Editor
 
         void LoadProfileSpecificSettings()
         {
-            if (settings == null || buildProfiles == null || buildProfiles.Length == 0) return;
+            if (settings == null || buildProfiles == null || buildProfiles.Length == 0)
+            {
+                Debug.LogWarning("Cannot load profile settings: settings or profiles are not initialized");
+                return;
+            }
 
             var selectedProfile = buildProfiles[selectedBuildProfileIndex];
             var profileSettings = settings.GetOrCreateProfileSettings(selectedProfile.name);
 
-            // Load profile-specific settings
-            buildFolderPath = profileSettings.buildFolderPath;
-            copyFolderPaths = new List<string>(profileSettings.copyFolderPaths);
-            enableCopyFolders = profileSettings.enableCopyFolders;
-            copyFilePaths = new List<string>(profileSettings.copyFilePaths);
-            enableCopyFiles = profileSettings.enableCopyFiles;
-            buildName = !string.IsNullOrEmpty(profileSettings.buildName) ? profileSettings.buildName : selectedProfile.name;
-            buildSuffix = profileSettings.buildSuffix;
-            buildVersion = !string.IsNullOrEmpty(profileSettings.buildVersion) ? profileSettings.buildVersion : PlayerSettings.bundleVersion;
-
-            // Load global settings
-            isNotify = settings.isNotify;
-            isSoundNotify = settings.isSoundNotify;
+            // Load data using the data object
+            data.LoadFrom(profileSettings, settings);
+            
+            // Override build name if not set
+            if (string.IsNullOrEmpty(data.buildName))
+            {
+                data.buildName = selectedProfile.name;
+            }
+            
+            // Override build version if not set
+            if (string.IsNullOrEmpty(data.buildVersion))
+            {
+                data.buildVersion = PlayerSettings.bundleVersion;
+            }
         }
 
         void ShowProfileSettingsUI(BuildProfile selectedBuildProfile)
@@ -201,26 +197,26 @@ namespace Modules.Utilities.Editor
             GUILayout.BeginHorizontal();
             GUILayout.Label("Build Name: ", EditorStyles.label);
             EditorGUI.BeginChangeCheck();
-            buildName = GUILayout.TextField(buildName, GUILayout.Width(200));
+            data.buildName = GUILayout.TextField(data.buildName, GUILayout.Width(200));
             if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                profileSettings.buildName = buildName;
-                SaveSettings();
+                profileSettings.buildName = data.buildName;
+                MarkDirty();
             }
             GUILayout.EndHorizontal();
 
             GUILayout.BeginHorizontal();
             GUILayout.Label("Build Suffix: ", EditorStyles.label);
             EditorGUI.BeginChangeCheck();
-            buildSuffix = GUILayout.TextField(buildSuffix, GUILayout.Width(200));
+            data.buildSuffix = GUILayout.TextField(data.buildSuffix, GUILayout.Width(200));
             if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                profileSettings.buildSuffix = buildSuffix;
-                SaveSettings();
+                profileSettings.buildSuffix = data.buildSuffix;
+                MarkDirty();
             }
             GUILayout.EndHorizontal();
 
@@ -229,28 +225,28 @@ namespace Modules.Utilities.Editor
             GUILayout.Label("Version: ", EditorStyles.label);
 
             EditorGUI.BeginChangeCheck();
-            buildVersion = GUILayout.TextField(buildVersion, GUILayout.Width(100));
+            data.buildVersion = GUILayout.TextField(data.buildVersion, GUILayout.Width(100));
             if (EditorGUI.EndChangeCheck())
             {
                 // Update settings
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                profileSettings.buildVersion = buildVersion;
-                SaveSettings();
+                profileSettings.buildVersion = data.buildVersion;
+                MarkDirty();
             }
 
             // Disable update button during compilation
             GUI.enabled = !EditorApplication.isCompiling && !EditorApplication.isUpdating;
 
-            if (PlayerSettings.bundleVersion != buildVersion && GUILayout.Button("Update", GUILayout.Width(60)))
+            if (PlayerSettings.bundleVersion != data.buildVersion && GUILayout.Button("Update", GUILayout.Width(60)))
             {
                 try
                 {
-                    PlayerSettings.bundleVersion = buildVersion;
+                    PlayerSettings.bundleVersion = data.buildVersion;
                     var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                    profileSettings.buildVersion = buildVersion;
-                    Debug.Log($"Updated build version to: {buildVersion}");
+                    profileSettings.buildVersion = data.buildVersion;
+                    Debug.Log($"Updated build version to: {data.buildVersion}");
                     AssetDatabase.SaveAssets();
-                    SaveSettings();
+                    MarkDirty();
                 }
                 catch (System.Exception e)
                 {
@@ -264,17 +260,17 @@ namespace Modules.Utilities.Editor
             //select build folder using dialog
             GUILayout.BeginHorizontal();
             GUILayout.Label("Build Folder: ", EditorStyles.label);
-            buildFolderPath = GUILayout.TextField(buildFolderPath);
+            data.buildFolderPath = GUILayout.TextField(data.buildFolderPath);
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
-                string path = EditorUtility.OpenFolderPanel("Select Build Folder", buildFolderPath, "");
+                string path = EditorUtility.OpenFolderPanel("Select Build Folder", data.buildFolderPath, "");
                 if (!string.IsNullOrEmpty(path))
                 {
-                    buildFolderPath = path;
+                    data.buildFolderPath = path;
                     // Save to settings
                     var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                    profileSettings.buildFolderPath = buildFolderPath;
-                    SaveSettings();
+                    profileSettings.buildFolderPath = data.buildFolderPath;
+                    MarkDirty();
                 }
                 // Focus back to this window
                 Focus();
@@ -282,7 +278,7 @@ namespace Modules.Utilities.Editor
             GUILayout.EndHorizontal();
 
             // Show warning if build folder is empty
-            if (string.IsNullOrEmpty(buildFolderPath))
+            if (string.IsNullOrEmpty(data.buildFolderPath))
             {
                 EditorGUILayout.HelpBox("Build folder path is required. Please select a folder using the Browse button above.", MessageType.Error);
             }
@@ -299,24 +295,24 @@ namespace Modules.Utilities.Editor
                 GUILayout.FlexibleSpace();
                 
                 EditorGUI.BeginChangeCheck();
-                enableCopyFolders = GUILayout.Toggle(enableCopyFolders, "Enable Copy Folders", GUILayout.Width(150));
+                data.enableCopyFolders = GUILayout.Toggle(data.enableCopyFolders, "Enable Copy Folders", GUILayout.Width(150));
                 // Save toggle state to settings
                 if (EditorGUI.EndChangeCheck())
                 {
                     var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                    profileSettings.enableCopyFolders = enableCopyFolders;
-                    SaveSettings();
+                    profileSettings.enableCopyFolders = data.enableCopyFolders;
+                    MarkDirty();
                 }
                 GUILayout.EndHorizontal();
 
-                if (copyFolderPaths != null && copyFolderPaths.Count > 0)
+                if (data.copyFolderPaths != null && data.copyFolderPaths.Count > 0)
                 {
                     int indexToRemove = -1;
-                    for (int i = 0; i < copyFolderPaths.Count; i++)
+                    for (int i = 0; i < data.copyFolderPaths.Count; i++)
                     {
                         GUILayout.BeginHorizontal();
                         GUILayout.Space(20);
-                        GUILayout.Label(copyFolderPaths[i], EditorStyles.label);
+                        GUILayout.Label(data.copyFolderPaths[i], EditorStyles.label);
                         if (GUILayout.Button("DEL", GUILayout.Width(60)))
                         {
                             indexToRemove = i;
@@ -326,10 +322,10 @@ namespace Modules.Utilities.Editor
 
                     if (indexToRemove >= 0)
                     {
-                        copyFolderPaths.RemoveAt(indexToRemove);
+                        data.copyFolderPaths.RemoveAt(indexToRemove);
                         var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                        profileSettings.copyFolderPaths = copyFolderPaths;
-                        SaveSettings();
+                        profileSettings.copyFolderPaths = data.copyFolderPaths;
+                        MarkDirty();
                     }
                 }
                 else
@@ -345,10 +341,10 @@ namespace Modules.Utilities.Editor
                     string path = EditorUtility.OpenFolderPanel("Select Copy Folder", System.Environment.CurrentDirectory, "");
                     if (!string.IsNullOrEmpty(path))
                     {
-                        copyFolderPaths.Add(path);
+                        data.copyFolderPaths.Add(path);
                         var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                        profileSettings.copyFolderPaths = copyFolderPaths;
-                        SaveSettings();
+                        profileSettings.copyFolderPaths = data.copyFolderPaths;
+                        MarkDirty();
                     }
                     // Focus back to this window
                     Focus();
@@ -364,24 +360,24 @@ namespace Modules.Utilities.Editor
                 GUILayout.FlexibleSpace();
                 
                 EditorGUI.BeginChangeCheck();
-                enableCopyFiles = GUILayout.Toggle(enableCopyFiles, "Enable Copy Files", GUILayout.Width(150));
+                data.enableCopyFiles = GUILayout.Toggle(data.enableCopyFiles, "Enable Copy Files", GUILayout.Width(150));
                 // Save toggle state to settings
                 if (EditorGUI.EndChangeCheck())
                 {
                     var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                    profileSettings.enableCopyFiles = enableCopyFiles;
-                    SaveSettings();
+                    profileSettings.enableCopyFiles = data.enableCopyFiles;
+                    MarkDirty();
                 }
                 GUILayout.EndHorizontal();
 
-                if (copyFilePaths != null && copyFilePaths.Count > 0)
+                if (data.copyFilePaths != null && data.copyFilePaths.Count > 0)
                 {
                     int indexToRemove = -1;
-                    for (int i = 0; i < copyFilePaths.Count; i++)
+                    for (int i = 0; i < data.copyFilePaths.Count; i++)
                     {
                         GUILayout.BeginHorizontal();
                         GUILayout.Space(20);
-                        GUILayout.Label(copyFilePaths[i], EditorStyles.label);
+                        GUILayout.Label(data.copyFilePaths[i], EditorStyles.label);
                         if (GUILayout.Button("DEL", GUILayout.Width(60)))
                         {
                             indexToRemove = i;
@@ -391,10 +387,10 @@ namespace Modules.Utilities.Editor
 
                     if (indexToRemove >= 0)
                     {
-                        copyFilePaths.RemoveAt(indexToRemove);
+                        data.copyFilePaths.RemoveAt(indexToRemove);
                         var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                        profileSettings.copyFilePaths = copyFilePaths;
-                        SaveSettings();
+                        profileSettings.copyFilePaths = data.copyFilePaths;
+                        MarkDirty();
                     }
                 }
                 else
@@ -410,10 +406,10 @@ namespace Modules.Utilities.Editor
                     string path = EditorUtility.OpenFilePanel("Select Copy File", System.Environment.CurrentDirectory, "");
                     if (!string.IsNullOrEmpty(path))
                     {
-                        copyFilePaths.Add(path);
+                        data.copyFilePaths.Add(path);
                         var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
-                        profileSettings.copyFilePaths = copyFilePaths;
-                        SaveSettings();
+                        profileSettings.copyFilePaths = data.copyFilePaths;
+                        MarkDirty();
                     }
                     // Focus back to this window
                     Focus();
@@ -425,27 +421,27 @@ namespace Modules.Utilities.Editor
 
             //draw checkbox for isNotify
             EditorGUI.BeginChangeCheck();
-            isNotify = GUILayout.Toggle(isNotify, "Enable Message Notify", GUILayout.Width(150));
+            data.isNotify = GUILayout.Toggle(data.isNotify, "Enable Message Notify", GUILayout.Width(150));
             if (EditorGUI.EndChangeCheck())
             {
-                settings.isNotify = isNotify;
-                SaveSettings();
+                settings.isNotify = data.isNotify;
+                MarkDirty();
             }
 
             //draw checkbox for isSoundNotify
             EditorGUI.BeginChangeCheck();
-            isSoundNotify = GUILayout.Toggle(isSoundNotify, "Enable Sound Notify", GUILayout.Width(150));
+            data.isSoundNotify = GUILayout.Toggle(data.isSoundNotify, "Enable Sound Notify", GUILayout.Width(150));
             if (EditorGUI.EndChangeCheck())
             {
-                settings.isSoundNotify = isSoundNotify;
-                SaveSettings();
+                settings.isSoundNotify = data.isSoundNotify;
+                MarkDirty();
             }
 
             GUILayout.BeginHorizontal();
             GUILayout.FlexibleSpace();
 
             // Disable Build button if build folder is empty
-            GUI.enabled = !string.IsNullOrEmpty(buildFolderPath);
+            GUI.enabled = !string.IsNullOrEmpty(data.buildFolderPath);
             if (GUILayout.Button("Build", GUILayout.Width(100)))
             {
                 Build(selectedBuildProfile);
@@ -473,18 +469,10 @@ namespace Modules.Utilities.Editor
                 var selectedBuildProfile = buildProfiles[selectedBuildProfileIndex];
                 var profileSettings = settings.GetOrCreateProfileSettings(selectedBuildProfile.name);
 
-                profileSettings.buildFolderPath = buildFolderPath;
-                profileSettings.copyFolderPaths = new List<string>(copyFolderPaths);
-                profileSettings.enableCopyFolders = enableCopyFolders;
-                profileSettings.copyFilePaths = new List<string>(copyFilePaths);
-                profileSettings.enableCopyFiles = enableCopyFiles;
-                profileSettings.buildName = buildName;
-                profileSettings.buildSuffix = buildSuffix;
-                profileSettings.buildVersion = buildVersion;
+                // Save data using the data object
+                data.SaveTo(profileSettings, settings);
 
                 settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
-                settings.isNotify = isNotify;
-                settings.isSoundNotify = isSoundNotify;
 
                 SaveSettings();
             }
@@ -523,14 +511,14 @@ namespace Modules.Utilities.Editor
                 {
                     // Fallback to default values when no settings exist
                     selectedBuildProfileIndex = 0;
-                    buildFolderPath = string.Empty;
-                    copyFolderPaths = new List<string>();
-                    enableCopyFolders = true;
-                    buildVersion = PlayerSettings.bundleVersion;
-                    buildName = buildProfiles[0].name;
-                    buildSuffix = string.Empty;
-                    isNotify = false;
-                    isSoundNotify = false;
+                    data.buildFolderPath = string.Empty;
+                    data.copyFolderPaths = new List<string>();
+                    data.enableCopyFolders = true;
+                    data.buildVersion = PlayerSettings.bundleVersion;
+                    data.buildName = buildProfiles[0].name;
+                    data.buildSuffix = string.Empty;
+                    data.isNotify = false;
+                    data.isSoundNotify = false;
                 }
             }
             catch (System.Exception e)
@@ -542,20 +530,6 @@ namespace Modules.Utilities.Editor
 
         private void OnGUI()
         {
-            // Check for focus changes
-            bool hasFocusNow = EditorWindow.focusedWindow == this;
-            if (hasFocusNow && !hadFocusLastFrame)
-            {
-                // Window just gained focus
-                OnWindowFocused();
-            }
-            else if (!hasFocusNow && hadFocusLastFrame)
-            {
-                // Window just lost focus
-                OnWindowLostFocus();
-            }
-            hadFocusLastFrame = hasFocusNow;
-
             // Check if compiling and show appropriate UI
             if (EditorApplication.isCompiling)
             {
@@ -652,7 +626,7 @@ namespace Modules.Utilities.Editor
                 if (previousIndex != selectedBuildProfileIndex)
                 {
                     // Profile changed, save current profile settings before switching
-                    UpdateCurrentProfileSettings();
+                    SaveIfDirty();
                     // Then reload settings for new profile
                     LoadProfileSpecificSettings();
                 }
@@ -669,7 +643,7 @@ namespace Modules.Utilities.Editor
                         if (settings != null)
                         {
                             settings.selectedBuildProfileIndex = selectedBuildProfileIndex;
-                            SaveSettings();
+                            MarkDirty();
                         }
                         GUI.FocusControl(null);
                     }
@@ -736,7 +710,7 @@ namespace Modules.Utilities.Editor
 
             try
             {
-                if (string.IsNullOrEmpty(buildFolderPath))
+                if (string.IsNullOrEmpty(data.buildFolderPath))
                 {
                     Debug.LogError("Build folder path is not set.");
                     return;
@@ -752,10 +726,10 @@ namespace Modules.Utilities.Editor
 
                 var buildTarget = EditorUserBuildSettings.activeBuildTarget;
                 var extension = "";
-                var folderName = string.IsNullOrEmpty(buildSuffix)
-                    ? $"{buildName}-v{versionString}-{dateString}"
-                    : $"{buildName}-v{versionString}-{dateString}-{buildSuffix}";
-                var appName = buildName;
+                var folderName = string.IsNullOrEmpty(data.buildSuffix)
+                    ? $"{data.buildName}-v{versionString}-{dateString}"
+                    : $"{data.buildName}-v{versionString}-{dateString}-{data.buildSuffix}";
+                var appName = data.buildName;
 
                 switch (buildTarget)
                 {
@@ -776,7 +750,7 @@ namespace Modules.Utilities.Editor
 
 
 
-                var buildPath = System.IO.Path.Combine(buildFolderPath, folderName, $"{appName}{extension}");
+                var buildPath = System.IO.Path.Combine(data.buildFolderPath, folderName, $"{appName}{extension}");
 
                 BuildPipeline.BuildPlayer(EditorBuildSettings.scenes, buildPath, buildTarget, BuildOptions.None);
 
@@ -834,7 +808,7 @@ namespace Modules.Utilities.Editor
                 }
                 var profile = buildProfiles[selectedBuildProfileIndex];
                 //write error message
-                if (isNotify)
+                if (data.isNotify)
                 {
                     SendMessage(
                         $"[Build Fail!]\nProfile Name: {profile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget} \nError: {condition} \nStackTrace: {stackTrace}");
@@ -900,12 +874,12 @@ namespace Modules.Utilities.Editor
             }
         }
 
-        if (isNotify)
+        if (data.isNotify)
         {
             SendMessage($"[Build Success!]\nProfile Name: {activeProfile.name}  \nVersion: {PlayerSettings.bundleVersion} \nPlatform: {EditorUserBuildSettings.activeBuildTarget}");
         }
 
-        if (isSoundNotify)
+        if (data.isSoundNotify)
         {
 #if UNITY_EDITOR_WIN
             RunCommand("rundll32 user32.dll,MessageBeep");
