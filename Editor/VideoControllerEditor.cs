@@ -274,10 +274,16 @@ namespace Modules.Utilities.Editor
                 _ResourceFolder,
                 videoExtensions,
                 _FileSearchState,
-                (selectedFileName) =>
+                (filePath) =>
                 {
                     // Update URL in VideoController
-                    instance.SetupURL(selectedFileName, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
+
+                    //filePath = /Users/draftsama/Works/Unity/runner-faster-2d-game/Resources/videos/waituser_bg.webm
+                   // _FolderNameProperty.stringValue = Resources
+                   //filePath = videos/waituser_bg.webm
+                    var relativePath = Path.GetRelativePath(_ResourceFolder, filePath);
+
+                    instance.SetupURL(relativePath, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
                     EditorUtility.SetDirty(instance);
                 }
             );

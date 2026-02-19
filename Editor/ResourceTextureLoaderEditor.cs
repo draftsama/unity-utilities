@@ -116,7 +116,7 @@ namespace Modules.Utilities.Editor
                 (selectedFileName) =>
                 {
                     // Defer loading to prevent disposed SerializedObject errors
-                    _PendingLoadFileName = selectedFileName;
+                    _PendingLoadFileName = Path.GetFileName(selectedFileName);
                 }
             );
 

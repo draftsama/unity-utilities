@@ -219,8 +219,8 @@ public class EditorGUIHelper
                             // Reset state after selection (use -1 to avoid 0 == 0 match)
                             state.InputNameID = -1;
 
-                            // Invoke callback (this may cause the property to be disposed)
-                            onFileSelected?.Invoke(name);
+                            // Invoke callback with full path (this may cause the property to be disposed)
+                            onFileSelected?.Invoke(file);
 
                             // Force GUI to repaint
                             GUI.changed = true;
