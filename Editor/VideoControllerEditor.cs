@@ -212,10 +212,6 @@ namespace Modules.Utilities.Editor
                     break;
                 case PathType.Relative:
                     _ResourceFolder = System.Environment.CurrentDirectory;
-                    if (!string.IsNullOrEmpty(_FolderNameProperty.stringValue))
-                    {
-                        _ResourceFolder = Path.Combine(_ResourceFolder, _FolderNameProperty.stringValue);
-                    }
                     break;
                 case PathType.Absolute:
                     _ResourceFolder = _FolderNameProperty.stringValue;
@@ -271,19 +267,21 @@ namespace Modules.Utilities.Editor
             string[] videoExtensions = { ".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv" };
             EditorGUIHelper.DrawFileSearchField(
                 _FileNameProperty,
-                _ResourceFolder,
+                Path.Combine(_ResourceFolder, _FolderNameProperty.stringValue),
                 videoExtensions,
                 _FileSearchState,
                 (filePath) =>
                 {
-                    // Update URL in VideoController
 
-                    //filePath = /Users/draftsama/Works/Unity/runner-faster-2d-game/Resources/videos/waituser_bg.webm
-                   // _FolderNameProperty.stringValue = Resources
-                   //filePath = videos/waituser_bg.webm
-                    var relativePath = Path.GetRelativePath(_ResourceFolder, filePath);
+                    //update foloder name based on selected file
+                    var dicrectorPath = Path.GetDirectoryName(filePath);
+                    var fileName = Path.GetFileName(filePath);
 
-                    instance.SetupURL(relativePath, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
+                    _FolderNameProperty.stringValue = Path.GetRelativePath(_ResourceFolder, dicrectorPath);
+                    serializedObject.ApplyModifiedProperties();
+
+
+                    instance.SetupURL(fileName, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
                     EditorUtility.SetDirty(instance);
                 }
             );
