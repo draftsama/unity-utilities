@@ -2,7 +2,7 @@
     "name": "com.draft.unity-utilities",
     "displayName": "Unity Utilities",
     "author": { "name": "Draft Sama", "url": "https://github.com/draftsama" },
-    "version": "1.0.6",
+    "version": "1.0.7",
     "unity": "2021.3",
     "description": "A collection of utilities for Unity development.",
     "dependencies": {
