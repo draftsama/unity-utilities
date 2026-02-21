@@ -303,7 +303,7 @@ namespace Modules.Utilities.Editor
             }
         }
 
-        public async Task LoadImage(string _filename)
+        public void LoadImage(string _filename)
         {
             if (string.IsNullOrEmpty(_filename))
                 return;
