@@ -27,7 +27,7 @@ namespace Modules.Utilities
                         var go = new GameObject("TransitionCanvas");
                         var canvas = go.AddComponent<Canvas>();
                         canvas.renderMode = RenderMode.ScreenSpaceOverlay;
-                        canvas.sortingOrder = 10;
+                        canvas.sortingOrder = 1000;
                         go.AddComponent<CanvasScaler>();
                         go.AddComponent<GraphicRaycaster>();
                         var container = new GameObject("Container", typeof(RectTransform));
