@@ -114,3 +114,52 @@ namespace Modules.Utilities
 
 
 }
+
+#if UNITY_EDITOR
+namespace Modules.Utilities.Editor
+{
+    using UnityEditor;
+
+    /// <summary>
+    /// Utility class for drawing custom attributes in custom editors
+    /// </summary>
+    public static class CustomAttributeDrawer
+    {
+        /// <summary>
+        /// Draw buttons for all methods with [Button] attribute
+        /// Call this in your custom editor's OnInspectorGUI()
+        /// </summary>
+        public static void DrawButtonMethods(UnityEngine.Object target)
+        {
+            var targetType = target.GetType();
+            var methods = targetType.GetMethods(BindingFlags.Instance | 
+                                                BindingFlags.Static | 
+                                                BindingFlags.Public | 
+                                                BindingFlags.NonPublic);
+
+            var hasButtons = false;
+            foreach (var method in methods)
+            {
+                var buttonAttribute = method.GetCustomAttribute<ButtonAttribute>();
+                if (buttonAttribute != null)
+                {
+                    if (!hasButtons)
+                    {
+                        EditorGUILayout.Space(5);
+                        hasButtons = true;
+                    }
+
+                    var buttonText = string.IsNullOrEmpty(buttonAttribute.ButtonText) 
+                        ? ObjectNames.NicifyVariableName(method.Name) 
+                        : buttonAttribute.ButtonText;
+
+                    if (GUILayout.Button(buttonText))
+                    {
+                        method.Invoke(target, null);
+                    }
+                }
+            }
+        }
+    }
+}
+#endif

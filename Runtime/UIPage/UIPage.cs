@@ -7,6 +7,7 @@ using UnityEngine;
 using Object = UnityEngine.Object;
 #if UNITY_EDITOR
 using UnityEditor;
+using System.Reflection;
 #endif
 
 namespace Modules.Utilities
@@ -446,8 +447,11 @@ namespace Modules.Utilities.Editor
             //
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginVertical("box");
-            DrawPropertiesExcluding(serializedObject, "m_Script");
+            DrawPropertiesExcluding(serializedObject, "m_Script", "m_GroupName", "m_IsDefault", "m_TransitionInfo", "m_IsTransitionPage", "m_IsOpened");
             EditorGUILayout.EndVertical();
+
+            // Draw buttons from ButtonAttribute
+            CustomAttributeDrawer.DrawButtonMethods(target);
 
             serializedObject.ApplyModifiedProperties();
 
@@ -475,6 +479,7 @@ namespace Modules.Utilities.Editor
 
 
         }
+
     }
 
 }
