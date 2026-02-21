@@ -1,0 +1,106 @@
+// TextureOperations.compute
+// GPU-accelerated texture flip and rotation operations
+// Each kernel handles a specific transformation using optimized UV remapping
+
+#pragma kernel FlipX
+#pragma kernel FlipY
+#pragma kernel Rotate90
+#pragma kernel Rotate180
+#pragma kernel Rotate270
+
+// Input texture (read-only)
+Texture2D<float4> Source;
+
+// Output texture (read-write)
+RWTexture2D<float4> Result;
+
+// Texture dimensions
+int Width;
+int Height;
+
+// Thread group size: 8x8 threads per group (standard for 2D operations)
+[numthreads(8,8,1)]
+void FlipX (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds to prevent out-of-range writes
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Flip horizontally: read from opposite X coordinate
+    // Formula: flipped_x = (width - 1) - x
+    uint flippedX = (Width - 1) - id.x;
+    
+    // Read pixel from flipped position and write to current position
+    Result[id.xy] = Source[uint2(flippedX, id.y)];
+}
+
+[numthreads(8,8,1)]
+void FlipY (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds to prevent out-of-range writes
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Flip vertically: read from opposite Y coordinate
+    // Formula: flipped_y = (height - 1) - y
+    uint flippedY = (Height - 1) - id.y;
+    
+    // Read pixel from flipped position and write to current position
+    Result[id.xy] = Source[uint2(id.x, flippedY)];
+}
+
+[numthreads(8,8,1)]
+void Rotate90 (uint3 id : SV_DispatchThreadID)
+{
+    // Rotate 90 degrees clockwise
+    // Output dimensions are swapped: output width = input height, output height = input width
+    // Check bounds against rotated dimensions
+    if (id.x >= (uint)Height || id.y >= (uint)Width)
+        return;
+    
+    // 90° clockwise rotation formula:
+    // new_x comes from original y (from bottom)
+    // new_y comes from original x (inverted)
+    // Source coordinate: (height - 1 - new_x, new_y)
+    uint sourceX = (Height - 1) - id.x;
+    uint sourceY = id.y;
+    
+    // Read from rotated source position
+    Result[id.xy] = Source[uint2(sourceY, sourceX)];
+}
+
+[numthreads(8,8,1)]
+void Rotate180 (uint3 id : SV_DispatchThreadID)
+{
+    // Rotate 180 degrees (flip both X and Y)
+    // Output dimensions remain the same
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // 180° rotation formula: invert both coordinates
+    // Source coordinate: (width - 1 - x, height - 1 - y)
+    uint sourceX = (Width - 1) - id.x;
+    uint sourceY = (Height - 1) - id.y;
+    
+    // Read from inverted position
+    Result[id.xy] = Source[uint2(sourceX, sourceY)];
+}
+
+[numthreads(8,8,1)]
+void Rotate270 (uint3 id : SV_DispatchThreadID)
+{
+    // Rotate 270 degrees clockwise (or 90 degrees counter-clockwise)
+    // Output dimensions are swapped: output width = input height, output height = input width
+    if (id.x >= (uint)Height || id.y >= (uint)Width)
+        return;
+    
+    // 270° clockwise rotation formula:
+    // new_x comes from original y
+    // new_y comes from original x (from right)
+    // Source coordinate: (new_x, width - 1 - new_y)
+    uint sourceX = id.x;
+    uint sourceY = (Width - 1) - id.y;
+    
+    // Read from rotated source position
+    Result[id.xy] = Source[uint2(sourceY, sourceX)];
+}

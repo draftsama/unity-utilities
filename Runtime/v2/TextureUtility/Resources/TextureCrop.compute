@@ -1,0 +1,139 @@
+// TextureCrop.compute
+// GPU-accelerated texture cropping operations
+// Supports rectangular crop, circle crop, and rounded corner masking
+
+#pragma kernel CropRect
+#pragma kernel CropCircle
+#pragma kernel CropRoundedCorners
+
+// Input texture (read-only)
+Texture2D<float4> Source;
+
+// Output texture (read-write)
+RWTexture2D<float4> Result;
+
+// Texture dimensions
+int Width;
+int Height;
+
+// Crop rectangle (x, y, width, height)
+int4 RectData;
+
+// Circle crop parameters
+float2 Center;      // Center position (normalized 0-1 or pixel coordinates)
+float Radius;       // Radius (in pixels or normalized)
+
+// Rounded corner radii (top-left, top-right, bottom-right, bottom-left)
+float4 CornerRadii;
+
+// Helper function: Calculate signed distance field for rounded rectangle
+// Returns negative values inside the shape, positive outside
+float RoundedRectSDF(float2 pos, float2 size, float4 radii)
+{
+    // Determine which corner radius to use based on quadrant
+    float2 halfSize = size * 0.5;
+    float2 centerPos = pos - halfSize;
+    
+    // Select appropriate corner radius
+    float radius;
+    if (centerPos.x < 0.0)
+    {
+        // Left side
+        radius = (centerPos.y < 0.0) ? radii.x : radii.w; // Top-left or Bottom-left
+    }
+    else
+    {
+        // Right side
+        radius = (centerPos.y < 0.0) ? radii.y : radii.z; // Top-right or Bottom-right
+    }
+    
+    // Calculate distance to rounded corner
+    float2 q = abs(centerPos) - halfSize + radius;
+    float dist = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - radius;
+    
+    return dist;
+}
+
+// Thread group size: 8x8 threads per group
+[numthreads(8,8,1)]
+void CropRect (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Calculate position relative to crop rectangle
+    int2 pos = int2(id.x, id.y);
+    int2 cropMin = RectData.xy;
+    int2 cropMax = cropMin + RectData.zw;
+    
+    // Check if pixel is inside crop rectangle
+    bool insideCrop = (pos.x >= cropMin.x && pos.x < cropMax.x &&
+                       pos.y >= cropMin.y && pos.y < cropMax.y);
+    
+    if (insideCrop)
+    {
+        // Inside crop area: copy pixel from source
+        Result[id.xy] = Source[id.xy];
+    }
+    else
+    {
+        // Outside crop area: make transparent
+        Result[id.xy] = float4(0, 0, 0, 0);
+    }
+}
+
+[numthreads(8,8,1)]
+void CropCircle (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Calculate distance from center
+    float2 pixelPos = float2(id.x, id.y);
+    float dist = distance(pixelPos, Center);
+    
+    // Read source pixel
+    float4 color = Source[id.xy];
+    
+    // Apply smooth circle mask with anti-aliasing
+    // smoothstep creates a smooth transition at the circle edge
+    float smoothEdge = 1.0; // 1 pixel smooth edge for anti-aliasing
+    float alpha = smoothstep(Radius + smoothEdge, Radius - smoothEdge, dist);
+    
+    // Multiply alpha channel by mask
+    color.a *= alpha;
+    
+    // Write result
+    Result[id.xy] = color;
+}
+
+[numthreads(8,8,1)]
+void CropRoundedCorners (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Calculate position within texture
+    float2 pixelPos = float2(id.x, id.y);
+    float2 texSize = float2(Width, Height);
+    
+    // Calculate signed distance to rounded rectangle
+    float dist = RoundedRectSDF(pixelPos, texSize, CornerRadii);
+    
+    // Read source pixel
+    float4 color = Source[id.xy];
+    
+    // Apply smooth mask with anti-aliasing
+    // Pixels outside the rounded rect (dist > 0) become transparent
+    float smoothEdge = 1.0; // 1 pixel smooth edge
+    float alpha = smoothstep(smoothEdge, -smoothEdge, dist);
+    
+    // Multiply alpha channel by mask
+    color.a *= alpha;
+    
+    // Write result
+    Result[id.xy] = color;
+}

@@ -1,0 +1,174 @@
+// TextureCombine.compute
+// GPU-accelerated texture blending and combining operations
+// Supports multiple blend modes: alpha, additive, multiply, screen, overlay
+
+#pragma kernel BlendAlpha
+#pragma kernel BlendAdditive
+#pragma kernel BlendMultiply
+#pragma kernel BlendScreen
+#pragma kernel BlendOverlay
+#pragma kernel Overlay
+
+// Input textures (read-only)
+Texture2D<float4> Source1;
+Texture2D<float4> Source2;
+
+// Output texture (read-write)
+RWTexture2D<float4> Result;
+
+// Texture dimensions
+int Width;
+int Height;
+
+// Blend parameters
+float Opacity;      // Blend opacity (0-1)
+float2 Position;    // Position offset for overlay (in pixels)
+float2 Scale;       // Scale for overlay (1.0 = original size)
+
+// Helper function: Sample texture with bounds checking
+float4 SampleTexture(Texture2D<float4> tex, int2 coord, int2 size)
+{
+    // Clamp coordinates to texture bounds
+    coord = clamp(coord, int2(0, 0), size - int2(1, 1));
+    return tex[coord];
+}
+
+// Thread group size: 8x8 threads per group
+[numthreads(8,8,1)]
+void BlendAlpha (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Read pixels from both sources
+    float4 color1 = Source1[id.xy];
+    float4 color2 = Source2[id.xy];
+    
+    // Standard alpha blending formula
+    // result = color2 * alpha + color1 * (1 - alpha)
+    float alpha = color2.a * Opacity;
+    float3 blendedRGB = color2.rgb * alpha + color1.rgb * (1.0 - alpha);
+    float blendedAlpha = max(color1.a, color2.a * Opacity);
+    
+    Result[id.xy] = float4(blendedRGB, blendedAlpha);
+}
+
+[numthreads(8,8,1)]
+void BlendAdditive (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Read pixels from both sources
+    float4 color1 = Source1[id.xy];
+    float4 color2 = Source2[id.xy];
+    
+    // Additive blending: colors add together
+    // Result is brighter (can exceed 1.0, clamped by render target)
+    float3 blendedRGB = color1.rgb + (color2.rgb * color2.a * Opacity);
+    float blendedAlpha = max(color1.a, color2.a * Opacity);
+    
+    Result[id.xy] = float4(blendedRGB, blendedAlpha);
+}
+
+[numthreads(8,8,1)]
+void BlendMultiply (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Read pixels from both sources
+    float4 color1 = Source1[id.xy];
+    float4 color2 = Source2[id.xy];
+    
+    // Multiply blending: colors multiply together
+    // Result is darker (black stays black, white has no effect)
+    float3 multiplied = color1.rgb * color2.rgb;
+    float3 blendedRGB = lerp(color1.rgb, multiplied, color2.a * Opacity);
+    float blendedAlpha = max(color1.a, color2.a * Opacity);
+    
+    Result[id.xy] = float4(blendedRGB, blendedAlpha);
+}
+
+[numthreads(8,8,1)]
+void BlendScreen (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Read pixels from both sources
+    float4 color1 = Source1[id.xy];
+    float4 color2 = Source2[id.xy];
+    
+    // Screen blending: inverse multiply
+    // Result is brighter (opposite of multiply)
+    float3 screened = 1.0 - (1.0 - color1.rgb) * (1.0 - color2.rgb);
+    float3 blendedRGB = lerp(color1.rgb, screened, color2.a * Opacity);
+    float blendedAlpha = max(color1.a, color2.a * Opacity);
+    
+    Result[id.xy] = float4(blendedRGB, blendedAlpha);
+}
+
+[numthreads(8,8,1)]
+void BlendOverlay (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Read pixels from both sources
+    float4 color1 = Source1[id.xy];
+    float4 color2 = Source2[id.xy];
+    
+    // Overlay blending: combination of multiply and screen
+    // Dark areas use multiply, bright areas use screen
+    float3 overlayed;
+    overlayed.r = (color1.r < 0.5) ? (2.0 * color1.r * color2.r) : (1.0 - 2.0 * (1.0 - color1.r) * (1.0 - color2.r));
+    overlayed.g = (color1.g < 0.5) ? (2.0 * color1.g * color2.g) : (1.0 - 2.0 * (1.0 - color1.g) * (1.0 - color2.g));
+    overlayed.b = (color1.b < 0.5) ? (2.0 * color1.b * color2.b) : (1.0 - 2.0 * (1.0 - color1.b) * (1.0 - color2.b));
+    
+    float3 blendedRGB = lerp(color1.rgb, overlayed, color2.a * Opacity);
+    float blendedAlpha = max(color1.a, color2.a * Opacity);
+    
+    Result[id.xy] = float4(blendedRGB, blendedAlpha);
+}
+
+[numthreads(8,8,1)]
+void Overlay (uint3 id : SV_DispatchThreadID)
+{
+    // Check bounds
+    if (id.x >= (uint)Width || id.y >= (uint)Height)
+        return;
+    
+    // Read base pixel from Source1
+    float4 baseColor = Source1[id.xy];
+    
+    // Calculate position in Source2 (overlay texture)
+    // Apply position offset and scale
+    float2 overlayCoord = (float2(id.xy) - Position) / Scale;
+    
+    // Check if overlay coordinate is within Source2 bounds
+    int2 overlaySize = int2(Width, Height); // Assume same size for now
+    if (overlayCoord.x >= 0 && overlayCoord.x < overlaySize.x &&
+        overlayCoord.y >= 0 && overlayCoord.y < overlaySize.y)
+    {
+        // Sample overlay texture
+        float4 overlayColor = SampleTexture(Source2, int2(overlayCoord), overlaySize);
+        
+        // Alpha blend overlay on top of base
+        float alpha = overlayColor.a * Opacity;
+        float3 blendedRGB = overlayColor.rgb * alpha + baseColor.rgb * (1.0 - alpha);
+        float blendedAlpha = max(baseColor.a, alpha);
+        
+        Result[id.xy] = float4(blendedRGB, blendedAlpha);
+    }
+    else
+    {
+        // Outside overlay bounds: just use base color
+        Result[id.xy] = baseColor;
+    }
+}
