@@ -51,14 +51,10 @@ namespace Modules.Utilities
         public int m_BufferSize = 8192;
         [SerializeField, Range(1, 100), Tooltip("Maximum concurrent connections for server")]
         public int m_MaxConcurrentConnections = 8;
+        [SerializeField, Range(5000, 120000), Tooltip("Send operation timeout in milliseconds (default 30s)")]
+        public int m_SendTimeout = 30000;
         [SerializeField, Tooltip("Enable TCP keep-alive to detect dead connections")]
         public bool m_EnableKeepAlive = true;
-
-        [Header("Real-time Mode")]
-        [SerializeField, Tooltip("Enable real-time mode for low-latency data transmission")]
-        public bool m_EnableRealTimeMode = false;
-        [SerializeField, Range(7000, 65535), Tooltip("Real-time communication port")]
-        public int m_RealTimePort = 54323;
 
         [Header("Retry Settings")]
         [SerializeField, Range(0, 10), Tooltip("Maximum retry attempts")]
@@ -87,10 +83,10 @@ namespace Modules.Utilities
         private TcpClient _tcpClient;     // Client
         private readonly Dictionary<TcpClient, ConnectorInfo> m_Clients = new Dictionary<TcpClient, ConnectorInfo>();
 
-        // --- Real-time Components ---
-        private UdpClient _realTimeServer; // Server real-time listener
-        private UdpClient _realTimeClient; // Client real-time sender
-        private readonly Dictionary<IPEndPoint, ConnectorInfo> m_RealTimeClients = new Dictionary<IPEndPoint, ConnectorInfo>();
+        // --- Handshake State Tracking ---
+        private readonly Dictionary<TcpClient, ConnectionState> _pendingConnections = new Dictionary<TcpClient, ConnectionState>();
+        private readonly Dictionary<string, UniTaskCompletionSource<PacketResponse>> _handshakeWaiters = new Dictionary<string, UniTaskCompletionSource<PacketResponse>>();
+        private readonly object _handshakeLock = new object();
 
         [Header("Connected Server Info")]
         [SerializeField] public ConnectorInfo m_ServerInfo;
@@ -103,7 +99,6 @@ namespace Modules.Utilities
         [SerializeField] public UnityEvent<ConnectorInfo> m_OnServerConnected = new UnityEvent<ConnectorInfo>();
         [SerializeField] public UnityEvent<ConnectorInfo> m_OnServerDisconnected = new UnityEvent<ConnectorInfo>();
         [SerializeField] public UnityEvent<PacketResponse> m_OnDataReceived = new UnityEvent<PacketResponse>();
-        [SerializeField] public UnityEvent<PacketResponse> m_OnRealTimeDataReceived = new UnityEvent<PacketResponse>(); // Separate real-time event
         [SerializeField] public UnityEvent<ErrorInfo> m_OnError = new UnityEvent<ErrorInfo>();
         [SerializeField] public UnityEvent<List<ConnectorInfo>> m_OnClientListUpdated = new UnityEvent<List<ConnectorInfo>>();
 
@@ -113,19 +108,31 @@ namespace Modules.Utilities
         private readonly Queue<byte[]> _bufferPool = new Queue<byte[]>();
         private readonly object _bufferPoolLock = new object();
 
+        // Cache component name for thread-safe logging
+        private string _cachedName;
+
         // Optimize memory allocation
-        private const int MAX_BUFFER_POOL_SIZE = 20; // ลดจาก unlimited เป็น 20
+        private const int MAX_BUFFER_POOL_SIZE = 50; // Increased from 20 to 50 for better performance
         private const int BUFFER_REUSE_THRESHOLD = 4096; // ใช้ buffer ซ้ำถ้า >= 4KB
 
         // Optimize progress reporting (per-instance)
         private long _lastProgressTicks = 0;
 
-        // Discovery broadcast control
-        private bool m_IsDiscoveryPausedManually = false;
-        private readonly object _discoveryPauseLock = new object();
-
         // --- Packet Structure ---
         private const int PACKET_HEADER_SIZE = 6; // 4-messageId, 2-action
+
+        // --- Reserved Action Numbers ---
+        // ⚠️ WARNING: Actions 65529-65535 are RESERVED for internal protocol use.
+        // User applications MUST NOT use these action numbers.
+        // Valid user action range: 0-65528 or 0x0000-0xFFFE.
+        private const ushort RESERVED_ACTION_MIN = 65529; 
+        private const ushort RESERVED_ACTION_MAX = 65535; 
+
+        // --- Handshake Protocol ---
+        private const ushort ACTION_CONNECTION_HELLO = 65535;
+        private const ushort ACTION_CONNECTION_ACK = 65534;
+        private const ushort ACTION_CONNECTION_READY = 65533;
+        private const int HANDSHAKE_TIMEOUT_MS = 5000; // 5 seconds
 
         // --- Client Sync Protocol ---
         private const ushort ACTION_CLIENT_LIST_FULL = 65530;
@@ -141,13 +148,28 @@ namespace Modules.Utilities
         #endregion
 
         #region Public Variables
+        
+        /// <summary>
+        /// Maximum action number that can be used by user applications.
+        /// Actions 0-65528 are available for user use.
+        /// Actions 65529-65535 are reserved for internal protocol.
+        /// </summary>
+        public const ushort MaxUserAction = 65528;
+        
         public bool IsConnected => m_IsConnected;
         public bool IsRunning => m_IsRunning;
-        public bool IsRealTimeEnabled => m_EnableRealTimeMode;
         public int ConnectedClientCount => m_Clients.Count;
-        public int ActiveRealTimeClientCount => m_RealTimeClients.Count;
         public ConnectorInfo ServerInfo => m_ServerInfo;
         public int MyClientId => m_MyClientId; // Client's server-assigned ID (for self-filtering)
+
+        /// <summary>
+        /// Checks if an action number can be used by user applications.
+        /// Returns false if the action is in the reserved range (65529-65535).
+        /// </summary>
+        public static bool IsValidUserAction(ushort action)
+        {
+            return action <= MaxUserAction;
+        }
 
 
 
@@ -193,18 +215,6 @@ namespace Modules.Utilities
             }
         }
 
-
-        /// <summary>
-        /// Gets list of real-time clients (creates new list each call - use sparingly)
-        /// </summary>
-        public List<ConnectorInfo> GetRealTimeClientInfoList()
-        {
-            lock (m_RealTimeClients)
-            {
-                return m_RealTimeClients.Values.ToList();
-            }
-        }
-
         /// <summary>
         /// Gets a buffer from the pool or creates a new one (Optimized)
         /// </summary>
@@ -245,42 +255,15 @@ namespace Modules.Utilities
             }
         }
 
-        /// <summary>
-        /// Pauses server discovery broadcast manually. Server will stop advertising itself to clients.
-        /// </summary>
-        public void PauseDiscoveryBroadcast()
-        {
-            lock (_discoveryPauseLock)
-            {
-                if (!m_IsDiscoveryPausedManually)
-                {
-                    m_IsDiscoveryPausedManually = true;
-                    if (m_IsServer) Log("Discovery broadcast paused manually");
-                }
-            }
-        }
-
-        /// <summary>
-        /// Resumes server discovery broadcast manually. Server will start advertising itself to clients again.
-        /// </summary>
-        public void ResumeDiscoveryBroadcast()
-        {
-            lock (_discoveryPauseLock)
-            {
-                if (m_IsDiscoveryPausedManually)
-                {
-                    m_IsDiscoveryPausedManually = false;
-                    if (m_IsServer) Log("Discovery broadcast resumed manually");
-                }
-            }
-        }
-
         #endregion
 
         #region Unity Methods
 
-
-
+        private void Awake()
+        {
+            // Cache the name on the main thread for thread-safe logging
+            _cachedName = name;
+        }
 
         private void OnEnable()
         {
@@ -303,7 +286,7 @@ namespace Modules.Utilities
         {
             if (!m_IsDebug) return;
             var prefix = m_IsServer ? "Server" : "Client";
-            var logMessage = $"[{prefix}][{name}] {message}";
+            var logMessage = $"[{prefix}][{_cachedName}] {message}";
             Debug.Log(logMessage);
 
         }
@@ -354,8 +337,6 @@ namespace Modules.Utilities
             {
                 m_IsRunning = false;
             }
-
-
         }
 
         public void StopConnection()
@@ -385,32 +366,11 @@ namespace Modules.Utilities
                 m_Clients.Clear();
             }
 
-            // Clear real-time clients
-            lock (m_RealTimeClients)
-            {
-                m_RealTimeClients.Clear();
-            }
-
-            // Close real-time UDP components
-            _realTimeServer?.Close();
-            _realTimeServer?.Dispose();
-            _realTimeServer = null;
-
-            _realTimeClient?.Close();
-            _realTimeClient?.Dispose();
-            _realTimeClient = null;
-
             // Handle connection state
             if (m_IsConnected)
             {
                 m_IsConnected = false;
                 m_OnServerDisconnected?.Invoke(m_ServerInfo);
-            }
-
-            // Reset manual discovery pause state
-            lock (_discoveryPauseLock)
-            {
-                m_IsDiscoveryPausedManually = false;
             }
 
             // Dispose cancellation token
@@ -447,12 +407,6 @@ namespace Modules.Utilities
                 if (m_EnableDiscovery)
                 {
                     BroadcastPresenceAsync(token).Forget();
-                }
-
-                // Start real-time server if enabled
-                if (m_EnableRealTimeMode)
-                {
-                    StartRealTimeServerAsync(token).Forget();
                 }
 
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
@@ -506,7 +460,8 @@ namespace Modules.Utilities
 
                 while (!token.IsCancellationRequested && m_IsRunning)
                 {
-                    TcpClient connectedClient = await _tcpListener.AcceptTcpClientAsync().AsUniTask().AttachExternalCancellation(token);
+                    TcpClient connectedClient = await _tcpListener.AcceptTcpClientAsync().ConfigureAwait(false);
+                    token.ThrowIfCancellationRequested();
 
                     // Check again after accepting client
                     if (!m_IsRunning || token.IsCancellationRequested)
@@ -556,28 +511,135 @@ namespace Modules.Utilities
                 remoteEndPoint = clientEndPoint
             };
 
-            lock (m_Clients) { m_Clients.Add(client, clientInfo); }
-            Log($"Client connected: {clientInfo.ipAddress}:{clientInfo.port}");
-
-            // Use try-catch for main thread switch to avoid SynchronizationContext errors
-            try
+            // Add to pending connections (not m_Clients yet)
+            lock (_handshakeLock)
             {
-                await UniTask.SwitchToMainThread();
-                m_OnClientConnected?.Invoke(clientInfo);
-            }
-            catch (Exception ex)
-            {
-                Log($"Warning: Could not switch to main thread for event: {ex.Message}");
-                // Events will be invoked when possible - continue operation
+                _pendingConnections[client] = ConnectionState.Pending;
             }
 
-            // Sync: Send full client list to newly connected client
-            await BroadcastClientListSync(clientInfo.id, isFullSync: true);
+            Log($"✅ Client TCP connected: {clientInfo.ipAddress}:{clientInfo.port} (ID: {clientInfo.id})");
 
             var stream = client.GetStream();
+            bool handshakeComplete = false;
+
             try
             {
+                // --- Handshake Step 1: Send HELLO ---
+                lock (_handshakeLock)
+                {
+                    _pendingConnections[client] = ConnectionState.HelloSent;
+                }
+
+                byte[] helloPacket = CreatePacket(ACTION_CONNECTION_HELLO, Array.Empty<byte>());
+                await SendDataToStreamAsync(stream, helloPacket, null, token);
+
+                // --- Handshake Step 2: Wait for ACK ---
+                string ackKey = $"ack_{clientInfo.id}";
+                UniTaskCompletionSource<PacketResponse> ackWaiter;
+                lock (_handshakeLock)
+                {
+                    ackWaiter = new UniTaskCompletionSource<PacketResponse>();
+                    _handshakeWaiters[ackKey] = ackWaiter;
+                }
+
+                // Start receive loop BEFORE waiting for ACK (critical for handshake)
+                var receiveLoopTask = ReceiveDataLoopAsync(stream, clientInfo, token);
+
+                using (var timeoutCts = new CancellationTokenSource(HANDSHAKE_TIMEOUT_MS))
+                using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
+                {
+                    try
+                    {
+                        await ackWaiter.Task.AttachExternalCancellation(linkedCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        lock (_handshakeLock)
+                        {
+                            _handshakeWaiters.Remove(ackKey);
+                        }
+
+                        if (timeoutCts.IsCancellationRequested)
+                        {
+                            Log($"Handshake timeout: Client {clientInfo.ipAddress} did not send ACK");
+                            return;
+                        }
+                        throw; // Re-throw if it's the main cancellation token
+                    }
+                }
+
+                lock (_handshakeLock)
+                {
+                    _handshakeWaiters.Remove(ackKey);
+                }
+
+                lock (_handshakeLock)
+                {
+                    _pendingConnections[client] = ConnectionState.Acknowledged;
+                }
+
+                // --- Handshake Step 3: Send client list sync ---
+                // Temporarily add to m_Clients for BroadcastClientListSync
+                lock (m_Clients) { m_Clients[client] = clientInfo; }
+                await BroadcastClientListSync(clientInfo.id, isFullSync: true);
+
+                // --- Handshake Step 4: Wait for READY ---
+                string readyKey = $"ready_{clientInfo.id}";
+                UniTaskCompletionSource<PacketResponse> readyWaiter;
+                lock (_handshakeLock)
+                {
+                    readyWaiter = new UniTaskCompletionSource<PacketResponse>();
+                    _handshakeWaiters[readyKey] = readyWaiter;
+                }
+
+                using (var timeoutCts = new CancellationTokenSource(HANDSHAKE_TIMEOUT_MS))
+                using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
+                {
+                    try
+                    {
+                        await readyWaiter.Task.AttachExternalCancellation(linkedCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        lock (_handshakeLock)
+                        {
+                            _handshakeWaiters.Remove(readyKey);
+                        }
+
+                        if (timeoutCts.IsCancellationRequested)
+                        {
+                            Log($"Handshake timeout: Client {clientInfo.ipAddress} did not send READY");
+                            lock (m_Clients) { m_Clients.Remove(client); }
+                            return;
+                        }
+                        throw; // Re-throw if it's the main cancellation token
+                    }
+                }
+
+                lock (_handshakeLock)
+                {
+                    _handshakeWaiters.Remove(readyKey);
+                }
+
+                lock (_handshakeLock)
+                {
+                    _pendingConnections[client] = ConnectionState.Ready;
+                    _pendingConnections.Remove(client);
+                }
+
+                handshakeComplete = true;
+                Log($"✅ Handshake complete: {clientInfo.ipAddress}:{clientInfo.port}");
+
+                // Fire m_OnClientConnected only after handshake completes
+                await SwitchToMainThreadWithRetry();
+                m_OnClientConnected?.Invoke(clientInfo);
+
+                // Start receive loop
                 await ReceiveDataLoopAsync(stream, clientInfo, token);
+            }
+            catch (OperationCanceledException)
+            {
+                // Silent cancellation
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
                                             ex.SocketErrorCode == SocketError.ConnectionAborted ||
@@ -599,25 +661,32 @@ namespace Modules.Utilities
             catch (Exception ex)
             {
                 Log($"Unexpected client handling error: {ex.GetType().Name} - {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.DataTransmission, "Unexpected error handling client data", ex, clientInfo);
+                ReportError(ErrorInfo.ErrorType.DataTransmission, "Unexpected error handling client", ex, clientInfo);
             }
             finally
             {
-                lock (m_Clients) { m_Clients.Remove(client); }
+                // Clean up pending/active connections
+                lock (_handshakeLock)
+                {
+                    _pendingConnections.Remove(client);
+                }
+
+                lock (m_Clients)
+                {
+                    m_Clients.Remove(client);
+                }
+
                 client.Close();
 
-                try
+                // Only fire disconnect event if handshake was complete
+                if (handshakeComplete)
                 {
-                    await UniTask.SwitchToMainThread();
+                    await SwitchToMainThreadWithRetry();
                     m_OnClientDisconnected?.Invoke(clientInfo);
-                }
-                catch
-                {
-                    // Ignore thread switch errors
-                }
 
-                // Sync: Broadcast client left to all remaining clients
-                await BroadcastClientListSync(clientInfo.id, isFullSync: false);
+                    // Sync: Broadcast client left to all remaining clients
+                    await BroadcastClientListSync(clientInfo.id, isFullSync: false);
+                }
             }
         }
 
@@ -640,13 +709,6 @@ namespace Modules.Utilities
                 {
                     try
                     {
-                        // Check for manual pause first
-                        bool isManuallyPaused;
-                        lock (_discoveryPauseLock)
-                        {
-                            isManuallyPaused = m_IsDiscoveryPausedManually;
-                        }
-
                         // Check if server has reached max concurrent connections
                         int currentClientCount;
                         lock (m_Clients)
@@ -654,21 +716,14 @@ namespace Modules.Utilities
                             currentClientCount = m_Clients.Count;
                         }
 
-                        bool shouldPauseBroadcast = isManuallyPaused || currentClientCount >= m_MaxConcurrentConnections;
+                        bool shouldPauseBroadcast = currentClientCount >= m_MaxConcurrentConnections;
 
                         if (shouldPauseBroadcast)
                         {
-                            // Server is paused (manually or full) - pause broadcasting
+                            // Server is full - pause broadcasting
                             if (!wasBroadcastingPaused)
                             {
-                                if (isManuallyPaused)
-                                {
-                                    Log($"Discovery broadcast paused manually");
-                                }
-                                else
-                                {
-                                    Log($"Server reached max connections ({currentClientCount}/{m_MaxConcurrentConnections}). Pausing discovery broadcast...");
-                                }
+                                Log($"Server reached max connections ({currentClientCount}/{m_MaxConcurrentConnections}). Pausing discovery broadcast...");
                                 wasBroadcastingPaused = true;
                             }
 
@@ -678,7 +733,7 @@ namespace Modules.Utilities
                         }
                         else
                         {
-                            // Server has available slots and not manually paused - resume/continue broadcasting
+                            // Server has available slots - resume/continue broadcasting
                             if (wasBroadcastingPaused)
                             {
                                 Log($"Server has available slots ({currentClientCount}/{m_MaxConcurrentConnections}). Resuming discovery broadcast...");
@@ -789,361 +844,19 @@ namespace Modules.Utilities
 
         #endregion
 
-        #region Real-time Methods
+        #region Packet Utilities
 
         /// <summary>
-        /// Starts real-time server for low-latency data transmission
+        /// Checks if an action number is reserved for internal protocol use.
+        /// Reserved range: 65529-65535 or 0xFFFD-0xFFFF.
         /// </summary>
-        private async UniTask StartRealTimeServerAsync(CancellationToken token)
+        private bool IsReservedAction(ushort action)
         {
-            try
-            {
-                _realTimeServer = new UdpClient(m_RealTimePort);
-                _realTimeServer.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-
-                Log($"Real-time server listening on port {m_RealTimePort}");
-
-                while (!token.IsCancellationRequested)
-                {
-                    var result = await _realTimeServer.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-
-                    // UDP Style: Process immediately, don't queue
-                    ProcessRealTimeDataImmediate(result.Buffer, result.RemoteEndPoint);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Silent cancellation
-            }
-            catch (ObjectDisposedException)
-            {
-                // Silent disposal
-            }
-            catch (Exception ex)
-            {
-                Log($"Real-time Server Error: {ex.GetType().Name} - {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Connection, "Real-time server failed", ex);
-            }
-            finally
-            {
-                _realTimeServer?.Close();
-                _realTimeServer?.Dispose();
-                _realTimeServer = null;
-            }
+            return action >= RESERVED_ACTION_MIN && action <= RESERVED_ACTION_MAX;
         }
 
         /// <summary>
-        /// Starts real-time client for low-latency data transmission
-        /// </summary>
-        private async UniTask StartRealTimeClientAsync(CancellationToken token)
-        {
-            try
-            {
-                // Let OS choose an available port automatically (pass 0)
-                _realTimeClient = new UdpClient(0);
-                _realTimeClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
-
-                // Get the actual port assigned by OS
-                var localEndPoint = (IPEndPoint)_realTimeClient.Client.LocalEndPoint;
-
-                // Start listening for real-time data from server on the same port
-                StartRealTimeClientReceiveLoopAsync(token).Forget();
-
-                await UniTask.CompletedTask;
-            }
-            catch (Exception ex)
-            {
-                Log($"Real-time Client Error: {ex.GetType().Name} - {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Connection, "Real-time client setup failed", ex);
-            }
-        }
-
-        /// <summary>
-        /// Real-time client receive loop to listen for server responses
-        /// </summary>
-        private async UniTask StartRealTimeClientReceiveLoopAsync(CancellationToken token)
-        {
-            try
-            {
-                while (!token.IsCancellationRequested && _realTimeClient != null)
-                {
-                    var result = await _realTimeClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
-
-                    // UDP Style: Process immediately, don't queue
-                    ProcessRealTimeDataImmediate(result.Buffer, result.RemoteEndPoint);
-                }
-            }
-            catch (OperationCanceledException)
-            {
-                // Silent cancellation
-            }
-            catch (ObjectDisposedException)
-            {
-                // Silent disposal
-            }
-            catch (Exception ex)
-            {
-                Log($"Real-time Client Receive Error: {ex.GetType().Name} - {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.Connection, "Real-time client receive failed", ex);
-            }
-        }
-
-        /// <summary>
-        /// Processes incoming real-time data immediately (UDP style - no queuing)
-        /// </summary>
-        private void ProcessRealTimeDataImmediate(byte[] data, IPEndPoint remoteEndPoint)
-        {
-            try
-            {
-                // Register real-time client if not already known
-                lock (m_RealTimeClients)
-                {
-                    if (!m_RealTimeClients.ContainsKey(remoteEndPoint))
-                    {
-                        var clientInfo = new ConnectorInfo
-                        {
-                            id = remoteEndPoint.GetHashCode(),
-                            ipAddress = remoteEndPoint.Address.ToString(),
-                            port = remoteEndPoint.Port,
-                            remoteEndPoint = remoteEndPoint
-                        };
-                        m_RealTimeClients[remoteEndPoint] = clientInfo;
-                    }
-                }
-
-                // Get connector info for packet parsing
-                ConnectorInfo connectorInfo;
-                lock (m_RealTimeClients)
-                {
-                    connectorInfo = m_RealTimeClients[remoteEndPoint];
-                }
-
-                // Parse real-time packet (simpler than TCP - no length prefix)
-                var packetResponse = ReadRealTimePacket(data, connectorInfo);
-                if (packetResponse != null)
-                {
-                    packetResponse.status = PacketResponse.ReceiveStatus.Received;
-                    packetResponse.totalBytes = data.Length;
-                    packetResponse.processedBytes = data.Length;
-
-                    // Log real-time receive
-                    if (m_LogReceive)
-                    {
-                        Log($"📡 Real-time data received: Action={packetResponse.action}, Size={data.Length} bytes from {remoteEndPoint.Address}:{remoteEndPoint.Port}");
-                    }
-
-                    // Fire immediately on main thread - no queuing!
-                    // This ensures latest data overwrites older data
-                    if (UnityEngine.Application.isPlaying)
-                    {
-                        // Use a simple immediate dispatch without complex threading
-                        // Since we're already on a background thread, we'll use a sync approach
-                        try
-                        {
-                            // Schedule for main thread execution without blocking
-                            UniTask.Post(() => m_OnRealTimeDataReceived?.Invoke(packetResponse));
-                        }
-                        catch
-                        {
-                            // Ignore dispatch errors in true UDP style
-                        }
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"Real-time data processing error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Processes incoming real-time data (legacy async version - kept for compatibility)
-        /// </summary>
-        private async UniTask ProcessRealTimeDataAsync(byte[] data, IPEndPoint remoteEndPoint, CancellationToken token)
-        {
-            try
-            {
-                // Register real-time client if not already known
-                lock (m_RealTimeClients)
-                {
-                    if (!m_RealTimeClients.ContainsKey(remoteEndPoint))
-                    {
-                        var clientInfo = new ConnectorInfo
-                        {
-                            id = remoteEndPoint.GetHashCode(),
-                            ipAddress = remoteEndPoint.Address.ToString(),
-                            port = remoteEndPoint.Port,
-                            remoteEndPoint = remoteEndPoint
-                        };
-                        m_RealTimeClients[remoteEndPoint] = clientInfo;
-                    }
-                }
-
-                // Get connector info for packet parsing
-                ConnectorInfo connectorInfo;
-                lock (m_RealTimeClients)
-                {
-                    connectorInfo = m_RealTimeClients[remoteEndPoint];
-                }
-
-                // Parse real-time packet (simpler than TCP - no length prefix)
-                var packetResponse = ReadRealTimePacket(data, connectorInfo);
-                if (packetResponse != null)
-                {
-                    packetResponse.status = PacketResponse.ReceiveStatus.Received;
-                    packetResponse.totalBytes = data.Length;
-                    packetResponse.processedBytes = data.Length;
-
-                    try
-                    {
-                        await UniTask.SwitchToMainThread();
-                        m_OnRealTimeDataReceived?.Invoke(packetResponse);
-                    }
-                    catch
-                    {
-                        // Ignore thread switch errors
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"Real-time data processing error: {ex.Message}");
-                ReportError(ErrorInfo.ErrorType.DataTransmission, "Real-time data processing failed", ex);
-            }
-        }
-
-        /// <summary>
-        /// Sends data via real-time transmission (unreliable but fast) - suitable for real-time updates
-        /// </summary>
-        /// <param name="action">Action identifier</param>
-        /// <param name="data">Data to send (should be small, < 512 bytes recommended)</param>
-        /// <param name="token">Cancellation token</param>
-        public void SendRealTimeData(ushort action, byte[] data)
-        {
-            if (!m_EnableRealTimeMode)
-            {
-                Log("Real-time mode is not enabled");
-                return;
-            }
-
-            if (!m_IsRunning)
-            {
-                Log("Real-time: Connection not running");
-                return;
-            }
-
-            if (data != null && data.Length > 1024)
-            {
-                Log($"Real-time data too large ({data.Length} bytes). Max recommended: 1024 bytes. Use TCP for large data.");
-                return;
-            }
-
-            try
-            {
-                byte[] packet = CreateRealTimePacket(action, data);
-
-                // Log real-time send attempt
-                if (m_LogSend)
-                {
-                    Log($"📡 Sending real-time data: Action={action}, Size={data?.Length ?? 0} bytes");
-                }
-
-                if (m_IsServer)
-                {
-                    // Server sends to all active real-time clients
-                    if (_realTimeServer == null) return;
-
-                    IPEndPoint[] activeClients;
-                    lock (m_RealTimeClients)
-                    {
-                        if (m_RealTimeClients.Count == 0) return;
-                        activeClients = new IPEndPoint[m_RealTimeClients.Count];
-                        m_RealTimeClients.Keys.CopyTo(activeClients, 0);
-                    }
-
-                    // Fire and forget - parallel sending without awaiting
-                    foreach (var client in activeClients)
-                    {
-                        try
-                        {
-                            // True UDP style - no await, just fire!
-                            _ = _realTimeServer.SendAsync(packet, packet.Length, client);
-                        }
-                        catch
-                        {
-                            // Ignore all send failures - pure UDP style
-                        }
-                    }
-
-                    // Log successful send for server
-                    if (m_LogSend)
-                    {
-                        Log($"✅ Real-time data sent to {activeClients.Length} clients: Action={action}");
-                    }
-                }
-                else
-                {
-                    // Client sends to server
-                    if (_realTimeClient == null) return;
-
-                    try
-                    {
-                        // True UDP style - no await, just fire!
-                        _ = _realTimeClient.SendAsync(packet, packet.Length, m_Host, m_RealTimePort);
-
-                        // Log successful send for client
-                        if (m_LogSend)
-                        {
-                            Log($"✅ Real-time data sent to server: Action={action}");
-                        }
-                    }
-                    catch
-                    {
-                        // Ignore all failures - pure UDP style
-                    }
-                }
-            }
-            catch (Exception ex)
-            {
-                // Pure UDP style - log only for debugging
-                Log($"Real-time send ignored error: {ex.Message}");
-            }
-        }
-
-        /// <summary>
-        /// Async version for compatibility (but still fire-and-forget internally)
-        /// </summary>
-
-
-        /// <summary>
-        /// Sends serialized object via real-time transmission (sync version for max speed)
-        /// </summary>
-        public void SendRealTimeData<T>(ushort action, T data)
-        {
-            byte[] serializedData;
-            try
-            {
-                if (data == null)
-                {
-                    // Send empty data for null input
-                    serializedData = Array.Empty<byte>();
-                }
-                else
-                {
-                    serializedData = SerializeData(data);
-                }
-            }
-            catch (Exception ex)
-            {
-                Log($"Real-time Serialization Error: {ex.Message}");
-                return;
-            }
-
-            SendRealTimeData(action, serializedData);
-        }
-
-        /// <summary>
-        /// Creates the core packet structure (shared between TCP and UDP)
+        /// Creates the core packet structure
         /// </summary>
         private byte[] CreateCorePacket(ushort action, byte[] data)
         {
@@ -1161,7 +874,7 @@ namespace Modules.Utilities
         }
 
         /// <summary>
-        /// Reads the core packet structure (shared between TCP and UDP)
+        /// Reads the core packet structure
         /// </summary>
         private PacketResponse ReadCorePacket(byte[] data, int dataLength, ConnectorInfo connectorInfo)
         {
@@ -1189,24 +902,6 @@ namespace Modules.Utilities
                 totalBytes = dataLength,
                 processedBytes = dataLength
             };
-        }
-
-        /// <summary>
-        /// Creates a simple real-time packet (without length prefix since UDP preserves boundaries)
-        /// </summary>
-        private byte[] CreateRealTimePacket(ushort action, byte[] data)
-        {
-            // Real-time packets don't need length prefix - just return the core packet
-            return CreateCorePacket(action, data);
-        }
-
-        /// <summary>
-        /// Reads real-time packet (simpler than TCP since UDP preserves message boundaries)
-        /// </summary>
-        private PacketResponse ReadRealTimePacket(byte[] data, ConnectorInfo connectorInfo)
-        {
-            // Real-time packets don't have length prefix - read directly
-            return ReadCorePacket(data, data?.Length ?? 0, connectorInfo);
         }
 
         #endregion
@@ -1259,12 +954,6 @@ namespace Modules.Utilities
                     if (m_EnableDiscovery)
                         await DiscoverServerAsync(token).AttachExternalCancellation(token);
 
-                    // Start real-time client if enabled
-                    if (m_EnableRealTimeMode)
-                    {
-                        StartRealTimeClientAsync(token).Forget();
-                    }
-
                     // Start TCP client connection
                     await ConnectToServerAsync(m_Host, m_Port, token).AttachExternalCancellation(token);
 
@@ -1286,6 +975,8 @@ namespace Modules.Utilities
 
         private async UniTask ConnectToServerAsync(string _host, int _port, CancellationToken token)
         {
+            bool handshakeComplete = false;
+
             try
             {
                 Log($"Attempting to connect to {_host}:{_port}");
@@ -1294,8 +985,10 @@ namespace Modules.Utilities
                 _tcpClient.ReceiveBufferSize = m_BufferSize;
                 _tcpClient.SendBufferSize = m_BufferSize;
 
-                // Add connection timeout for builds
-                var connectTask = _tcpClient.ConnectAsync(_host, _port).AsUniTask().AttachExternalCancellation(token);
+                // Add connection timeout for builds - wrap to avoid SynchronizationContext issues
+                var connectTask = UniTask.Create(async () => {
+                    await _tcpClient.ConnectAsync(_host, _port).ConfigureAwait(false);
+                });
                 var timeoutTask = UniTask.Delay(10000, cancellationToken: token); // 10 second timeout
 
                 var result = await UniTask.WhenAny(connectTask, timeoutTask);
@@ -1313,10 +1006,8 @@ namespace Modules.Utilities
                 }
 
                 ConfigureTcpClient(_tcpClient);
-                m_IsConnected = true;
 
                 var serverEndPoint = (IPEndPoint)_tcpClient.Client.RemoteEndPoint;
-                var localEndPoint = (IPEndPoint)_tcpClient.Client.LocalEndPoint;
 
                 m_ServerInfo = new ConnectorInfo
                 {
@@ -1326,13 +1017,126 @@ namespace Modules.Utilities
                     remoteEndPoint = serverEndPoint
                 };
 
-                Log($"✅ Connected to server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
-
-                await UniTask.SwitchToMainThread();
-                m_OnServerConnected?.Invoke(m_ServerInfo);
+                Log($"✅ TCP connected to server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port} (ID: {m_ServerInfo.id})");
 
                 var stream = _tcpClient.GetStream();
-                await ReceiveDataLoopAsync(stream, m_ServerInfo, token);
+
+                // --- Client Handshake Flow ---
+
+                // Add server to pending connections
+                lock (_handshakeLock)
+                {
+                    _pendingConnections[_tcpClient] = ConnectionState.Pending;
+                }
+
+                // --- Prepare ALL handshake waiters BEFORE starting receive loop (prevent race condition) ---
+                string helloKey = $"hello_{m_ServerInfo.id}";
+                string clientListKey = $"clientlist_{m_ServerInfo.id}";
+                UniTaskCompletionSource<PacketResponse> helloWaiter;
+                UniTaskCompletionSource<PacketResponse> clientListWaiter;
+                
+                lock (_handshakeLock)
+                {
+                    helloWaiter = new UniTaskCompletionSource<PacketResponse>();
+                    _handshakeWaiters[helloKey] = helloWaiter;
+                    
+                    clientListWaiter = new UniTaskCompletionSource<PacketResponse>();
+                    _handshakeWaiters[clientListKey] = clientListWaiter;
+                }
+
+                // Start receive loop in background to process handshake messages
+                var receiveLoopTask = ReceiveDataLoopAsync(stream, m_ServerInfo, token);
+
+                // --- Handshake Step 1: Wait for HELLO from server ---
+                using (var timeoutCts = new CancellationTokenSource(HANDSHAKE_TIMEOUT_MS))
+                using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
+                {
+                    try
+                    {
+                        await helloWaiter.Task.AttachExternalCancellation(linkedCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        lock (_handshakeLock)
+                        {
+                            _handshakeWaiters.Remove(helloKey);
+                            _handshakeWaiters.Remove(clientListKey);
+                        }
+
+                        if (timeoutCts.IsCancellationRequested)
+                        {
+                            Log($"Handshake timeout: Server did not send HELLO");
+                            throw new TimeoutException("Server handshake HELLO timeout");
+                        }
+                        throw;
+                    }
+                }
+
+                lock (_handshakeLock)
+                {
+                    _handshakeWaiters.Remove(helloKey);
+                    _pendingConnections[_tcpClient] = ConnectionState.HelloSent;
+                }
+
+                // --- Handshake Step 2: Send ACK to server ---
+                byte[] ackPacket = CreatePacket(ACTION_CONNECTION_ACK, Array.Empty<byte>());
+                await SendDataToStreamAsync(stream, ackPacket, null, token);
+
+                lock (_handshakeLock)
+                {
+                    _pendingConnections[_tcpClient] = ConnectionState.Acknowledged;
+                }
+
+                // --- Handshake Step 3: Wait for CLIENT_LIST_FULL (waiter already created above) ---
+
+                using (var timeoutCts = new CancellationTokenSource(HANDSHAKE_TIMEOUT_MS))
+                using (var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token))
+                {
+                    try
+                    {
+                        await clientListWaiter.Task.AttachExternalCancellation(linkedCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        lock (_handshakeLock)
+                        {
+                            _handshakeWaiters.Remove(clientListKey);
+                        }
+
+                        if (timeoutCts.IsCancellationRequested)
+                        {
+                            Log($"Handshake timeout: Server did not send CLIENT_LIST");
+                            throw new TimeoutException("Server handshake CLIENT_LIST timeout");
+                        }
+                        throw;
+                    }
+                }
+
+                lock (_handshakeLock)
+                {
+                    _handshakeWaiters.Remove(clientListKey);
+                }
+
+                // --- Handshake Step 4: Send READY to server ---
+                byte[] readyPacket = CreatePacket(ACTION_CONNECTION_READY, Array.Empty<byte>());
+                await SendDataToStreamAsync(stream, readyPacket, null, token);
+
+                lock (_handshakeLock)
+                {
+                    _pendingConnections[_tcpClient] = ConnectionState.Ready;
+                    _pendingConnections.Remove(_tcpClient);
+                }
+
+                m_IsConnected = true;
+                handshakeComplete = true;
+                Log($"✅ Handshake complete with server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
+
+                // Fire m_OnServerConnected only after handshake completes
+                await SwitchToMainThreadWithRetry();
+                m_OnServerConnected?.Invoke(m_ServerInfo);
+
+                // Continue with receive loop (it's already running)
+                await receiveLoopTask;
             }
             catch (OperationCanceledException)
             {
@@ -1342,19 +1146,30 @@ namespace Modules.Utilities
             catch (Exception ex)
             {
                 Log($"TCP connection error: {ex.GetType().Name} - {ex.Message}");
-                throw ex;
+                throw;
             }
             finally
             {
-                if (m_IsConnected)
+                // Clean up pending connections
+                lock (_handshakeLock)
+                {
+                    if (_tcpClient != null)
+                    {
+                        _pendingConnections.Remove(_tcpClient);
+                    }
+                }
+
+                // Only fire disconnect event if handshake was complete
+                if (handshakeComplete && m_IsConnected)
                 {
                     m_IsConnected = false;
-                    await UniTask.SwitchToMainThread();
+                    await SwitchToMainThreadWithRetry();
                     m_OnServerDisconnected?.Invoke(m_ServerInfo);
                 }
 
                 _tcpClient?.Close();
                 _tcpClient?.Dispose();
+                _tcpClient = null;
             }
         }
 
@@ -1364,13 +1179,14 @@ namespace Modules.Utilities
             {
                 using var udpClient = new UdpClient(m_DiscoveryPort);
 
-
-
-
-
                 Log($"Listening for server on UDP port {m_DiscoveryPort}");
 
-                var receiveResult = await udpClient.ReceiveAsync().AsUniTask().AttachExternalCancellation(token);
+                // Use ConfigureAwait(false) to avoid SynchronizationContext issues
+                var receiveResult = await udpClient.ReceiveAsync().ConfigureAwait(false);
+                
+                // Check cancellation after await
+                token.ThrowIfCancellationRequested();
+                
                 var receivedMessage = Encoding.UTF8.GetString(receiveResult.Buffer);
 
                 if (receivedMessage == m_DiscoveryMessage)
@@ -1404,7 +1220,10 @@ namespace Modules.Utilities
                 try
                 {
                     int bytesRead = await stream.ReadAsync(lengthBuffer, 0, lengthBuffer.Length, token);
-                    if (bytesRead < 4) break; // Connection closed
+                    if (bytesRead < 4)
+                    {
+                        break; // Connection closed
+                    }
 
                     int messageLength = BitConverter.ToInt32(lengthBuffer, 0);
                     if (messageLength <= 0 || messageLength > 1024 * 1024 * 10) // Max 10MB
@@ -1414,9 +1233,17 @@ namespace Modules.Utilities
                     }
 
                     // Log receive start
+                    bool isLargeReceive = messageLength > m_BufferSize * 2;
                     if (m_LogReceive)
                     {
-                        Log($"📥 Receiving data: Size={messageLength} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                        if (isLargeReceive)
+                        {
+                            Log($"📥 Receiving large data: {messageLength:N0} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                        }
+                        else
+                        {
+                            Log($"📥 Receiving data: Size={messageLength} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                        }
                     }
 
                     // Use buffer pool for large messages
@@ -1438,6 +1265,7 @@ namespace Modules.Utilities
                         int totalBytesRead = 0;
                         var lastProgressReport = System.DateTime.Now;
                         const int progressReportIntervalMs = 100; // Report progress every 100ms max
+                        int lastLoggedProgress = 0;
 
                         while (totalBytesRead < messageLength)
                         {
@@ -1454,6 +1282,19 @@ namespace Modules.Utilities
 
                             // Update progress in packet response
                             packetResponse.processedBytes = totalBytesRead;
+                            
+                            // Log progress for large transfers (every 25%)
+                            if (isLargeReceive && m_LogReceive)
+                            {
+                                float progressPercentage = (float)totalBytesRead / messageLength;
+                                int currentProgress = (int)(progressPercentage * 100);
+                                
+                                if (currentProgress >= lastLoggedProgress + 25 || totalBytesRead >= messageLength)
+                                {
+                                    lastLoggedProgress = currentProgress;
+                                    Log($"📥 Receive progress: {currentProgress}% ({totalBytesRead:N0}/{messageLength:N0} bytes)");
+                                }
+                            }
 
                             // Throttle progress reports to avoid UI spam (Optimized)
                             var nowTicks = DateTime.UtcNow.Ticks;
@@ -1488,6 +1329,60 @@ namespace Modules.Utilities
                             finalPacketResponse.totalBytes = messageLength;
                             finalPacketResponse.processedBytes = totalBytesRead;
                             finalPacketResponse.operationId = operationId;
+
+                            // --- Handle Handshake Messages (Internal Protocol) ---
+                            bool isHandshakeMessage = false;
+
+                            // Server-side: Handle ACK and READY from client
+                            if (m_IsServer && (finalPacketResponse.action == ACTION_CONNECTION_ACK || 
+                                              finalPacketResponse.action == ACTION_CONNECTION_READY))
+                            {
+                                isHandshakeMessage = true;
+                                string waitKey = finalPacketResponse.action == ACTION_CONNECTION_ACK 
+                                    ? $"ack_{connectorInfo.id}" 
+                                    : $"ready_{connectorInfo.id}";
+
+                                lock (_handshakeLock)
+                                {
+                                    if (_handshakeWaiters.TryGetValue(waitKey, out var waiter))
+                                    {
+                                        waiter.TrySetResult(finalPacketResponse);
+                                    }
+                                }
+                            }
+
+                            // Client-side: Handle HELLO and CLIENT_LIST from server
+                            if (!m_IsServer && (finalPacketResponse.action == ACTION_CONNECTION_HELLO || 
+                                               finalPacketResponse.action == ACTION_CLIENT_LIST_FULL))
+                            {
+                                isHandshakeMessage = true;
+                                string waitKey = finalPacketResponse.action == ACTION_CONNECTION_HELLO 
+                                    ? $"hello_{connectorInfo.id}" 
+                                    : $"clientlist_{connectorInfo.id}";
+
+                                lock (_handshakeLock)
+                                {
+                                    if (_handshakeWaiters.TryGetValue(waitKey, out var waiter))
+                                    {
+                                        waiter.TrySetResult(finalPacketResponse);
+                                    }
+                                }
+
+                                // For CLIENT_LIST, also process it normally for client list sync
+                                if (finalPacketResponse.action == ACTION_CLIENT_LIST_FULL)
+                                {
+                                    await ProcessClientSyncMessage(finalPacketResponse);
+                                }
+                            }
+
+                            // Skip normal processing for handshake messages
+                            if (isHandshakeMessage && finalPacketResponse.action != ACTION_CLIENT_LIST_FULL)
+                            {
+                                // Don't invoke m_OnDataReceived for handshake messages (except CLIENT_LIST which is dual-purpose)
+                                continue; // Skip to next message
+                            }
+
+                            // --- Normal Message Processing ---
 
                             // Log successful receive
                             if (m_LogReceive)
@@ -1569,15 +1464,35 @@ namespace Modules.Utilities
         /// 
         /// For servers: Sends to all connected clients.
         /// For clients: Sends to server only.
+        /// 
+        /// ⚠️ WARNING: Action numbers 65529-65535 are RESERVED for internal protocol.
+        /// Use IsValidUserAction() to check if an action number is valid, or use actions 0-65528.
         /// </summary>
-        /// <param name="action">Action identifier</param>
+        /// <param name="action">Action identifier (0-65528). Reserved actions (65529-65535) will be rejected.</param>
         /// <param name="data">Data to send</param>
         /// <param name="progress">Optional progress reporter (0.0 to 1.0)</param>
         /// <param name="token">Cancellation token</param>
         /// <returns>True if data was sent successfully, false otherwise</returns>
         public async UniTask<bool> SendDataAsync(ushort action, byte[] data, IProgress<float> progress, CancellationToken token = default)
         {
+            return await SendDataAsync(action, data, progress, token, isInternalCall: false);
+        }
+
+        /// <summary>
+        /// Internal version with validation bypass for internal protocol use
+        /// </summary>
+        private async UniTask<bool> SendDataAsync(ushort action, byte[] data, IProgress<float> progress, CancellationToken token, bool isInternalCall)
+        {
             if (!m_IsRunning) return false;
+
+            // Validate action number - reject reserved actions (only for user calls)
+            if (!isInternalCall && IsReservedAction(action))
+            {
+                var errorMsg = $"Action {action} is reserved for internal protocol. Valid range: 0-{RESERVED_ACTION_MIN - 1}";
+                Log($"❌ {errorMsg}");
+                ReportError(ErrorInfo.ErrorType.Protocol, errorMsg, null);
+                return false;
+            }
 
             // Handle null data by converting to empty byte array
             data ??= Array.Empty<byte>();
@@ -1794,18 +1709,42 @@ namespace Modules.Utilities
             // Use configured buffer size for optimal performance
             int chunkSize = Math.Min(m_BufferSize, message.Length);
             int offset = 0;
+            
+            // Log for large transfers
+            bool isLargeTransfer = message.Length > m_BufferSize * 2;
+            if (isLargeTransfer && m_LogSend)
+            {
+                Log($"📤 Sending large data: {message.Length:N0} bytes (will send in {Math.Ceiling((double)message.Length / chunkSize)} chunks)");
+            }
+
+            // Create timeout token source
+            using var timeoutCts = new CancellationTokenSource(m_SendTimeout);
+            using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(token, timeoutCts.Token);
+            
+            int lastLoggedProgress = 0;
 
             try
             {
-                while (offset < message.Length && !token.IsCancellationRequested)
+                while (offset < message.Length && !linkedCts.Token.IsCancellationRequested)
                 {
                     int bytesToSend = Math.Min(chunkSize, message.Length - offset);
-                    await stream.WriteAsync(message, offset, bytesToSend, token);
+                    await stream.WriteAsync(message, offset, bytesToSend, linkedCts.Token);
                     offset += bytesToSend;
 
                     // Report progress as percentage (0.0 to 1.0)
                     float progressPercentage = (float)offset / message.Length;
                     progress?.Report(progressPercentage);
+                    
+                    // Log progress for large transfers (every 25%)
+                    if (isLargeTransfer && m_LogSend)
+                    {
+                        int currentProgress = (int)(progressPercentage * 100);
+                        if (currentProgress >= lastLoggedProgress + 25 || offset >= message.Length)
+                        {
+                            lastLoggedProgress = currentProgress;
+                            Log($"📤 Send progress: {currentProgress}% ({offset:N0}/{message.Length:N0} bytes)");
+                        }
+                    }
 
                     // Only yield on larger messages to reduce overhead
                     if (message.Length > m_BufferSize)
@@ -1814,9 +1753,14 @@ namespace Modules.Utilities
                     }
                 }
 
-                // Ensure all data is sent
-                await stream.FlushAsync(token);
+                // Ensure all data is sent with timeout
+                await stream.FlushAsync(linkedCts.Token);
                 // Log removed for performance - was logging every successful send operation
+            }
+            catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
+            {
+                // Timeout occurred
+                throw new TimeoutException($"Send operation timed out after {m_SendTimeout}ms at offset {offset}/{message.Length}", ex);
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
                                              ex.SocketErrorCode == SocketError.ConnectionAborted ||
@@ -1852,7 +1796,24 @@ namespace Modules.Utilities
 
         public async UniTask<bool> SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
+            return await SendDataAsync(action, data, progress, token, isInternalCall: false);
+        }
+
+        /// <summary>
+        /// Internal version with validation bypass for internal protocol use
+        /// </summary>
+        private async UniTask<bool> SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token, bool isInternalCall)
+        {
             if (!m_IsRunning) return false;
+
+            // Validate action number - reject reserved actions (only for user calls)
+            if (!isInternalCall && IsReservedAction(action))
+            {
+                var errorMsg = $"Action {action} is reserved for internal protocol. Valid range: 0-{RESERVED_ACTION_MIN - 1}";
+                Log($"❌ {errorMsg}");
+                ReportError(ErrorInfo.ErrorType.Protocol, errorMsg, null);
+                return false;
+            }
 
             byte[] serializedData;
             try
@@ -1875,7 +1836,7 @@ namespace Modules.Utilities
                 return false;
             }
 
-            return await SendDataAsync(action, serializedData, progress, token);
+            return await SendDataAsync(action, serializedData, progress, token, isInternalCall);
         }
 
         /// <summary>
@@ -1899,11 +1860,20 @@ namespace Modules.Utilities
                 return false;
             }
 
+            // Validate action number - reject reserved actions
+            if (IsReservedAction(action))
+            {
+                var errorMsg = $"Action {action} is reserved for internal protocol. Valid range: 0-{RESERVED_ACTION_MIN - 1}";
+                Log($"❌ {errorMsg}");
+                ReportError(ErrorInfo.ErrorType.Protocol, errorMsg, null);
+                return false;
+            }
+
             try
             {
                 string jsonData = data == null ? "" : JsonConvert.SerializeObject(data);
                 var relayMessage = new RelayMessage(m_MyClientId, targetClientIds, action, jsonData);
-                return await SendDataAsync(ACTION_RELAY_MESSAGE, relayMessage, token);
+                return await SendDataAsync(ACTION_RELAY_MESSAGE, relayMessage, null, token, isInternalCall: true);
             }
             catch (Exception ex)
             {
@@ -1986,6 +1956,14 @@ namespace Modules.Utilities
         /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
         public async UniTask<bool> SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
+            return await SendDataToClientsAsync(action, data, targetClientIds, progress, token, isInternalCall: false);
+        }
+
+        /// <summary>
+        /// Internal version with validation bypass for internal protocol use
+        /// </summary>
+        private async UniTask<bool> SendDataToClientsAsync(ushort action, byte[] data, int[] targetClientIds, IProgress<float> progress, CancellationToken token, bool isInternalCall)
+        {
             if (!m_IsRunning) return false;
 
 
@@ -1999,6 +1977,15 @@ namespace Modules.Utilities
             if (targetClientIds == null || targetClientIds.Length == 0)
             {
                 Log("No target client IDs specified - use SendDataAsync for broadcasting to all clients");
+                return false;
+            }
+
+            // Validate action number - reject reserved actions (only for user calls)
+            if (!isInternalCall && IsReservedAction(action))
+            {
+                var errorMsg = $"Action {action} is reserved for internal protocol. Valid range: 0-{RESERVED_ACTION_MIN - 1}";
+                Log($"❌ {errorMsg}");
+                ReportError(ErrorInfo.ErrorType.Protocol, errorMsg, null);
                 return false;
             }
 
@@ -2078,6 +2065,14 @@ namespace Modules.Utilities
         /// <returns>True if data was sent successfully to at least one target client, false otherwise</returns>
         public async UniTask<bool> SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, IProgress<float> progress, CancellationToken token = default)
         {
+            return await SendDataToClientsAsync(action, data, targetClientIds, progress, token, isInternalCall: false);
+        }
+
+        /// <summary>
+        /// Internal version with validation bypass for internal protocol use
+        /// </summary>
+        private async UniTask<bool> SendDataToClientsAsync<T>(ushort action, T data, int[] targetClientIds, IProgress<float> progress, CancellationToken token, bool isInternalCall)
+        {
             if (!m_IsRunning) return false;
 
             // Only servers can target specific clients
@@ -2090,6 +2085,15 @@ namespace Modules.Utilities
             if (targetClientIds == null || targetClientIds.Length == 0)
             {
                 Log("No target client IDs specified - use SendDataAsync for broadcasting to all clients");
+                return false;
+            }
+
+            // Validate action number - reject reserved actions (only for user calls)
+            if (!isInternalCall && IsReservedAction(action))
+            {
+                var errorMsg = $"Action {action} is reserved for internal protocol. Valid range: 0-{RESERVED_ACTION_MIN - 1}";
+                Log($"❌ {errorMsg}");
+                ReportError(ErrorInfo.ErrorType.Protocol, errorMsg, null);
                 return false;
             }
 
@@ -2113,7 +2117,7 @@ namespace Modules.Utilities
                 return false;
             }
 
-            return await SendDataToClientsAsync(action, serializedData, targetClientIds, progress, token);
+            return await SendDataToClientsAsync(action, serializedData, targetClientIds, progress, token, isInternalCall);
         }
 
         /// <summary>
@@ -2144,9 +2148,50 @@ namespace Modules.Utilities
             // The length prefix is processed separately in the receive loop
             return ReadCorePacket(data, dataLength, connectorInfo);
         }
+
+        /// <summary>
+        /// Switch to main thread with retry and exponential backoff
+        /// </summary>
+        private async UniTask SwitchToMainThreadWithRetry(int maxRetries = 3)
+        {
+            int retryCount = 0;
+            while (retryCount < maxRetries)
+            {
+                try
+                {
+                    await UniTask.SwitchToMainThread();
+                    return; // Success
+                }
+                catch (Exception ex)
+                {
+                    retryCount++;
+                    if (retryCount >= maxRetries)
+                    {
+                        Log($"Failed to switch to main thread after {maxRetries} attempts: {ex.Message}");
+                        throw;
+                    }
+                    
+                    // Exponential backoff: 10ms, 20ms, 40ms
+                    int delayMs = 10 * (1 << retryCount);
+                    await UniTask.Delay(delayMs);
+                }
+            }
+        }
+
         #endregion
 
         #region Nested Classes & Enums
+
+        /// <summary>
+        /// Connection state for handshake protocol
+        /// </summary>
+        public enum ConnectionState
+        {
+            Pending,      // Initial state after TCP connection
+            HelloSent,    // HELLO message sent, waiting for ACK
+            Acknowledged, // ACK received, waiting for READY
+            Ready         // Handshake complete, connection ready for user data
+        }
 
         /// <summary>
         /// Contains connection information for a client or server.
@@ -2155,35 +2200,6 @@ namespace Modules.Utilities
         /// - For Real-time UDP: id = IPEndPoint.GetHashCode()
         /// </summary>
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; [JsonIgnore] public IPEndPoint remoteEndPoint; }
-
-        /// <summary>
-        /// Extended information for real-time clients with timeout tracking
-        /// </summary>
-        [Serializable]
-        public struct RealTimeClientInfo
-        {
-            public ConnectorInfo connectorInfo;
-            public DateTime lastSeen;
-            public bool isActive;
-
-            public RealTimeClientInfo(ConnectorInfo info)
-            {
-                connectorInfo = info;
-                lastSeen = DateTime.Now;
-                isActive = true;
-            }
-
-            public void UpdateActivity()
-            {
-                lastSeen = DateTime.Now;
-                isActive = true;
-            }
-
-            public bool IsExpired(int timeoutSeconds)
-            {
-                return (DateTime.Now - lastSeen).TotalSeconds > timeoutSeconds;
-            }
-        }
 
         [Serializable]
         public class PacketResponse
@@ -2317,7 +2333,7 @@ namespace Modules.Utilities
 
                 try
                 {
-                    await SendDataToClientsAsync(action, syncData, new[] { client.id });
+                    await SendDataToClientsAsync(action, syncData, new[] { client.id }, null, default, isInternalCall: true);
                     if (client.id == excludeClientId)
                     {
                         Log($"Sent initial full client list to new client {client.id}");
@@ -2499,7 +2515,6 @@ namespace Modules.Utilities
 
         #region Event Handlers
         public IUniTaskAsyncEnumerable<PacketResponse> OnDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnDataReceived, token);
-        public IUniTaskAsyncEnumerable<PacketResponse> OnRealTimeDataReceived(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<PacketResponse>(m_OnRealTimeDataReceived, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnClientConnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnClientConnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnClientDisconnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnClientDisconnected, token);
         public IUniTaskAsyncEnumerable<ConnectorInfo> OnServerConnected(CancellationToken token) => new UnityEventHandlerAsyncEnumerable<ConnectorInfo>(m_OnServerConnected, token);
@@ -2554,7 +2569,6 @@ namespace Modules.Utilities
         private bool eventsExpanded = false;
         private bool settingsExpanded = true;
         private bool performanceExpanded = false;
-        private bool udpExpanded = false;
 
         // Force inspector to repaint during play mode to show live status updates
         public override bool RequiresConstantRepaint()
@@ -2642,31 +2656,6 @@ namespace Modules.Utilities
 
             EditorGUILayout.EndVertical();
 
-            // --- Real-time Mode Box ---
-            EditorGUILayout.Space();
-            EditorGUILayout.BeginVertical("box");
-            EditorGUI.indentLevel++;
-
-            udpExpanded = EditorGUILayout.Foldout(udpExpanded, "Real-time Mode", true);
-
-            if (udpExpanded)
-            {
-                var enableRealTime = serializedObject.FindProperty("m_EnableRealTimeMode");
-                EditorGUILayout.PropertyField(enableRealTime);
-
-                EditorGUI.BeginDisabledGroup(!enableRealTime.boolValue);
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RealTimePort"));
-                EditorGUI.EndDisabledGroup();
-
-                if (enableRealTime.boolValue)
-                {
-                    EditorGUILayout.HelpBox("Real-time mode provides low-latency communication but packets may be lost. Recommended for frequent updates like player positions.", MessageType.Info);
-                }
-            }
-            EditorGUI.indentLevel--;
-
-            EditorGUILayout.EndVertical();
-
             EditorGUILayout.Space();
 
             // --- Status Box ---
@@ -2678,7 +2667,6 @@ namespace Modules.Utilities
                 EditorGUILayout.BeginVertical("box");
                 EditorGUILayout.LabelField("Status", EditorStyles.boldLabel);
                 EditorGUILayout.Toggle("Is Running", isRunningProp.boolValue);
-                EditorGUILayout.Toggle("Real-time Enabled", tcpConnector.IsRealTimeEnabled);
                 if (!isServer.boolValue)
                 {
                     EditorGUILayout.Toggle("Is Connected", isConnectedProp.boolValue);
@@ -2746,7 +2734,6 @@ namespace Modules.Utilities
                 if (isServer.boolValue && tcpConnector.ConnectedClientCount > 0)
                 {
                     EditorGUILayout.LabelField($"TCP Clients: {tcpConnector.ConnectedClientCount}");
-                    EditorGUILayout.LabelField($"Real-time Clients: {tcpConnector.ActiveRealTimeClientCount}");
 
                     // Show client details with individual Send buttons
                     EditorGUILayout.Space();
@@ -2776,16 +2763,6 @@ namespace Modules.Utilities
                         Debug.Log($"[TCPConnector] Broadcast message to {allClientIds.Length} clients: Action={testAction}, Message='{testMessage}'");
                     }
                     GUI.backgroundColor = Color.white;
-
-                    if (tcpConnector.ActiveRealTimeClientCount > 0)
-                    {
-                        EditorGUILayout.Space();
-                        EditorGUILayout.LabelField("Real-time Client Details:", EditorStyles.miniLabel);
-                        foreach (var client in tcpConnector.GetRealTimeClientInfoList())
-                        {
-                            EditorGUILayout.LabelField($"• Real-time {client.id}: {client.ipAddress}:{client.port}", EditorStyles.miniLabel);
-                        }
-                    }
                 }
                 EditorGUILayout.EndVertical();
 
@@ -2828,7 +2805,7 @@ namespace Modules.Utilities
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerDisconnected"));
                 }
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnDataReceived"));
-                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnRealTimeDataReceived"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientListUpdated"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnError"));
             }
             EditorGUI.indentLevel--;
