@@ -62,6 +62,68 @@ namespace Modules.Utilities
         [SerializeField, Range(0, 3000), Tooltip("Delay between retries (ms)")]
         public int m_RetryDelay = 1000;
 
+        [Header("Connection Health")]
+        [SerializeField, Tooltip("Enable heartbeat monitoring to detect dead connections")]
+        public bool m_EnableHeartbeat = true;
+        [SerializeField, Range(5000, 60000), Tooltip("Interval between heartbeat pings (milliseconds)")]
+        public int m_HeartbeatInterval = 30000; // 30 seconds
+        [SerializeField, Range(10000, 180000), Tooltip("Connection timeout if no heartbeat response (milliseconds)")]
+        public int m_HeartbeatTimeout = 90000; // 90 seconds
+
+        [Header("Auto Reconnection (Client Mode)")]
+        [SerializeField, Tooltip("Enable automatic reconnection when connection is lost (client mode only)")]
+        public bool m_EnableAutoReconnect = true;
+        [SerializeField, Range(1, 20), Tooltip("Maximum reconnection attempts (0 = infinite)")]
+        public int m_ReconnectMaxAttempts = 5;
+        [SerializeField, Tooltip("Reconnection delay pattern in milliseconds (exponential backoff)")]
+        public int[] m_ReconnectDelays = new int[] { 1000, 2000, 5000, 10000, 30000 }; // 1s, 2s, 5s, 10s, 30s
+
+        [Header("Security (Encryption)")]
+        [SerializeField, Tooltip("Enable AES-256 encryption for all data transmission")]
+        public bool m_EnableEncryption = false;
+        [SerializeField, Tooltip("Pre-shared encryption key (32 bytes for AES-256). Leave empty for auto-generation.")]
+        public string m_EncryptionKey = ""; // Hex string or base64
+
+        [Header("Security (Authentication)")]
+        [SerializeField, Tooltip("Enable authentication (server validates connecting clients)")]
+        public bool m_EnableAuthentication = false;
+        [SerializeField, Tooltip("Server authentication password (clients must provide this to connect)")]
+        public string m_AuthPassword = "";
+        [SerializeField, Range(3000, 30000), Tooltip("Authentication timeout in milliseconds")]
+        public int m_AuthTimeout = 10000; // 10 seconds
+
+        [Header("Connection Metrics")]
+        [SerializeField, Tooltip("Enable connection metrics tracking (bandwidth, messages, uptime)")]
+        public bool m_EnableMetrics = true;
+        [SerializeField, Range(1000, 60000), Tooltip("Interval for metrics reporting events (milliseconds)")]
+        public int m_MetricsReportInterval = 5000; // 5 seconds
+
+        [Header("Rate Limiting")]
+        [SerializeField, Tooltip("Enable rate limiting to prevent message spam (server-side)")]
+        public bool m_EnableRateLimit = true;
+        [SerializeField, Range(1, 1000), Tooltip("Maximum messages per second per client")]
+        public int m_RateLimit = 100; // messages per second
+        [SerializeField, Range(1, 500), Tooltip("Burst size (max messages in single burst)")]
+        public int m_BurstSize = 50; // allow short bursts
+
+        [Header("Message Priority Queues")]
+        [SerializeField, Tooltip("Enable priority-based message queuing (high priority messages sent first)")]
+        public bool m_EnablePriorityQueue = false;
+        [SerializeField, Range(10, 1000), Tooltip("Maximum messages in queue per priority level")]
+        public int m_QueueMaxSize = 100;
+
+        [Header("Graceful Shutdown")]
+        [SerializeField, Tooltip("Enable graceful shutdown (notify connections before closing)")]
+        public bool m_EnableGracefulShutdown = true;
+        [SerializeField, Range(1000, 10000), Tooltip("Maximum time to wait for shutdown completion (milliseconds)")]
+        public int m_ShutdownTimeout = 3000; // 3 seconds
+
+        [Header("Protocol Version Checking")]
+        [SerializeField, Tooltip("Enable protocol version checking (reject incompatible versions)")]
+        public bool m_EnableVersionCheck = true;
+        [SerializeField, Tooltip("Protocol version (Major.Minor format, e.g., 2.5)")]
+        public string m_ProtocolVersion = "2.5";
+
         [Header("Auto Discovery (UDP Broadcast)")]
         [SerializeField, Tooltip("Enable automatic server discovery via UDP broadcast")]
         public bool m_EnableDiscovery = true;
@@ -101,6 +163,14 @@ namespace Modules.Utilities
         [SerializeField] public UnityEvent<PacketResponse> m_OnDataReceived = new UnityEvent<PacketResponse>();
         [SerializeField] public UnityEvent<ErrorInfo> m_OnError = new UnityEvent<ErrorInfo>();
         [SerializeField] public UnityEvent<List<ConnectorInfo>> m_OnClientListUpdated = new UnityEvent<List<ConnectorInfo>>();
+        [SerializeField] public UnityEvent<int> m_OnReconnecting = new UnityEvent<int>(); // Parameter: attempt number
+        [SerializeField] public UnityEvent<ConnectorInfo> m_OnReconnected = new UnityEvent<ConnectorInfo>();
+        [SerializeField] public UnityEvent m_OnReconnectFailed = new UnityEvent(); // All attempts exhausted
+        [SerializeField] public UnityEvent<ConnectorInfo> m_OnAuthSuccess = new UnityEvent<ConnectorInfo>(); // Authentication succeeded
+        [SerializeField] public UnityEvent<ConnectorInfo, string> m_OnAuthFailed = new UnityEvent<ConnectorInfo, string>(); // Authentication failed (client, reason)
+        [SerializeField] public UnityEvent<ConnectionMetrics> m_OnMetricsUpdated = new UnityEvent<ConnectionMetrics>(); // Periodic metrics report
+        [SerializeField] public UnityEvent<ConnectorInfo, int> m_OnRateLimitExceeded = new UnityEvent<ConnectorInfo, int>(); // (client, message count)
+        [SerializeField] public UnityEvent<ConnectorInfo, string, string> m_OnVersionMismatch = new UnityEvent<ConnectorInfo, string, string>(); // (connector, localVersion, remoteVersion)
 
         private CancellationTokenSource _cts;
 
@@ -122,10 +192,10 @@ namespace Modules.Utilities
         private const int PACKET_HEADER_SIZE = 6; // 4-messageId, 2-action
 
         // --- Reserved Action Numbers ---
-        // ⚠️ WARNING: Actions 65529-65535 are RESERVED for internal protocol use.
+        // ⚠️ WARNING: Actions 65525-65535 are RESERVED for internal protocol use.
         // User applications MUST NOT use these action numbers.
-        // Valid user action range: 0-65528 or 0x0000-0xFFFE.
-        private const ushort RESERVED_ACTION_MIN = 65529; 
+        // Valid user action range: 0-65522 or 0x0000-0xFFF2.
+        private const ushort RESERVED_ACTION_MIN = 65523; 
         private const ushort RESERVED_ACTION_MAX = 65535; 
 
         // --- Handshake Protocol ---
@@ -140,10 +210,60 @@ namespace Modules.Utilities
         private const ushort ACTION_CLIENT_LEFT = 65532;
         private const ushort ACTION_RELAY_MESSAGE = 65529; // Client-to-client relay via server
 
+        // --- Heartbeat Protocol ---
+        private const ushort ACTION_HEARTBEAT_PING = 65528;
+        private const ushort ACTION_HEARTBEAT_PONG = 65527;
+
+        // --- Authentication Protocol ---
+        private const ushort ACTION_AUTH_REQUEST = 65526; // Server → Client: Request authentication
+        private const ushort ACTION_AUTH_RESPONSE = 65525; // Client → Server: Send credentials
+
+        // --- Graceful Disconnect Protocol ---
+        private const ushort ACTION_DISCONNECT_NOTIFICATION = 65524; // Graceful disconnect notification
+
+        // --- Protocol Version Checking ---
+        private const ushort ACTION_VERSION_REQUEST = 65523; // Server → Client: Request protocol version
+        private const ushort ACTION_VERSION_RESPONSE = 65522; // Client → Server: Send protocol version
+
         // --- Client List Tracking ---
         private List<ConnectorInfo> m_SyncedClientList = new List<ConnectorInfo>();
         private readonly object _syncedClientListLock = new object();
         private int m_MyClientId = -1; // Client's own server-assigned ID (received from server sync)
+
+        // --- Client ID Generation ---
+        private static int _nextClientId = 0; // Thread-safe sequential ID counter
+
+        // --- Connection Health Tracking ---
+        private readonly Dictionary<TcpClient, long> _lastHeartbeatTicks = new Dictionary<TcpClient, long>();
+        private readonly object _heartbeatLock = new object();
+        private long _lastServerHeartbeatTicks = 0; // Client-side: track server heartbeat
+
+        // --- Reconnection Tracking ---
+        private int _reconnectAttempts = 0;
+        private bool _isReconnecting = false;
+
+        // --- Encryption ---
+        private byte[] _encryptionKeyBytes;
+        private System.Security.Cryptography.Aes _aesProvider;
+        private readonly object _encryptionLock = new object();
+
+        // --- Authentication ---
+        private string _authPasswordHash; // SHA256 hash of password
+        private readonly Dictionary<TcpClient, bool> _authenticatedClients = new Dictionary<TcpClient, bool>();
+
+        // --- Connection Metrics ---
+        private readonly Dictionary<TcpClient, ConnectionMetrics> _clientMetrics = new Dictionary<TcpClient, ConnectionMetrics>();
+        private ConnectionMetrics _serverMetrics; // Client mode: tracks connection to server
+        private readonly object _metricsLock = new object();
+
+        // --- Rate Limiting ---
+        private readonly Dictionary<TcpClient, TokenBucket> _rateLimiters = new Dictionary<TcpClient, TokenBucket>();
+        private readonly object _rateLimitLock = new object();
+
+        // --- Priority Message Queues ---
+        private readonly Dictionary<MessagePriority, Queue<QueuedMessage>> _sendQueue = new Dictionary<MessagePriority, Queue<QueuedMessage>>();
+        private readonly object _queueLock = new object();
+        private bool _isProcessingQueue = false;
 
         #endregion
 
@@ -151,10 +271,10 @@ namespace Modules.Utilities
         
         /// <summary>
         /// Maximum action number that can be used by user applications.
-        /// Actions 0-65528 are available for user use.
-        /// Actions 65529-65535 are reserved for internal protocol.
+        /// Actions 0-65522 are available for user use.
+        /// Actions 65523-65535 are reserved for internal protocol.
         /// </summary>
-        public const ushort MaxUserAction = 65528;
+        public const ushort MaxUserAction = 65522;
         
         public bool IsConnected => m_IsConnected;
         public bool IsRunning => m_IsRunning;
@@ -169,6 +289,62 @@ namespace Modules.Utilities
         public static bool IsValidUserAction(ushort action)
         {
             return action <= MaxUserAction;
+        }
+
+        /// <summary>
+        /// Gets connection metrics for a specific client (server mode) or server connection (client mode).
+        /// Returns null if metrics are disabled or client not found.
+        /// </summary>
+        public ConnectionMetrics GetConnectionMetrics(int clientId = -1)
+        {
+            if (!m_EnableMetrics) return null;
+
+            lock (_metricsLock)
+            {
+                if (m_IsServer)
+                {
+                    // Server mode: find client by ID
+                    foreach (var kvp in _clientMetrics)
+                    {
+                        if (kvp.Value.ClientId == clientId)
+                        {
+                            kvp.Value.UpdateRates();
+                            return kvp.Value;
+                        }
+                    }
+                    return null;
+                }
+                else
+                {
+                    // Client mode: return server connection metrics
+                    if (_serverMetrics != null)
+                    {
+                        _serverMetrics.UpdateRates();
+                        return _serverMetrics;
+                    }
+                    return null;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Gets all connection metrics (server mode only).
+        /// Returns empty list if metrics are disabled or in client mode.
+        /// </summary>
+        public List<ConnectionMetrics> GetAllConnectionMetrics()
+        {
+            if (!m_EnableMetrics || !m_IsServer) return new List<ConnectionMetrics>();
+
+            lock (_metricsLock)
+            {
+                var result = new List<ConnectionMetrics>(_clientMetrics.Count);
+                foreach (var metrics in _clientMetrics.Values)
+                {
+                    metrics.UpdateRates();
+                    result.Add(metrics);
+                }
+                return result;
+            }
         }
 
 
@@ -263,6 +439,24 @@ namespace Modules.Utilities
         {
             // Cache the name on the main thread for thread-safe logging
             _cachedName = name;
+
+            // Initialize encryption if enabled
+            if (m_EnableEncryption)
+            {
+                InitializeEncryption();
+            }
+
+            // Initialize authentication if enabled
+            if (m_EnableAuthentication)
+            {
+                InitializeAuthentication();
+            }
+
+            // Initialize priority queues if enabled
+            if (m_EnablePriorityQueue)
+            {
+                InitializePriorityQueues();
+            }
         }
 
         private void OnEnable()
@@ -274,6 +468,13 @@ namespace Modules.Utilities
         private void OnDisable()
         {
             StopConnection();
+
+            // Dispose encryption provider
+            lock (_encryptionLock)
+            {
+                _aesProvider?.Dispose();
+                _aesProvider = null;
+            }
         }
 
 
@@ -343,6 +544,83 @@ namespace Modules.Utilities
         {
             Log("Stopping connection...");
             m_IsRunning = false;
+
+            // --- Graceful Shutdown: Send disconnect notification ---
+            if (m_EnableGracefulShutdown)
+            {
+                try
+                {
+                    byte[] disconnectPacket = CreatePacket(ACTION_DISCONNECT_NOTIFICATION, Array.Empty<byte>());
+                    
+                    if (m_IsServer)
+                    {
+                        // Server: Notify all connected clients
+                        Log($"📢 Sending graceful disconnect notification to {m_Clients.Count} client(s)...");
+                        lock (m_Clients)
+                        {
+                            var clientsArray = new TcpClient[m_Clients.Count];
+                            m_Clients.Keys.CopyTo(clientsArray, 0);
+
+                            foreach (var client in clientsArray)
+                            {
+                                try
+                                {
+                                    if (client?.Connected == true)
+                                    {
+                                        var stream = client.GetStream();
+                                        stream.Write(disconnectPacket, 0, disconnectPacket.Length);
+                                        stream.Flush();
+                                    }
+                                }
+                                catch (Exception ex)
+                                {
+                                    Log($"⚠️ Failed to send disconnect notification to client: {ex.Message}");
+                                }
+                            }
+                        }
+                    }
+                    else
+                    {
+                        // Client: Notify server
+                        if (_tcpClient?.Connected == true)
+                        {
+                            Log("📢 Sending graceful disconnect notification to server...");
+                            try
+                            {
+                                var stream = _tcpClient.GetStream();
+                                stream.Write(disconnectPacket, 0, disconnectPacket.Length);
+                                stream.Flush();
+                            }
+                            catch (Exception ex)
+                            {
+                                Log($"⚠️ Failed to send disconnect notification to server: {ex.Message}");
+                            }
+                        }
+                    }
+
+                    // Wait for a short period to allow notification delivery
+                    System.Threading.Thread.Sleep(Math.Min(m_ShutdownTimeout, 500)); // Cap at 500ms for safety
+                    Log("✅ Graceful disconnect notification sent");
+                }
+                catch (Exception ex)
+                {
+                    Log($"⚠️ Error during graceful shutdown: {ex.Message}");
+                }
+            }
+
+            // --- Clear Priority Queues ---
+            if (m_EnablePriorityQueue)
+            {
+                lock (_queueLock)
+                {
+                    foreach (var queue in _sendQueue.Values)
+                    {
+                        queue.Clear();
+                    }
+                    _isProcessingQueue = false;
+                }
+                Log("🧹 Priority queues cleared");
+            }
 
             _cts?.Cancel();
 
@@ -505,7 +783,7 @@ namespace Modules.Utilities
             var clientEndPoint = (IPEndPoint)client.Client.RemoteEndPoint;
             var clientInfo = new ConnectorInfo
             {
-                id = client.GetHashCode(),
+                id = System.Threading.Interlocked.Increment(ref _nextClientId),
                 ipAddress = clientEndPoint.Address.ToString(),
                 port = clientEndPoint.Port,
                 remoteEndPoint = clientEndPoint
@@ -578,6 +856,134 @@ namespace Modules.Utilities
                     _pendingConnections[client] = ConnectionState.Acknowledged;
                 }
 
+                // --- Protocol Version Check (if enabled): Request and validate version ---
+                if (m_EnableVersionCheck)
+                {
+                    // Send VERSION_REQUEST
+                    byte[] versionRequestPacket = CreatePacket(ACTION_VERSION_REQUEST, Array.Empty<byte>());
+                    await SendDataToStreamAsync(stream, versionRequestPacket, null, token);
+
+                    // Wait for VERSION_RESPONSE
+                    string versionKey = $"version_{clientInfo.id}";
+                    UniTaskCompletionSource<PacketResponse> versionWaiter;
+                    lock (_handshakeLock)
+                    {
+                        versionWaiter = new UniTaskCompletionSource<PacketResponse>();
+                        _handshakeWaiters[versionKey] = versionWaiter;
+                    }
+
+                    using (var versionTimeoutCts = new CancellationTokenSource(5000)) // 5s timeout for version check
+                    using (var linkedVersionCts = CancellationTokenSource.CreateLinkedTokenSource(token, versionTimeoutCts.Token))
+                    {
+                        try
+                        {
+                            var versionResponse = await versionWaiter.Task.AttachExternalCancellation(linkedVersionCts.Token);
+                            
+                            // Parse client's protocol version
+                            string clientVersion = System.Text.Encoding.UTF8.GetString(versionResponse.data).Trim();
+                            
+                            // Validate version compatibility (simple string comparison for now)
+                            if (clientVersion != m_ProtocolVersion)
+                            {
+                                Log($"❌ Protocol version mismatch: Server={m_ProtocolVersion}, Client={clientVersion}");
+                                lock (m_Clients) { m_Clients.Remove(client); }
+                                await SwitchToMainThreadWithRetry();
+                                m_OnVersionMismatch?.Invoke(clientInfo, m_ProtocolVersion, clientVersion);
+                                return;
+                            }
+
+                            Log($"✅ Protocol version validated: {clientVersion}");
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            lock (_handshakeLock)
+                            {
+                                _handshakeWaiters.Remove(versionKey);
+                            }
+
+                            if (versionTimeoutCts.IsCancellationRequested)
+                            {
+                                Log($"❌ Version check timeout: Client {clientInfo.ipAddress} did not respond");
+                                lock (m_Clients) { m_Clients.Remove(client); }
+                                return;
+                            }
+                            throw;
+                        }
+                    }
+
+                    lock (_handshakeLock)
+                    {
+                        _handshakeWaiters.Remove(versionKey);
+                    }
+                }
+
+                // --- Authentication Step (if enabled): Request and validate credentials ---
+                if (m_EnableAuthentication)
+                {
+                    // Send AUTH_REQUEST
+                    byte[] authRequestPacket = CreatePacket(ACTION_AUTH_REQUEST, Array.Empty<byte>());
+                    await SendDataToStreamAsync(stream, authRequestPacket, null, token);
+
+                    // Wait for AUTH_RESPONSE
+                    string authKey = $"auth_{clientInfo.id}";
+                    UniTaskCompletionSource<PacketResponse> authWaiter;
+                    lock (_handshakeLock)
+                    {
+                        authWaiter = new UniTaskCompletionSource<PacketResponse>();
+                        _handshakeWaiters[authKey] = authWaiter;
+                    }
+
+                    using (var authTimeoutCts = new CancellationTokenSource(m_AuthTimeout))
+                    using (var linkedAuthCts = CancellationTokenSource.CreateLinkedTokenSource(token, authTimeoutCts.Token))
+                    {
+                        try
+                        {
+                            var authResponse = await authWaiter.Task.AttachExternalCancellation(linkedAuthCts.Token);
+                            
+                            // Validate password
+                            string providedPassword = System.Text.Encoding.UTF8.GetString(authResponse.data);
+                            bool isValid = ValidateAuthentication(providedPassword);
+
+                            if (!isValid)
+                            {
+                                Log($"❌ Authentication failed for {clientInfo.ipAddress}:{clientInfo.port} (invalid credentials)");
+                                lock (m_Clients) { m_Clients.Remove(client); }
+                                await SwitchToMainThreadWithRetry();
+                                m_OnAuthFailed?.Invoke(clientInfo, "Invalid credentials");
+                                return;
+                            }
+
+                            // Mark as authenticated
+                            _authenticatedClients[client] = true;
+                            Log($"✅ Client authenticated: {clientInfo.ipAddress}:{clientInfo.port}");
+                            await SwitchToMainThreadWithRetry();
+                            m_OnAuthSuccess?.Invoke(clientInfo);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            lock (_handshakeLock)
+                            {
+                                _handshakeWaiters.Remove(authKey);
+                            }
+
+                            if (authTimeoutCts.IsCancellationRequested)
+                            {
+                                Log($"❌ Authentication timeout: Client {clientInfo.ipAddress} did not respond");
+                                lock (m_Clients) { m_Clients.Remove(client); }
+                                await SwitchToMainThreadWithRetry();
+                                m_OnAuthFailed?.Invoke(clientInfo, "Timeout");
+                                return;
+                            }
+                            throw;
+                        }
+                    }
+
+                    lock (_handshakeLock)
+                    {
+                        _handshakeWaiters.Remove(authKey);
+                    }
+                }
+
                 // --- Handshake Step 3: Send client list sync ---
                 // Temporarily add to m_Clients for BroadcastClientListSync
                 lock (m_Clients) { m_Clients[client] = clientInfo; }
@@ -630,12 +1036,33 @@ namespace Modules.Utilities
                 handshakeComplete = true;
                 Log($"✅ Handshake complete: {clientInfo.ipAddress}:{clientInfo.port}");
 
+                // Initialize metrics tracking
+                if (m_EnableMetrics)
+                {
+                    lock (_metricsLock)
+                    {
+                        _clientMetrics[client] = new ConnectionMetrics(clientInfo.id);
+                    }
+                }
+
+                // Initialize rate limiter
+                if (m_EnableRateLimit)
+                {
+                    lock (_rateLimitLock)
+                    {
+                        _rateLimiters[client] = new TokenBucket(m_BurstSize, m_RateLimit);
+                    }
+                }
+
                 // Fire m_OnClientConnected only after handshake completes
                 await SwitchToMainThreadWithRetry();
                 m_OnClientConnected?.Invoke(clientInfo);
 
-                // Start receive loop
-                await ReceiveDataLoopAsync(stream, clientInfo, token);
+                // Start receive loop, heartbeat loop, and metrics loop concurrently
+                var receiveTask = ReceiveDataLoopAsync(stream, clientInfo, token);
+                var heartbeatTask = HeartbeatLoopAsync(client, stream, clientInfo, token);
+                var metricsTask = m_EnableMetrics ? MetricsReportLoopAsync(client, clientInfo, token) : UniTask.CompletedTask;
+                await UniTask.WhenAll(receiveTask, heartbeatTask, metricsTask);
             }
             catch (OperationCanceledException)
             {
@@ -674,6 +1101,36 @@ namespace Modules.Utilities
                 lock (m_Clients)
                 {
                     m_Clients.Remove(client);
+                }
+
+                // Clean up metrics
+                if (m_EnableMetrics)
+                {
+                    lock (_metricsLock)
+                    {
+                        _clientMetrics.Remove(client);
+                    }
+                }
+
+                // Clean up heartbeat tracking
+                lock (_heartbeatLock)
+                {
+                    _lastHeartbeatTicks.Remove(client);
+                }
+
+                // Clean up authentication tracking
+                if (m_EnableAuthentication)
+                {
+                    _authenticatedClients.Remove(client);
+                }
+
+                // Clean up rate limiter
+                if (m_EnableRateLimit)
+                {
+                    lock (_rateLimitLock)
+                    {
+                        _rateLimiters.Remove(client);
+                    }
                 }
 
                 client.Close();
@@ -842,6 +1299,505 @@ namespace Modules.Utilities
             }
         }
 
+        /// <summary>
+        /// Sends periodic heartbeat pings to detect dead connections (Server-side)
+        /// </summary>
+        private async UniTask HeartbeatLoopAsync(TcpClient client, NetworkStream stream, ConnectorInfo clientInfo, CancellationToken token)
+        {
+            if (!m_EnableHeartbeat) return;
+
+            try
+            {
+                // Initialize heartbeat timestamp
+                lock (_heartbeatLock)
+                {
+                    _lastHeartbeatTicks[client] = DateTime.UtcNow.Ticks;
+                }
+
+                while (!token.IsCancellationRequested && client.Connected && stream.CanWrite)
+                {
+                    await UniTask.Delay(m_HeartbeatInterval, cancellationToken: token);
+
+                    // Check if connection is still alive
+                    lock (_heartbeatLock)
+                    {
+                        if (!_lastHeartbeatTicks.ContainsKey(client)) break;
+
+                        long lastHeartbeat = _lastHeartbeatTicks[client];
+                        long elapsedTicks = DateTime.UtcNow.Ticks - lastHeartbeat;
+                        long elapsedMs = elapsedTicks / TimeSpan.TicksPerMillisecond;
+
+                        if (elapsedMs > m_HeartbeatTimeout)
+                        {
+                            Log($"⚠️ Heartbeat timeout: {clientInfo.ipAddress}:{clientInfo.port} (last: {elapsedMs}ms ago)");
+                            break;
+                        }
+                    }
+
+                    // Send heartbeat ping
+                    byte[] pingPacket = CreatePacket(ACTION_HEARTBEAT_PING, Array.Empty<byte>());
+                    await SendDataToStreamAsync(stream, pingPacket, null, token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Silent cancellation
+            }
+            catch (Exception ex)
+            {
+                Log($"Heartbeat error for {clientInfo.ipAddress}:{clientInfo.port}: {ex.Message}");
+            }
+            finally
+            {
+                // Cleanup
+                lock (_heartbeatLock)
+                {
+                    _lastHeartbeatTicks.Remove(client);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Sends periodic heartbeat pings to server (Client-side)
+        /// </summary>
+        private async UniTask ClientHeartbeatLoopAsync(NetworkStream stream, CancellationToken token)
+        {
+            if (!m_EnableHeartbeat) return;
+
+            try
+            {
+                _lastServerHeartbeatTicks = DateTime.UtcNow.Ticks;
+
+                while (!token.IsCancellationRequested && stream.CanWrite)
+                {
+                    await UniTask.Delay(m_HeartbeatInterval, cancellationToken: token);
+
+                    // Check server timeout
+                    long elapsedTicks = DateTime.UtcNow.Ticks - _lastServerHeartbeatTicks;
+                    long elapsedMs = elapsedTicks / TimeSpan.TicksPerMillisecond;
+
+                    if (elapsedMs > m_HeartbeatTimeout)
+                    {
+                        Log($"⚠️ Server heartbeat timeout (last: {elapsedMs}ms ago)");
+                        break;
+                    }
+
+                    // Send heartbeat ping
+                    byte[] pingPacket = CreatePacket(ACTION_HEARTBEAT_PING, Array.Empty<byte>());
+                    await SendDataToStreamAsync(stream, pingPacket, null, token);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Silent cancellation
+            }
+            catch (Exception ex)
+            {
+                Log($"Client heartbeat error: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Connection Metrics
+
+        /// <summary>
+        /// Periodically reports connection metrics (Server-side per-client)
+        /// </summary>
+        private async UniTask MetricsReportLoopAsync(TcpClient client, ConnectorInfo clientInfo, CancellationToken token)
+        {
+            if (!m_EnableMetrics) return;
+
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await UniTask.Delay(m_MetricsReportInterval, cancellationToken: token);
+
+                    ConnectionMetrics metrics;
+                    lock (_metricsLock)
+                    {
+                        if (!_clientMetrics.TryGetValue(client, out metrics))
+                        {
+                            break; // Client disconnected
+                        }
+                        metrics.UpdateRates();
+                    }
+
+                    // Fire metrics event on main thread
+                    await SwitchToMainThreadWithRetry();
+                    m_OnMetricsUpdated?.Invoke(metrics);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Silent cancellation
+            }
+            catch (Exception ex)
+            {
+                Log($"Metrics report error for {clientInfo.ipAddress}:{clientInfo.port}: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Periodically reports server connection metrics (Client-side)
+        /// </summary>
+        private async UniTask ClientMetricsReportLoopAsync(CancellationToken token)
+        {
+            if (!m_EnableMetrics) return;
+
+            try
+            {
+                while (!token.IsCancellationRequested)
+                {
+                    await UniTask.Delay(m_MetricsReportInterval, cancellationToken: token);
+
+                    ConnectionMetrics metrics;
+                    lock (_metricsLock)
+                    {
+                        if (_serverMetrics == null)
+                        {
+                            break; // Disconnected
+                        }
+                        _serverMetrics.UpdateRates();
+                        metrics = _serverMetrics;
+                    }
+
+                    // Fire metrics event on main thread
+                    await SwitchToMainThreadWithRetry();
+                    m_OnMetricsUpdated?.Invoke(metrics);
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                // Silent cancellation
+            }
+            catch (Exception ex)
+            {
+                Log($"Client metrics report error: {ex.Message}");
+            }
+        }
+
+        #endregion
+
+        #region Encryption Methods
+
+        /// <summary>
+        /// Initializes AES encryption provider with key
+        /// </summary>
+        private void InitializeEncryption()
+        {
+            lock (_encryptionLock)
+            {
+                try
+                {
+                    // Dispose existing provider
+                    _aesProvider?.Dispose();
+
+                    // Create AES provider
+                    _aesProvider = System.Security.Cryptography.Aes.Create();
+                    _aesProvider.Mode = System.Security.Cryptography.CipherMode.CBC;
+                    _aesProvider.Padding = System.Security.Cryptography.PaddingMode.PKCS7;
+                    _aesProvider.KeySize = 256; // AES-256
+
+                    // Parse or generate key
+                    if (!string.IsNullOrEmpty(m_EncryptionKey))
+                    {
+                        // Try to parse as hex or base64
+                        try
+                        {
+                            // Try hex first
+                            _encryptionKeyBytes = HexStringToBytes(m_EncryptionKey);
+                        }
+                        catch
+                        {
+                            // Try base64
+                            _encryptionKeyBytes = System.Convert.FromBase64String(m_EncryptionKey);
+                        }
+
+                        if (_encryptionKeyBytes.Length != 32)
+                        {
+                            Log($"❌ Encryption key must be 32 bytes (256 bits). Got {_encryptionKeyBytes.Length} bytes. Generating random key.");
+                            _encryptionKeyBytes = null;
+                        }
+                    }
+
+                    // Generate random key if not provided or invalid
+                    if (_encryptionKeyBytes == null)
+                    {
+                        _aesProvider.GenerateKey();
+                        _encryptionKeyBytes = _aesProvider.Key;
+                        Log($"⚠️ Generated random encryption key: {BytesToHexString(_encryptionKeyBytes)}");
+                        Log($"⚠️ WARNING: Save this key! Clients must use the same key to connect.");
+                    }
+
+                    _aesProvider.Key = _encryptionKeyBytes;
+
+                    Log("✅ Encryption initialized (AES-256-CBC)");
+                }
+                catch (Exception ex)
+                {
+                    Log($"❌ Failed to initialize encryption: {ex.Message}");
+                    m_EnableEncryption = false;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Encrypts data using AES
+        /// </summary>
+        private byte[] EncryptData(byte[] data)
+        {
+            if (!m_EnableEncryption || _aesProvider == null) return data;
+
+            lock (_encryptionLock)
+            {
+                try
+                {
+                    // Generate random IV for each message
+                    _aesProvider.GenerateIV();
+                    var iv = _aesProvider.IV;
+
+                    // Encrypt data
+                    using (var encryptor = _aesProvider.CreateEncryptor())
+                    using (var ms = new System.IO.MemoryStream())
+                    {
+                        // Write IV at the beginning (16 bytes for AES)
+                        ms.Write(iv, 0, iv.Length);
+
+                        // Write encrypted data
+                        using (var cs = new System.Security.Cryptography.CryptoStream(ms, encryptor, System.Security.Cryptography.CryptoStreamMode.Write))
+                        {
+                            cs.Write(data, 0, data.Length);
+                            cs.FlushFinalBlock();
+                        }
+
+                        return ms.ToArray();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"❌ Encryption failed: {ex.Message}");
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Decrypts data using AES
+        /// </summary>
+        private byte[] DecryptData(byte[] encryptedData)
+        {
+            if (!m_EnableEncryption || _aesProvider == null) return encryptedData;
+
+            lock (_encryptionLock)
+            {
+                try
+                {
+                    // Extract IV from the beginning (16 bytes)
+                    var iv = new byte[16];
+                    System.Buffer.BlockCopy(encryptedData, 0, iv, 0, 16);
+
+                    // Decrypt data
+                    using (var decryptor = _aesProvider.CreateDecryptor(_encryptionKeyBytes, iv))
+                    using (var ms = new System.IO.MemoryStream(encryptedData, 16, encryptedData.Length - 16))
+                    using (var cs = new System.Security.Cryptography.CryptoStream(ms, decryptor, System.Security.Cryptography.CryptoStreamMode.Read))
+                    using (var result = new System.IO.MemoryStream())
+                    {
+                        cs.CopyTo(result);
+                        return result.ToArray();
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Log($"❌ Decryption failed: {ex.Message}");
+                    throw;
+                }
+            }
+        }
+
+        /// <summary>
+        /// Converts hex string to byte array
+        /// </summary>
+        private byte[] HexStringToBytes(string hex)
+        {
+            hex = hex.Replace(" ", "").Replace("-", "");
+            byte[] bytes = new byte[hex.Length / 2];
+            for (int i = 0; i < bytes.Length; i++)
+            {
+                bytes[i] = System.Convert.ToByte(hex.Substring(i * 2, 2), 16);
+            }
+            return bytes;
+        }
+
+        /// <summary>
+        /// Converts byte array to hex string
+        /// </summary>
+        private string BytesToHexString(byte[] bytes)
+        {
+            return BitConverter.ToString(bytes).Replace("-", "");
+        }
+
+        #endregion
+
+        #region Authentication Methods
+
+        /// <summary>
+        /// Initializes authentication system with password hashing
+        /// </summary>
+        private void InitializeAuthentication()
+        {
+            if (string.IsNullOrEmpty(m_AuthPassword))
+            {
+                Log("⚠️ Authentication enabled but no password set. Access will be denied to all clients.");
+                _authPasswordHash = "";
+                return;
+            }
+
+            // Hash password using SHA256
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+            {
+                var passwordBytes = System.Text.Encoding.UTF8.GetBytes(m_AuthPassword);
+                var hashBytes = sha256.ComputeHash(passwordBytes);
+                _authPasswordHash = BytesToHexString(hashBytes);
+            }
+
+            Log("✅ Authentication initialized (SHA256)");
+        }
+
+        /// <summary>
+        /// Validates authentication credentials
+        /// </summary>
+        private bool ValidateAuthentication(string providedPassword)
+        {
+            if (string.IsNullOrEmpty(_authPasswordHash))
+            {
+                return false; // No password set
+            }
+
+            // Hash provided password
+            using (var sha256 = System.Security.Cryptography.SHA256.Create())
+            {
+                var passwordBytes = System.Text.Encoding.UTF8.GetBytes(providedPassword);
+                var hashBytes = sha256.ComputeHash(passwordBytes);
+                var providedHash = BytesToHexString(hashBytes);
+                
+                return providedHash == _authPasswordHash;
+            }
+        }
+
+        #endregion
+
+        #region Priority Queue Methods
+
+        /// <summary>
+        /// Initializes priority queues for all priority levels
+        /// </summary>
+        private void InitializePriorityQueues()
+        {
+            lock (_queueLock)
+            {
+                _sendQueue.Clear();
+                foreach (MessagePriority priority in System.Enum.GetValues(typeof(MessagePriority)))
+                {
+                    _sendQueue[priority] = new Queue<QueuedMessage>();
+                }
+            }
+            Log("✅ Priority queues initialized");
+        }
+
+        /// <summary>
+        /// Enqueues a message with specified priority
+        /// </summary>
+        private async UniTask<bool> EnqueueMessage(ushort action, byte[] data, MessagePriority priority, int[] targetClientIds, IProgress<float> progress, CancellationToken token)
+        {
+            if (!m_EnablePriorityQueue)
+            {
+                // Direct send if priority queue disabled
+                return await SendDataAsync(action, data, progress, token, isInternalCall: false);
+            }
+
+            UniTaskCompletionSource<bool> completionSource;
+
+            lock (_queueLock)
+            {
+                if (_sendQueue[priority].Count >= m_QueueMaxSize)
+                {
+                    Log($"⚠️ Message queue full for priority {priority} (max: {m_QueueMaxSize})");
+                    return false;
+                }
+
+                var queuedMessage = new QueuedMessage
+                {
+                    Action = action,
+                    Data = data,
+                    TargetClientIds = targetClientIds,
+                    Progress = progress,
+                    Token = token,
+                    CompletionSource = new UniTaskCompletionSource<bool>()
+                };
+
+                completionSource = queuedMessage.CompletionSource;
+                _sendQueue[priority].Enqueue(queuedMessage);
+
+                // Start queue processor if not already running
+                if (!_isProcessingQueue)
+                {
+                    _isProcessingQueue = true;
+                    ProcessMessageQueue(_cts.Token).Forget();
+                }
+            }
+
+            return await completionSource.Task;
+        }
+
+        /// <summary>
+        /// Processes messages from priority queues (highest priority first)
+        /// </summary>
+        private async UniTask ProcessMessageQueue(CancellationToken token)
+        {
+            while (!token.IsCancellationRequested && m_IsRunning)
+            {
+                QueuedMessage message = null;
+
+                // Dequeue highest priority message
+                lock (_queueLock)
+                {
+                    foreach (MessagePriority priority in System.Enum.GetValues(typeof(MessagePriority)))
+                    {
+                        if (_sendQueue[priority].Count > 0)
+                        {
+                            message = _sendQueue[priority].Dequeue();
+                            break;
+                        }
+                    }
+
+                    if (message == null)
+                    {
+                        _isProcessingQueue = false;
+                        return; // No messages to process
+                    }
+                }
+
+                // Send the message
+                try
+                {
+                    bool success = await SendDataAsync(message.Action, message.Data, message.Progress, message.Token, isInternalCall: false);
+                    message.CompletionSource.TrySetResult(success);
+                }
+                catch (Exception ex)
+                {
+                    Log($"Queue processing error: {ex.Message}");
+                    message.CompletionSource.TrySetException(ex);
+                }
+
+                // Small delay to prevent tight loop
+                await UniTask.Delay(1, cancellationToken: token);
+            }
+
+            _isProcessingQueue = false;
+        }
+
         #endregion
 
         #region Packet Utilities
@@ -947,6 +1903,9 @@ namespace Modules.Utilities
 
         private async UniTask StartClientAsync(CancellationToken token)
         {
+            _reconnectAttempts = 0;
+            _isReconnecting = false;
+
             while (!token.IsCancellationRequested)
             {
                 try
@@ -958,19 +1917,67 @@ namespace Modules.Utilities
                     await ConnectToServerAsync(m_Host, m_Port, token).AttachExternalCancellation(token);
 
                     // If we reach here, connection was successful but then disconnected
-                    // Wait before retrying
-                    await UniTask.Delay(1000, cancellationToken: token);
+                    // Reset reconnection tracking on successful connection
+                    if (_isReconnecting)
+                    {
+                        _reconnectAttempts = 0;
+                        _isReconnecting = false;
+                    }
+
+                    // Check if auto-reconnect is enabled
+                    if (!m_EnableAutoReconnect || !m_IsRunning)
+                    {
+                        Log("Connection lost. Auto-reconnect disabled.");
+                        break; // Exit loop if auto-reconnect is disabled
+                    }
+
+                    // Prepare for reconnection
+                    _reconnectAttempts++;
+                    _isReconnecting = true;
+
+                    // Check max attempts (0 = infinite)
+                    if (m_ReconnectMaxAttempts > 0 && _reconnectAttempts > m_ReconnectMaxAttempts)
+                    {
+                        Log($"❌ Max reconnection attempts ({m_ReconnectMaxAttempts}) reached. Giving up.");
+                        await SwitchToMainThreadWithRetry();
+                        m_OnReconnectFailed?.Invoke();
+                        break;
+                    }
+
+                    // Calculate delay with exponential backoff
+                    int delayIndex = Math.Min(_reconnectAttempts - 1, m_ReconnectDelays.Length - 1);
+                    int delay = m_ReconnectDelays[delayIndex];
+
+                    Log($"🔄 Reconnecting... (Attempt {_reconnectAttempts}/{(m_ReconnectMaxAttempts > 0 ? m_ReconnectMaxAttempts.ToString() : "∞")}, Delay: {delay}ms)");
+                    
+                    // Fire reconnecting event
+                    await SwitchToMainThreadWithRetry();
+                    m_OnReconnecting?.Invoke(_reconnectAttempts);
+
+                    // Wait before next attempt
+                    await UniTask.Delay(delay, cancellationToken: token);
                 }
                 catch (OperationCanceledException)
                 {
                     // Exit gracefully on cancellation
+                    break;
                 }
                 catch (Exception ex)
                 {
                     Log($"Client Error: {ex.GetType().Name} - {ex.Message}");
                     ReportError(ErrorInfo.ErrorType.Connection, "Client connection failed", ex);
+
+                    // If not auto-reconnect, break the loop
+                    if (!m_EnableAutoReconnect || !m_IsRunning)
+                    {
+                        break;
+                    }
                 }
             }
+
+            // Cleanup on exit
+            _isReconnecting = false;
+            _reconnectAttempts = 0;
         }
 
         private async UniTask ConnectToServerAsync(string _host, int _port, CancellationToken token)
@@ -1011,7 +2018,7 @@ namespace Modules.Utilities
 
                 m_ServerInfo = new ConnectorInfo
                 {
-                    id = _tcpClient.GetHashCode(),
+                    id = System.Threading.Interlocked.Increment(ref _nextClientId),
                     ipAddress = serverEndPoint.Address.ToString(),
                     port = serverEndPoint.Port,
                     remoteEndPoint = serverEndPoint
@@ -1031,14 +2038,22 @@ namespace Modules.Utilities
 
                 // --- Prepare ALL handshake waiters BEFORE starting receive loop (prevent race condition) ---
                 string helloKey = $"hello_{m_ServerInfo.id}";
+                string authReqKey = $"authreq_{m_ServerInfo.id}"; // Authentication request key
                 string clientListKey = $"clientlist_{m_ServerInfo.id}";
                 UniTaskCompletionSource<PacketResponse> helloWaiter;
+                UniTaskCompletionSource<PacketResponse> authReqWaiter = null; // Only if auth enabled
                 UniTaskCompletionSource<PacketResponse> clientListWaiter;
                 
                 lock (_handshakeLock)
                 {
                     helloWaiter = new UniTaskCompletionSource<PacketResponse>();
                     _handshakeWaiters[helloKey] = helloWaiter;
+                    
+                    if (m_EnableAuthentication)
+                    {
+                        authReqWaiter = new UniTaskCompletionSource<PacketResponse>();
+                        _handshakeWaiters[authReqKey] = authReqWaiter;
+                    }
                     
                     clientListWaiter = new UniTaskCompletionSource<PacketResponse>();
                     _handshakeWaiters[clientListKey] = clientListWaiter;
@@ -1087,6 +2102,46 @@ namespace Modules.Utilities
                     _pendingConnections[_tcpClient] = ConnectionState.Acknowledged;
                 }
 
+                // --- Authentication Step (if enabled): Wait for request and send credentials ---
+                if (m_EnableAuthentication)
+                {
+                    // Wait for AUTH_REQUEST from server
+                    using (var authTimeoutCts = new CancellationTokenSource(m_AuthTimeout))
+                    using (var linkedAuthCts = CancellationTokenSource.CreateLinkedTokenSource(token, authTimeoutCts.Token))
+                    {
+                        try
+                        {
+                            await authReqWaiter.Task.AttachExternalCancellation(linkedAuthCts.Token);
+                        }
+                        catch (OperationCanceledException)
+                        {
+                            lock (_handshakeLock)
+                            {
+                                _handshakeWaiters.Remove(authReqKey);
+                            }
+
+                            if (authTimeoutCts.IsCancellationRequested)
+                            {
+                                Log($"❌ Authentication timeout: Server did not request authentication");
+                                throw new TimeoutException("Server authentication request timeout");
+                            }
+                            throw;
+                        }
+                    }
+
+                    lock (_handshakeLock)
+                    {
+                        _handshakeWaiters.Remove(authReqKey);
+                    }
+
+                    // Send AUTH_RESPONSE with password
+                    byte[] passwordBytes = System.Text.Encoding.UTF8.GetBytes(m_AuthPassword);
+                    byte[] authResponsePacket = CreatePacket(ACTION_AUTH_RESPONSE, passwordBytes);
+                    await SendDataToStreamAsync(stream, authResponsePacket, null, token);
+
+                    Log($"📤 Sent authentication credentials to server");
+                }
+
                 // --- Handshake Step 3: Wait for CLIENT_LIST_FULL (waiter already created above) ---
 
                 using (var timeoutCts = new CancellationTokenSource(HANDSHAKE_TIMEOUT_MS))
@@ -1131,12 +2186,30 @@ namespace Modules.Utilities
                 handshakeComplete = true;
                 Log($"✅ Handshake complete with server: {m_ServerInfo.ipAddress}:{m_ServerInfo.port}");
 
+                // Initialize metrics tracking
+                if (m_EnableMetrics)
+                {
+                    lock (_metricsLock)
+                    {
+                        _serverMetrics = new ConnectionMetrics(m_ServerInfo.id);
+                    }
+                }
+
                 // Fire m_OnServerConnected only after handshake completes
                 await SwitchToMainThreadWithRetry();
                 m_OnServerConnected?.Invoke(m_ServerInfo);
 
-                // Continue with receive loop (it's already running)
-                await receiveLoopTask;
+                // Fire reconnected event if this was a reconnection
+                if (_isReconnecting && _reconnectAttempts > 0)
+                {
+                    Log($"✅ Reconnected successfully after {_reconnectAttempts} attempt(s)");
+                    m_OnReconnected?.Invoke(m_ServerInfo);
+                }
+
+                // Start heartbeat loop, metrics loop, and wait for all (receive already running)
+                var heartbeatTask = ClientHeartbeatLoopAsync(stream, token);
+                var metricsTask = m_EnableMetrics ? ClientMetricsReportLoopAsync(token) : UniTask.CompletedTask;
+                await UniTask.WhenAll(receiveLoopTask, heartbeatTask, metricsTask);
             }
             catch (OperationCanceledException)
             {
@@ -1156,6 +2229,15 @@ namespace Modules.Utilities
                     if (_tcpClient != null)
                     {
                         _pendingConnections.Remove(_tcpClient);
+                    }
+                }
+
+                // Clean up metrics
+                if (m_EnableMetrics)
+                {
+                    lock (_metricsLock)
+                    {
+                        _serverMetrics = null;
                     }
                 }
 
@@ -1330,6 +2412,41 @@ namespace Modules.Utilities
                             finalPacketResponse.processedBytes = totalBytesRead;
                             finalPacketResponse.operationId = operationId;
 
+                            // --- Rate Limiting Check (Server-side only) ---
+                            if (m_IsServer && m_EnableRateLimit)
+                            {
+                                TcpClient clientKey = null;
+                                lock (m_Clients)
+                                {
+                                    foreach (var kvp in m_Clients)
+                                    {
+                                        if (kvp.Value.id == connectorInfo.id)
+                                        {
+                                            clientKey = kvp.Key;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (clientKey != null)
+                                {
+                                    TokenBucket rateLimiter;
+                                    lock (_rateLimitLock)
+                                    {
+                                        _rateLimiters.TryGetValue(clientKey, out rateLimiter);
+                                    }
+
+                                    if (rateLimiter != null && !rateLimiter.TryConsume(1))
+                                    {
+                                        // Rate limit exceeded - disconnect client
+                                        Log($"⚠️ Rate limit exceeded for {connectorInfo.ipAddress}:{connectorInfo.port} - disconnecting");
+                                        await SwitchToMainThreadWithRetry();
+                                        m_OnRateLimitExceeded?.Invoke(connectorInfo, (int)rateLimiter.GetCurrentTokens());
+                                        break; // Exit receive loop to disconnect
+                                    }
+                                }
+                            }
+
                             // --- Handle Handshake Messages (Internal Protocol) ---
                             bool isHandshakeMessage = false;
 
@@ -1353,12 +2470,15 @@ namespace Modules.Utilities
 
                             // Client-side: Handle HELLO and CLIENT_LIST from server
                             if (!m_IsServer && (finalPacketResponse.action == ACTION_CONNECTION_HELLO || 
-                                               finalPacketResponse.action == ACTION_CLIENT_LIST_FULL))
+                                               finalPacketResponse.action == ACTION_CLIENT_LIST_FULL ||
+                                               finalPacketResponse.action == ACTION_AUTH_REQUEST))
                             {
                                 isHandshakeMessage = true;
                                 string waitKey = finalPacketResponse.action == ACTION_CONNECTION_HELLO 
                                     ? $"hello_{connectorInfo.id}" 
-                                    : $"clientlist_{connectorInfo.id}";
+                                    : finalPacketResponse.action == ACTION_AUTH_REQUEST
+                                        ? $"authreq_{connectorInfo.id}"
+                                        : $"clientlist_{connectorInfo.id}";
 
                                 lock (_handshakeLock)
                                 {
@@ -1375,6 +2495,102 @@ namespace Modules.Utilities
                                 }
                             }
 
+                            // Server-side: Handle AUTH_RESPONSE from client
+                            if (m_IsServer && finalPacketResponse.action == ACTION_AUTH_RESPONSE)
+                            {
+                                isHandshakeMessage = true;
+                                string waitKey = $"auth_{connectorInfo.id}";
+
+                                lock (_handshakeLock)
+                                {
+                                    if (_handshakeWaiters.TryGetValue(waitKey, out var waiter))
+                                    {
+                                        waiter.TrySetResult(finalPacketResponse);
+                                    }
+                                }
+                            }
+
+                            // Server-side: Handle VERSION_RESPONSE from client
+                            if (m_IsServer && finalPacketResponse.action == ACTION_VERSION_RESPONSE)
+                            {
+                                isHandshakeMessage = true;
+                                string waitKey = $"version_{connectorInfo.id}";
+
+                                lock (_handshakeLock)
+                                {
+                                    if (_handshakeWaiters.TryGetValue(waitKey, out var waiter))
+                                    {
+                                        waiter.TrySetResult(finalPacketResponse);
+                                    }
+                                }
+                            }
+
+                            // Client-side: Handle VERSION_REQUEST from server
+                            if (!m_IsServer && finalPacketResponse.action == ACTION_VERSION_REQUEST)
+                            {
+                                isHandshakeMessage = true;
+                                
+                                // Send VERSION_RESPONSE with our protocol version
+                                byte[] versionData = System.Text.Encoding.UTF8.GetBytes(m_ProtocolVersion);
+                                byte[] versionResponsePacket = CreatePacket(ACTION_VERSION_RESPONSE, versionData);
+                                await SendDataToStreamAsync(stream, versionResponsePacket, null, token);
+                                
+                                Log($"📤 Sent protocol version to server: {m_ProtocolVersion}");
+                                continue; // Skip normal processing
+                            }
+
+                            // --- Handle Heartbeat Messages (Internal Protocol) ---
+                            if (finalPacketResponse.action == ACTION_HEARTBEAT_PING)
+                            {
+                                // Respond with PONG
+                                byte[] pongPacket = CreatePacket(ACTION_HEARTBEAT_PONG, Array.Empty<byte>());
+                                await SendDataToStreamAsync(stream, pongPacket, null, token);
+                                continue; // Skip normal processing
+                            }
+
+                            if (finalPacketResponse.action == ACTION_HEARTBEAT_PONG)
+                            {
+                                // Update heartbeat timestamp
+                                if (m_IsServer)
+                                {
+                                    // Server-side: Update client heartbeat
+                                    var clientKey = m_Clients.FirstOrDefault(x => x.Value.id == connectorInfo.id).Key;
+                                    if (clientKey != null)
+                                    {
+                                        lock (_heartbeatLock)
+                                        {
+                                            _lastHeartbeatTicks[clientKey] = DateTime.UtcNow.Ticks;
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    // Client-side: Update server heartbeat
+                                    _lastServerHeartbeatTicks = DateTime.UtcNow.Ticks;
+                                }
+                                continue; // Skip normal processing
+                            }
+
+                            // --- Handle Graceful Disconnect Notification (Internal Protocol) ---
+                            if (finalPacketResponse.action == ACTION_DISCONNECT_NOTIFICATION)
+                            {
+                                Log($"📢 Received graceful disconnect notification from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                                
+                                if (m_IsServer)
+                                {
+                                    // Server: Client is disconnecting gracefully
+                                    Log($"Client {connectorInfo.id} is disconnecting gracefully");
+                                }
+                                else
+                                {
+                                    // Client: Server is shutting down gracefully
+                                    Log("Server is shutting down gracefully");
+                                }
+                                
+                                // Break the receive loop to allow graceful disconnection
+                                break;
+                            }
+
                             // Skip normal processing for handshake messages
                             if (isHandshakeMessage && finalPacketResponse.action != ACTION_CLIENT_LIST_FULL)
                             {
@@ -1388,6 +2604,40 @@ namespace Modules.Utilities
                             if (m_LogReceive)
                             {
                                 Log($"✅ Data received successfully: Action={finalPacketResponse.action}, Size={totalBytesRead} bytes from {connectorInfo.ipAddress}:{connectorInfo.port}");
+                            }
+
+                            // Track metrics
+                            if (m_EnableMetrics)
+                            {
+                                lock (_metricsLock)
+                                {
+                                    if (m_IsServer)
+                                    {
+                                        // Server mode: find metrics by client
+                                        TcpClient clientKey = null;
+                                        lock (m_Clients)
+                                        {
+                                            foreach (var kvp in m_Clients)
+                                            {
+                                                if (kvp.Value.id == connectorInfo.id)
+                                                {
+                                                    clientKey = kvp.Key;
+                                                    break;
+                                                }
+                                            }
+                                        }
+
+                                        if (clientKey != null && _clientMetrics.TryGetValue(clientKey, out var metrics))
+                                        {
+                                            metrics.RecordReceived(totalBytesRead);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        // Client mode: track server metrics
+                                        _serverMetrics?.RecordReceived(totalBytesRead);
+                                    }
+                                }
                             }
 
                             try
@@ -1456,6 +2706,31 @@ namespace Modules.Utilities
         public async UniTask<bool> SendDataAsync(ushort action, byte[] data, CancellationToken token = default)
         {
             return await SendDataAsync(action, data, (IProgress<float>)null, token);
+        }
+
+        /// <summary>
+        /// Sends data with specified priority (priority queue enabled only when m_EnablePriorityQueue is true)
+        /// </summary>
+        public async UniTask<bool> SendDataAsync(ushort action, byte[] data, MessagePriority priority, CancellationToken token = default)
+        {
+            return await SendDataAsync(action, data, null, priority, token);
+        }
+
+        /// <summary>
+        /// Sends data with progress reporting and priority
+        /// </summary>
+        public async UniTask<bool> SendDataAsync(ushort action, byte[] data, IProgress<float> progress, MessagePriority priority, CancellationToken token = default)
+        {
+            data ??= Array.Empty<byte>();
+            
+            if (m_EnablePriorityQueue)
+            {
+                return await EnqueueMessage(action, data, priority, null, progress, token);
+            }
+            else
+            {
+                return await SendDataAsync(action, data, progress, token, isInternalCall: false);
+            }
         }
 
         /// <summary>
@@ -1665,6 +2940,19 @@ namespace Modules.Utilities
                 try
                 {
                     await SendDataToStreamAsync(client.GetStream(), message, progress, token);
+
+                    // Track sent bytes for this client
+                    if (m_EnableMetrics)
+                    {
+                        lock (_metricsLock)
+                        {
+                            if (_clientMetrics.TryGetValue(client, out var metrics))
+                            {
+                                metrics.RecordSent(message.Length);
+                            }
+                        }
+                    }
+
                     return true; // Success
                 }
                 catch (Exception ex)
@@ -1755,6 +3043,27 @@ namespace Modules.Utilities
 
                 // Ensure all data is sent with timeout
                 await stream.FlushAsync(linkedCts.Token);
+
+                // Track sent bytes in metrics (if tracking is enabled)
+                if (m_EnableMetrics && message.Length > 0)
+                {
+                    lock (_metricsLock)
+                    {
+                        if (m_IsServer)
+                        {
+                            //  Note: For server→client sends, we track in per-client basis
+                            // We need to determine which client this stream belongs to
+                            // This is done by looking up stream's TcpClient in m_Clients
+                            // However, we don't have direct access here. We'll track in SendAsServerAsync instead.
+                        }
+                        else
+                        {
+                            // Client mode: track sent to server
+                            _serverMetrics?.RecordSent(message.Length);
+                        }
+                    }
+                }
+
                 // Log removed for performance - was logging every successful send operation
             }
             catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
@@ -1794,9 +3103,28 @@ namespace Modules.Utilities
             return await SendDataAsync(action, data, (IProgress<float>)null, token);
         }
 
+        public async UniTask<bool> SendDataAsync<T>(ushort action, T data, MessagePriority priority, CancellationToken token = default)
+        {
+            return await SendDataAsync(action, data, null, priority, token);
+        }
+
         public async UniTask<bool> SendDataAsync<T>(ushort action, T data, IProgress<float> progress, CancellationToken token = default)
         {
             return await SendDataAsync(action, data, progress, token, isInternalCall: false);
+        }
+
+        public async UniTask<bool> SendDataAsync<T>(ushort action, T data, IProgress<float> progress, MessagePriority priority, CancellationToken token = default)
+        {
+            byte[] serializedData = SerializeData(data);
+            
+            if (m_EnablePriorityQueue)
+            {
+                return await EnqueueMessage(action, serializedData, priority, null, progress, token);
+            }
+            else
+            {
+                return await SendDataAsync(action, serializedData, progress, token, isInternalCall: false);
+            }
         }
 
         /// <summary>
@@ -2128,6 +3456,12 @@ namespace Modules.Utilities
             // Get the core packet structure
             byte[] packet = CreateCorePacket(action, data);
 
+            // Encrypt packet if encryption is enabled
+            if (m_EnableEncryption)
+            {
+                packet = EncryptData(packet);
+            }
+
             // TCP needs length prefix for stream protocol
             byte[] lengthPrefix = BitConverter.GetBytes(packet.Length);
             byte[] finalMessage = new byte[4 + packet.Length];
@@ -2144,6 +3478,13 @@ namespace Modules.Utilities
         /// </summary>
         private PacketResponse ReadPacket(byte[] data, int dataLength, ConnectorInfo connectorInfo)
         {
+            // Decrypt packet if encryption is enabled
+            if (m_EnableEncryption)
+            {
+                data = DecryptData(data);
+                dataLength = data.Length;
+            }
+
             // TCP packets don't include the length prefix in the data buffer passed here
             // The length prefix is processed separately in the receive loop
             return ReadCorePacket(data, dataLength, connectorInfo);
@@ -2194,11 +3535,142 @@ namespace Modules.Utilities
         }
 
         /// <summary>
+        /// Message priority levels for priority queue system
+        /// </summary>
+        public enum MessagePriority
+        {
+            Critical = 0,  // Highest priority (e.g., connection control, critical game state)
+            High = 1,      // High priority (e.g., player actions, important events)
+            Normal = 2,    // Normal priority (e.g., regular game updates)
+            Low = 3        // Low priority (e.g., chat messages, non-critical data)
+        }
+
+        /// <summary>
+        /// Queued message with priority information
+        /// </summary>
+        private class QueuedMessage
+        {
+            public ushort Action;
+            public byte[] Data;
+            public int[] TargetClientIds;
+            public IProgress<float> Progress;
+            public CancellationToken Token;
+            public UniTaskCompletionSource<bool> CompletionSource;
+        }
+
+        /// <summary>
         /// Contains connection information for a client or server.
         /// The 'id' field is used as PacketResponse.senderId:
         /// - For TCP connections: id is set when connection is established
         /// - For Real-time UDP: id = IPEndPoint.GetHashCode()
         /// </summary>
+        [Serializable]
+        public class TokenBucket
+        {
+            private double _tokens;
+            private readonly double _maxTokens;
+            private readonly double _refillRate; // tokens per second
+            private DateTime _lastRefill;
+            private readonly object _lock = new object();
+
+            public TokenBucket(double maxTokens, double refillRate)
+            {
+                _maxTokens = maxTokens;
+                _refillRate = refillRate;
+                _tokens = maxTokens; // Start with full bucket
+                _lastRefill = DateTime.UtcNow;
+            }
+
+            /// <summary>
+            /// Try to consume tokens. Returns true if successful, false if rate limit exceeded.
+            /// </summary>
+            public bool TryConsume(int count = 1)
+            {
+                lock (_lock)
+                {
+                    Refill();
+
+                    if (_tokens >= count)
+                    {
+                        _tokens -= count;
+                        return true;
+                    }
+
+                    return false; // Rate limit exceeded
+                }
+            }
+
+            /// <summary>
+            /// Refill tokens based on elapsed time
+            /// </summary>
+            private void Refill()
+            {
+                var now = DateTime.UtcNow;
+                var elapsed = (now - _lastRefill).TotalSeconds;
+                _lastRefill = now;
+
+                _tokens = Math.Min(_maxTokens, _tokens + (_refillRate * elapsed));
+            }
+
+            /// <summary>
+            /// Get current token count (for diagnostics)
+            /// </summary>
+            public double GetCurrentTokens()
+            {
+                lock (_lock)
+                {
+                    Refill();
+                    return _tokens;
+                }
+            }
+        }
+
+        [Serializable]
+        public class ConnectionMetrics
+        {
+            public int ClientId;
+            public long BytesSent;
+            public long BytesReceived;
+            public long MessagesSent;
+            public long MessagesReceived;
+            public double ConnectionUptimeSeconds;
+            public double AverageSendRate; // bytes per second
+            public double AverageReceiveRate; // bytes per second
+            public DateTime ConnectionStartTime;
+            public DateTime LastActivityTime;
+
+            public ConnectionMetrics(int clientId)
+            {
+                ClientId = clientId;
+                ConnectionStartTime = DateTime.UtcNow;
+                LastActivityTime = DateTime.UtcNow;
+            }
+
+            public void RecordSent(int bytes)
+            {
+                BytesSent += bytes;
+                MessagesSent++;
+                LastActivityTime = DateTime.UtcNow;
+            }
+
+            public void RecordReceived(int bytes)
+            {
+                BytesReceived += bytes;
+                MessagesReceived++;
+                LastActivityTime = DateTime.UtcNow;
+            }
+
+            public void UpdateRates()
+            {
+                ConnectionUptimeSeconds = (DateTime.UtcNow - ConnectionStartTime).TotalSeconds;
+                if (ConnectionUptimeSeconds > 0)
+                {
+                    AverageSendRate = BytesSent / ConnectionUptimeSeconds;
+                    AverageReceiveRate = BytesReceived / ConnectionUptimeSeconds;
+                }
+            }
+        }
+
         [Serializable] public struct ConnectorInfo { public int id; public string ipAddress; public int port; [JsonIgnore] public IPEndPoint remoteEndPoint; }
 
         [Serializable]
@@ -2569,6 +4041,9 @@ namespace Modules.Utilities
         private bool eventsExpanded = false;
         private bool settingsExpanded = true;
         private bool performanceExpanded = false;
+        private bool securityExpanded = false;
+        private bool healthExpanded = false;
+        private bool advancedExpanded = false;
 
         // Force inspector to repaint during play mode to show live status updates
         public override bool RequiresConstantRepaint()
@@ -2651,6 +4126,141 @@ namespace Modules.Utilities
 
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MaxRetryCount"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RetryDelay"));
+            }
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
+
+            // --- Security Box ---
+            EditorGUILayout.Space();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
+
+            securityExpanded = EditorGUILayout.Foldout(securityExpanded, "Security Settings", true);
+
+            if (securityExpanded)
+            {
+                EditorGUILayout.LabelField("Encryption", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableEncryption"));
+                var enableEncryption = serializedObject.FindProperty("m_EnableEncryption");
+                if (enableEncryption.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EncryptionKey"));
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Authentication", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableAuthentication"));
+                var enableAuth = serializedObject.FindProperty("m_EnableAuthentication");
+                if (enableAuth.boolValue && isServer.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_AuthPassword"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_AuthTimeout"));
+                }
+            }
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
+
+            // --- Connection Health Box ---
+            EditorGUILayout.Space();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
+
+            healthExpanded = EditorGUILayout.Foldout(healthExpanded, "Connection Health", true);
+
+            if (healthExpanded)
+            {
+                EditorGUILayout.LabelField("Heartbeat", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableHeartbeat"));
+                var enableHeartbeat = serializedObject.FindProperty("m_EnableHeartbeat");
+                if (enableHeartbeat.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_HeartbeatInterval"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_HeartbeatTimeout"));
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Auto Reconnection", EditorStyles.boldLabel);
+                if (!isServer.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableAutoReconnect"));
+                    var enableReconnect = serializedObject.FindProperty("m_EnableAutoReconnect");
+                    if (enableReconnect.boolValue)
+                    {
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_ReconnectMaxAttempts"));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_ReconnectDelays"));
+                    }
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox("Auto-reconnection is only available in Client mode", MessageType.Info);
+                }
+            }
+            EditorGUI.indentLevel--;
+
+            EditorGUILayout.EndVertical();
+
+            // --- Advanced Features Box ---
+            EditorGUILayout.Space();
+            EditorGUILayout.BeginVertical("box");
+            EditorGUI.indentLevel++;
+
+            advancedExpanded = EditorGUILayout.Foldout(advancedExpanded, "Advanced Features", true);
+
+            if (advancedExpanded)
+            {
+                EditorGUILayout.LabelField("Connection Metrics", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableMetrics"));
+                var enableMetrics = serializedObject.FindProperty("m_EnableMetrics");
+                if (enableMetrics.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_MetricsReportInterval"));
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Rate Limiting", EditorStyles.boldLabel);
+                if (isServer.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableRateLimit"));
+                    var enableRateLimit = serializedObject.FindProperty("m_EnableRateLimit");
+                    if (enableRateLimit.boolValue)
+                    {
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_RateLimit"));
+                        EditorGUILayout.PropertyField(serializedObject.FindProperty("m_BurstSize"));
+                    }
+                }
+                else
+                {
+                    EditorGUILayout.HelpBox("Rate limiting is only available in Server mode", MessageType.Info);
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Message Priority Queues", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnablePriorityQueue"));
+                var enablePriorityQueue = serializedObject.FindProperty("m_EnablePriorityQueue");
+                if (enablePriorityQueue.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_QueueMaxSize"));
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Graceful Shutdown", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableGracefulShutdown"));
+                var enableGracefulShutdown = serializedObject.FindProperty("m_EnableGracefulShutdown");
+                if (enableGracefulShutdown.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_ShutdownTimeout"));
+                }
+
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Protocol Version Checking", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_EnableVersionCheck"));
+                var enableVersionCheck = serializedObject.FindProperty("m_EnableVersionCheck");
+                if (enableVersionCheck.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_ProtocolVersion"));
+                }
             }
             EditorGUI.indentLevel--;
 
@@ -2794,6 +4404,7 @@ namespace Modules.Utilities
 
             if (eventsExpanded)
             {
+                EditorGUILayout.LabelField("Connection Events", EditorStyles.boldLabel);
                 if (isServer.boolValue)
                 {
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientConnected"));
@@ -2803,10 +4414,30 @@ namespace Modules.Utilities
                 {
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerConnected"));
                     EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnServerDisconnected"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnReconnecting"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnReconnected"));
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnReconnectFailed"));
                 }
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Data Events", EditorStyles.boldLabel);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnDataReceived"));
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnClientListUpdated"));
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("Security Events", EditorStyles.boldLabel);
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnAuthSuccess"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnAuthFailed"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnVersionMismatch"));
+                
+                EditorGUILayout.Space();
+                EditorGUILayout.LabelField("System Events", EditorStyles.boldLabel);
                 EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnError"));
+                EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnMetricsUpdated"));
+                if (isServer.boolValue)
+                {
+                    EditorGUILayout.PropertyField(serializedObject.FindProperty("m_OnRateLimitExceeded"));
+                }
             }
             EditorGUI.indentLevel--;
 

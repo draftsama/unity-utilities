@@ -518,12 +518,13 @@ public static class TextureUtility
     
     /// <summary>
     /// Crop texture to specified rectangular region using GPU
-    /// Pixels outside the rectangle become transparent
+    /// Returns a new texture with dimensions matching the crop rectangle
     /// </summary>
     /// <param name="source">Source texture to crop</param>
     /// <param name="cropRect">Crop rectangle (x, y, width, height) in pixel coordinates</param>
-    /// <returns>Cropped texture with transparent areas outside rectangle</returns>
+    /// <returns>New cropped texture with size matching the crop rectangle</returns>
     /// <example>
+    /// // Crop 200x200 region from position (100, 100) - result will be 200x200 pixels
     /// Rect cropArea = new Rect(100, 100, 200, 200);
     /// Texture2D cropped = TextureUtility.CropRect(originalTexture, cropArea);
     /// </example>
@@ -531,54 +532,55 @@ public static class TextureUtility
     {
         if (!ValidateTexture(source, "CropRect")) return null;
         
-        int width = source.width;
-        int height = source.height;
+        // Validate crop rectangle dimensions
+        if (cropRect.width <= 0 || cropRect.height <= 0)
+        {
+            Debug.LogError($"TextureUtility.CropRect: Invalid crop dimensions ({cropRect.width}x{cropRect.height})");
+            return null;
+        }
         
-        // Create render textures
-        RenderTexture inputRT = CreateRenderTexture(width, height);
-        RenderTexture outputRT = CreateRenderTexture(width, height);
+        // Clamp crop rectangle to source bounds
+        float x = Mathf.Clamp(cropRect.x, 0, source.width);
+        float y = Mathf.Clamp(cropRect.y, 0, source.height);
+        float width = Mathf.Min(cropRect.width, source.width - x);
+        float height = Mathf.Min(cropRect.height, source.height - y);
         
-        // Copy source texture to input RenderTexture
-        Graphics.Blit(source, inputRT);
+        if (width <= 0 || height <= 0)
+        {
+            Debug.LogError($"TextureUtility.CropRect: Crop rectangle is outside source bounds");
+            return null;
+        }
         
-        // Set compute shader parameters
-        textureCropShader.SetTexture(kernelCropRect, PropSource, inputRT);
-        textureCropShader.SetTexture(kernelCropRect, PropResult, outputRT);
-        textureCropShader.SetInt(PropWidth, width);
-        textureCropShader.SetInt(PropHeight, height);
+        // Create temporary RenderTexture with source size
+        RenderTexture tempRT = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32);
+        Graphics.Blit(source, tempRT);
         
-        // Set crop rectangle (x, y, width, height)
-        Vector4 cropVector = new Vector4(cropRect.x, cropRect.y, cropRect.width, cropRect.height);
-        textureCropShader.SetVector(PropRectData, cropVector);
-        
-        // Dispatch compute shader
-        int threadGroupsX = CalculateThreadGroups(width);
-        int threadGroupsY = CalculateThreadGroups(height);
-        textureCropShader.Dispatch(kernelCropRect, threadGroupsX, threadGroupsY, 1);
-        
-        // Convert result to Texture2D
-        Texture2D result = RenderTextureToTexture2D(outputRT);
+        // Read only the cropped region
+        RenderTexture.active = tempRT;
+        Texture2D result = new Texture2D((int)width, (int)height, TextureFormat.RGBA32, false);
+        result.ReadPixels(new Rect(x, y, width, height), 0, 0);
+        result.Apply();
+        RenderTexture.active = null;
         
         // Cleanup
-        inputRT.Release();
-        outputRT.Release();
+        RenderTexture.ReleaseTemporary(tempRT);
         
         return result;
     }
     
     /// <summary>
     /// Crop texture to circular shape using GPU
-    /// Pixels outside the circle become transparent with smooth anti-aliased edges
+    /// Returns a square texture containing only the circular region with transparent background
     /// </summary>
     /// <param name="source">Source texture to crop</param>
     /// <param name="center">Center of circle in pixel coordinates (default: texture center)</param>
     /// <param name="radius">Radius in pixels (default: half of minimum dimension)</param>
-    /// <returns>Texture with circular crop and transparent background</returns>
+    /// <returns>Square texture (diameter × diameter) with circular crop and transparent background</returns>
     /// <example>
-    /// // Crop to circle at center with auto radius
+    /// // Crop to circle at center with auto radius - result is square with circle inside
     /// Texture2D circle = TextureUtility.CropCircle(originalTexture);
-    /// // Crop to circle at custom position
-    /// Texture2D customCircle = TextureUtility.CropCircle(originalTexture, new Vector2(128, 128), 100);
+    /// // Crop to circle at custom position with radius 100 - result is 200x200 texture
+    /// Texture2D customCircle = TextureUtility.CropCircle(originalTexture, new Vector2(256, 256), 100);
     /// </example>
     public static Texture2D CropCircle(Texture2D source, Vector2? center = null, float? radius = null)
     {
@@ -591,32 +593,45 @@ public static class TextureUtility
         Vector2 circleCenter = center ?? new Vector2(width * 0.5f, height * 0.5f);
         float circleRadius = radius ?? (Mathf.Min(width, height) * 0.5f);
         
-        // Create render textures
-        RenderTexture inputRT = CreateRenderTexture(width, height);
-        RenderTexture outputRT = CreateRenderTexture(width, height);
+        // Calculate crop bounds (square bounding box of circle)
+        int diameter = Mathf.CeilToInt(circleRadius * 2);
+        int cropX = Mathf.FloorToInt(circleCenter.x - circleRadius);
+        int cropY = Mathf.FloorToInt(circleCenter.y - circleRadius);
         
-        // Copy source texture to input RenderTexture
+        // Clamp to source bounds
+        cropX = Mathf.Max(0, cropX);
+        cropY = Mathf.Max(0, cropY);
+        int cropWidth = Mathf.Min(diameter, width - cropX);
+        int cropHeight = Mathf.Min(diameter, height - cropY);
+        
+        // Create temporary RenderTexture for the full image with circle mask
+        RenderTexture inputRT = CreateRenderTexture(width, height);
+        RenderTexture maskedRT = CreateRenderTexture(width, height);
+        
         Graphics.Blit(source, inputRT);
         
-        // Set compute shader parameters
+        // Apply circle mask using compute shader
         textureCropShader.SetTexture(kernelCropCircle, PropSource, inputRT);
-        textureCropShader.SetTexture(kernelCropCircle, PropResult, outputRT);
+        textureCropShader.SetTexture(kernelCropCircle, PropResult, maskedRT);
         textureCropShader.SetInt(PropWidth, width);
         textureCropShader.SetInt(PropHeight, height);
         textureCropShader.SetVector(PropCenter, circleCenter);
         textureCropShader.SetFloat(PropRadius, circleRadius);
         
-        // Dispatch compute shader
         int threadGroupsX = CalculateThreadGroups(width);
         int threadGroupsY = CalculateThreadGroups(height);
         textureCropShader.Dispatch(kernelCropCircle, threadGroupsX, threadGroupsY, 1);
         
-        // Convert result to Texture2D
-        Texture2D result = RenderTextureToTexture2D(outputRT);
+        // Read only the circular region (bounding box)
+        RenderTexture.active = maskedRT;
+        Texture2D result = new Texture2D(cropWidth, cropHeight, TextureFormat.RGBA32, false);
+        result.ReadPixels(new Rect(cropX, cropY, cropWidth, cropHeight), 0, 0);
+        result.Apply();
+        RenderTexture.active = null;
         
         // Cleanup
         inputRT.Release();
-        outputRT.Release();
+        maskedRT.Release();
         
         return result;
     }
