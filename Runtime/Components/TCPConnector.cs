@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -82,13 +83,13 @@ namespace Modules.Utilities
 
         // --- Status ---
         [Header("Status (Read Only)")]
-        [SerializeField] private bool m_IsRunning = false;
-        [SerializeField] private bool m_IsConnected = false;
+        [SerializeField] private volatile bool m_IsRunning = false;
+        [SerializeField] private volatile bool m_IsConnected = false;
 
         // --- TCP Components ---
         private TcpListener _tcpListener; // Server
         private TcpClient _tcpClient;     // Client
-        private readonly Dictionary<TcpClient, ConnectorInfo> m_Clients = new Dictionary<TcpClient, ConnectorInfo>();
+        private readonly ConcurrentDictionary<TcpClient, ConnectorInfo> m_Clients = new ConcurrentDictionary<TcpClient, ConnectorInfo>();
 
         // --- Handshake State Tracking ---
         private readonly Dictionary<TcpClient, ConnectionState> _pendingConnections = new Dictionary<TcpClient, ConnectionState>();
@@ -165,8 +166,7 @@ namespace Modules.Utilities
         private bool _isReconnecting = false;
 
         // --- Stream Write Synchronization (v2.7.3: Fix concurrent write race condition) ---
-        private readonly Dictionary<TcpClient, SemaphoreSlim> _streamSendLocks = new Dictionary<TcpClient, SemaphoreSlim>();
-        private readonly object _streamSendLocksLock = new object();
+        private readonly ConcurrentDictionary<TcpClient, SemaphoreSlim> _streamSendLocks = new ConcurrentDictionary<TcpClient, SemaphoreSlim>();
 
         #endregion
 
@@ -210,19 +210,17 @@ namespace Modules.Utilities
 
         public bool TryGetClientInfoById(int id, out ConnectorInfo clientInfo)
         {
-            lock (m_Clients)
+            // ConcurrentDictionary iteration is thread-safe
+            foreach (var client in m_Clients.Values)
             {
-                foreach (var client in m_Clients.Values)
+                if (client.id == id)
                 {
-                    if (client.id == id)
-                    {
-                        clientInfo = client;
-                        return true;
-                    }
+                    clientInfo = client;
+                    return true;
                 }
-                clientInfo = default(ConnectorInfo);
-                return false;
             }
+            clientInfo = default(ConnectorInfo);
+            return false;
         }
 
         /// <summary>
@@ -251,20 +249,15 @@ namespace Modules.Utilities
         /// <summary>
         /// Gets or creates a SemaphoreSlim for thread-safe stream writes (v2.7.3)
         /// Prevents race conditions when multiple threads write to the same NetworkStream
+        /// Uses ConcurrentDictionary.GetOrAdd for atomic thread-safe creation
         /// </summary>
         private SemaphoreSlim GetOrCreateSendLock(TcpClient client)
         {
             if (client == null) return null;
 
-            lock (_streamSendLocksLock)
-            {
-                if (!_streamSendLocks.TryGetValue(client, out var semaphore))
-                {
-                    semaphore = new SemaphoreSlim(1, 1);
-                    _streamSendLocks[client] = semaphore;
-                }
-                return semaphore;
-            }
+            // GetOrAdd is atomic - prevents race condition where multiple threads
+            // could create semaphores for the same client
+            return _streamSendLocks.GetOrAdd(client, _ => new SemaphoreSlim(1, 1));
         }
 
         /// <summary>
@@ -302,6 +295,36 @@ namespace Modules.Utilities
         private void OnDisable()
         {
             StopConnection();
+        }
+
+        private void OnDestroy()
+        {
+            // Ensure connection is stopped
+            StopConnection();
+
+            // Dispose all semaphores in the send locks dictionary
+            foreach (var semaphore in _streamSendLocks.Values)
+            {
+                try
+                {
+                    semaphore?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    Log($"Error disposing semaphore: {ex.Message}");
+                }
+            }
+            _streamSendLocks.Clear();
+
+            // Clear buffer pool
+            lock (_bufferPoolLock)
+            {
+                _bufferPool.Clear();
+            }
+
+            // Clean up cancellation token
+            _cts?.Dispose();
+            _cts = null;
         }
 
 
@@ -389,18 +412,13 @@ namespace Modules.Utilities
             _tcpClient?.Close();
 
             // Close all client connections (server only)
-            lock (m_Clients)
+            // ConcurrentDictionary: get snapshot of keys, then iterate safely
+            var clientsArray = m_Clients.Keys.ToArray();
+            foreach (var client in clientsArray)
             {
-                // Create array to avoid ToList() allocation
-                var clientsArray = new TcpClient[m_Clients.Count];
-                m_Clients.Keys.CopyTo(clientsArray, 0);
-
-                foreach (var client in clientsArray)
-                {
-                    client?.Close();
-                }
-                m_Clients.Clear();
+                client?.Close();
             }
+            m_Clients.Clear();
 
             // Handle connection state - MUST be on main thread for Unity serialization
             if (m_IsConnected)
@@ -616,16 +634,15 @@ namespace Modules.Utilities
                 }
 
                 // --- Handshake Step 3: Send client list sync ---
-                // Add to m_Clients and immediately update synced list
-                lock (m_Clients)
+                // Add to m_Clients (ConcurrentDictionary handles thread-safety)
+                m_Clients[client] = clientInfo;
+                
+                // Update server's synced list after addition
+                // Create snapshot first to avoid nested locks
+                var clientSnapshot = m_Clients.Values.ToList();
+                lock (_syncedClientListLock)
                 {
-                    m_Clients[client] = clientInfo;
-                    
-                    // Immediately update server's synced list after addition (prevent race condition)
-                    lock (_syncedClientListLock)
-                    {
-                        m_SyncedClientList = m_Clients.Values.ToList();
-                    }
+                    m_SyncedClientList = clientSnapshot;
                 }
                 await BroadcastClientListSync(clientInfo.id, isFullSync: true);
 
@@ -655,15 +672,15 @@ namespace Modules.Utilities
                         if (timeoutCts.IsCancellationRequested)
                         {
                             Log($"Handshake timeout: Client {clientInfo.ipAddress} did not send READY");
-                            lock (m_Clients)
+                            
+                            // Remove client (ConcurrentDictionary is thread-safe)
+                            m_Clients.TryRemove(client, out _);
+                            
+                            // Update server's synced list after removal
+                            var timeoutSnapshot = m_Clients.Values.ToList();
+                            lock (_syncedClientListLock)
                             {
-                                m_Clients.Remove(client);
-                                
-                                // Immediately update server's synced list after removal (prevent race condition)
-                                lock (_syncedClientListLock)
-                                {
-                                    m_SyncedClientList = m_Clients.Values.ToList();
-                                }
+                                m_SyncedClientList = timeoutSnapshot;
                             }
                             return;
                         }
@@ -724,24 +741,20 @@ namespace Modules.Utilities
                     _pendingConnections.Remove(client);
                 }
 
-                lock (m_Clients)
-                {
-                    m_Clients.Remove(client);
+                // Remove client (ConcurrentDictionary is thread-safe)
+                m_Clients.TryRemove(client, out _);
 
-                    // Immediately update server's synced list after removal (prevent race condition)
-                    lock (_syncedClientListLock)
-                    {
-                        m_SyncedClientList = m_Clients.Values.ToList();
-                    }
+                // Update server's synced list after removal
+                var clientSnapshot = m_Clients.Values.ToList();
+                lock (_syncedClientListLock)
+                {
+                    m_SyncedClientList = clientSnapshot;
                 }
 
-                lock (_streamSendLocksLock)
+                // Dispose and remove send lock for this client
+                if (_streamSendLocks.TryRemove(client, out var semaphore))
                 {
-                    if (_streamSendLocks.TryGetValue(client, out var semaphore))
-                    {
-                        semaphore.Dispose();
-                        _streamSendLocks.Remove(client);
-                    }
+                    semaphore.Dispose();
                 }
 
                 client.Close();
@@ -777,11 +790,8 @@ namespace Modules.Utilities
                     try
                     {
                         // Check if server has reached max concurrent connections
-                        int currentClientCount;
-                        lock (m_Clients)
-                        {
-                            currentClientCount = m_Clients.Count;
-                        }
+                        // ConcurrentDictionary.Count is thread-safe
+                        int currentClientCount = m_Clients.Count;
 
                         bool shouldPauseBroadcast = currentClientCount >= m_MaxConcurrentConnections;
 
@@ -1278,13 +1288,10 @@ namespace Modules.Utilities
 
                 if (_tcpClient != null)
                 {
-                    lock (_streamSendLocksLock)
+                    // ConcurrentDictionary: dispose and remove send lock atomically
+                    if (_streamSendLocks.TryRemove(_tcpClient, out var semaphore))
                     {
-                        if (_streamSendLocks.TryGetValue(_tcpClient, out var semaphore))
-                        {
-                            semaphore.Dispose();
-                            _streamSendLocks.Remove(_tcpClient);
-                        }
+                        semaphore.Dispose();
                     }
                 }
 
@@ -1791,33 +1798,31 @@ namespace Modules.Utilities
         {
             List<TcpClient> clientsToSend = new List<TcpClient>();
 
-            lock (m_Clients)
+            // ConcurrentDictionary: iteration is thread-safe, get snapshot
+            if (targetClientIds == null || targetClientIds.Length == 0)
             {
-                if (targetClientIds == null || targetClientIds.Length == 0)
+                // Send to all connected clients - avoid LINQ for performance
+                foreach (var kvp in m_Clients)
                 {
-                    // Send to all connected clients - avoid LINQ for performance
-                    foreach (var client in m_Clients.Keys)
+                    if (kvp.Key.Connected)
                     {
-                        if (client.Connected)
-                        {
-                            clientsToSend.Add(client);
-                        }
+                        clientsToSend.Add(kvp.Key);
                     }
                 }
-                else
+            }
+            else
+            {
+                // Send to specific clients - avoid LINQ for performance
+                foreach (var kvp in m_Clients)
                 {
-                    // Send to specific clients - avoid LINQ for performance
-                    foreach (var kvp in m_Clients)
+                    if (kvp.Key.Connected)
                     {
-                        if (kvp.Key.Connected)
+                        foreach (var targetId in targetClientIds)
                         {
-                            foreach (var targetId in targetClientIds)
+                            if (kvp.Value.id == targetId)
                             {
-                                if (kvp.Value.id == targetId)
-                                {
-                                    clientsToSend.Add(kvp.Key);
-                                    break;
-                                }
+                                clientsToSend.Add(kvp.Key);
+                                break;
                             }
                         }
                     }
@@ -1879,10 +1884,7 @@ namespace Modules.Utilities
             }
 
             SemaphoreSlim sendLock = client != null ? GetOrCreateSendLock(client) : null;
-            if (sendLock != null)
-            {
-                await sendLock.WaitAsync(token);
-            }
+            bool lockAcquired = false;
 
             // Use configured buffer size for optimal performance
             int chunkSize = Math.Min(m_BufferSize, message.Length);
@@ -1903,6 +1905,13 @@ namespace Modules.Utilities
 
             try
             {
+                // Acquire lock inside try block to ensure proper cleanup on cancellation
+                if (sendLock != null)
+                {
+                    await sendLock.WaitAsync(linkedCts.Token);
+                    lockAcquired = true;
+                }
+
                 while (offset < message.Length && !linkedCts.Token.IsCancellationRequested)
                 {
                     int bytesToSend = Math.Min(chunkSize, message.Length - offset);
@@ -1960,8 +1969,11 @@ namespace Modules.Utilities
             }
             finally
             {
-                // Release send lock to allow other operations
-                sendLock?.Release();
+                // Only release lock if it was successfully acquired
+                if (lockAcquired)
+                {
+                    sendLock?.Release();
+                }
             }
         }
 
@@ -2476,11 +2488,8 @@ namespace Modules.Utilities
         {
             if (!m_IsServer) return;
 
-            List<ConnectorInfo> currentClients;
-            lock (m_Clients)
-            {
-                currentClients = m_Clients.Values.ToList();
-            }
+            // Get snapshot of current clients (ConcurrentDictionary iteration is thread-safe)
+            List<ConnectorInfo> currentClients = m_Clients.Values.ToList();
 
             // Update server's own synced list
             lock (_syncedClientListLock)
@@ -2595,13 +2604,11 @@ namespace Modules.Utilities
                 if (relayData.targetIds == null || relayData.targetIds.Length == 0)
                 {
                     // Broadcast to all clients except sender
-                    lock (m_Clients)
-                    {
-                        targetIds = m_Clients.Values
-                            .Where(c => c.id != senderInfo.id)
-                            .Select(c => c.id)
-                            .ToArray();
-                    }
+                    // ConcurrentDictionary iteration is thread-safe
+                    targetIds = m_Clients.Values
+                        .Where(c => c.id != senderInfo.id)
+                        .Select(c => c.id)
+                        .ToArray();
                 }
                 else
                 {
