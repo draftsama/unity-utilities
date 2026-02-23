@@ -229,6 +229,58 @@ public static class TextureUtility
         return true;
     }
     
+    /// <summary>
+    /// Convert any Texture (RenderTexture, Texture2D, etc.) to Texture2D using GPU
+    /// This is an efficient method that works with any texture type, including those without Read/Write enabled
+    /// </summary>
+    /// <param name="texture">Source texture to convert</param>
+    /// <returns>New Texture2D with copied data, or null if conversion fails</returns>
+    /// <example>
+    /// // Convert RenderTexture to Texture2D
+    /// Texture2D tex2d = TextureUtility.ToTexture2D(renderTexture);
+    /// 
+    /// // Convert any texture from material
+    /// Texture2D tex2d = TextureUtility.ToTexture2D(material.mainTexture);
+    /// </example>
+    public static Texture2D ToTexture2D(Texture texture)
+    {
+        if (texture == null)
+        {
+            Debug.LogError("TextureUtility.ToTexture2D: Source texture is null");
+            return null;
+        }
+        
+        // If already Texture2D, can return as-is or create a copy
+        if (texture is Texture2D tex2d)
+        {
+            // Create a copy to maintain consistency (always returns a new instance)
+            RenderTexture tempRT = RenderTexture.GetTemporary(tex2d.width, tex2d.height, 0, RenderTextureFormat.ARGB32);
+            Graphics.Blit(tex2d, tempRT);
+            
+            RenderTexture.active = tempRT;
+            Texture2D result = new Texture2D(tex2d.width, tex2d.height, TextureFormat.RGBA32, false);
+            result.ReadPixels(new Rect(0, 0, tex2d.width, tex2d.height), 0, 0);
+            result.Apply();
+            RenderTexture.active = null;
+            
+            RenderTexture.ReleaseTemporary(tempRT);
+            return result;
+        }
+        
+        // For RenderTexture or other texture types, use Graphics.Blit
+        RenderTexture temp = RenderTexture.GetTemporary(texture.width, texture.height, 0, RenderTextureFormat.ARGB32);
+        Graphics.Blit(texture, temp);
+        
+        RenderTexture.active = temp;
+        Texture2D output = new Texture2D(texture.width, texture.height, TextureFormat.RGBA32, false);
+        output.ReadPixels(new Rect(0, 0, texture.width, texture.height), 0, 0);
+        output.Apply();
+        RenderTexture.active = null;
+        
+        RenderTexture.ReleaseTemporary(temp);
+        return output;
+    }
+    
     #endregion
     
     #region Flip Operations
@@ -1318,5 +1370,24 @@ public static class TextureUtilityExtensions
     public static TextureUtility.TextureOperationChain BeginChainGPU(this Texture2D texture)
     {
         return TextureUtility.BeginChain(texture);
+    }
+    
+    /// <summary>
+    /// Convert any Texture to Texture2D using GPU (extension method)
+    /// Works with RenderTexture, Texture2D, and any other texture type
+    /// Does not require Read/Write enabled
+    /// </summary>
+    /// <param name="texture">Source texture</param>
+    /// <returns>New Texture2D with copied data</returns>
+    /// <example>
+    /// // Convert RenderTexture
+    /// Texture2D tex = renderTexture.ToTexture2D();
+    /// 
+    /// // Convert from material
+    /// Texture2D tex = material.mainTexture.ToTexture2D();
+    /// </example>
+    public static Texture2D ToTexture2D(this Texture texture)
+    {
+        return TextureUtility.ToTexture2D(texture);
     }
 }
