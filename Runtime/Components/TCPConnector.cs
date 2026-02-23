@@ -585,8 +585,8 @@ namespace Modules.Utilities
                     _pendingConnections[client] = ConnectionState.HelloSent;
                 }
 
-                byte[] helloPacket = CreatePacket(ACTION_CONNECTION_HELLO, Array.Empty<byte>());
-                await SendDataToStreamAsync(stream, helloPacket, null, token, client);
+                var (helloPacket, helloLength) = CreatePacket(ACTION_CONNECTION_HELLO, Array.Empty<byte>());
+                await SendDataToStreamAsync(stream, helloPacket, helloLength, null, token, client);
 
                 // --- Handshake Step 2: Wait for ACK ---
                 string ackKey = $"ack_{clientInfo.id}";
@@ -1199,8 +1199,8 @@ namespace Modules.Utilities
                 }
 
                 // --- Handshake Step 2: Send ACK to server ---
-                byte[] ackPacket = CreatePacket(ACTION_CONNECTION_ACK, Array.Empty<byte>());
-                await SendDataToStreamAsync(stream, ackPacket, null, token, _tcpClient);
+                var (ackPacket, ackLength) = CreatePacket(ACTION_CONNECTION_ACK, Array.Empty<byte>());
+                await SendDataToStreamAsync(stream, ackPacket, ackLength, null, token, _tcpClient);
 
                 lock (_handshakeLock)
                 {
@@ -1238,8 +1238,8 @@ namespace Modules.Utilities
                 }
 
                 // --- Handshake Step 4: Send READY to server ---
-                byte[] readyPacket = CreatePacket(ACTION_CONNECTION_READY, Array.Empty<byte>());
-                await SendDataToStreamAsync(stream, readyPacket, null, token, _tcpClient);
+                var (readyPacket, readyLength) = CreatePacket(ACTION_CONNECTION_READY, Array.Empty<byte>());
+                await SendDataToStreamAsync(stream, readyPacket, readyLength, null, token, _tcpClient);
 
                 lock (_handshakeLock)
                 {
@@ -1678,7 +1678,9 @@ namespace Modules.Utilities
             // Handle null data by converting to empty byte array
             data ??= Array.Empty<byte>();
 
-            byte[] message = CreatePacket(action, data);
+            // Use buffer pool for normal messages (not in critical handshake paths)
+            bool usePool = true;
+            var (message, messageLength) = CreatePacket(action, data, usePool);
             int retryCount = 0;
             bool success = false;
 
@@ -1688,92 +1690,106 @@ namespace Modules.Utilities
                 Log($"📤 Sending data: Action={action}, Size={data?.Length ?? 0} bytes");
             }
 
-            while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
+            try
             {
-                try
+                while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
                 {
-                    // Simple connection check - let TCP error handling manage the rest
-                    if (!m_IsRunning)
+                    try
                     {
-                        throw new InvalidOperationException("Connection is not running");
-                    }
-
-                    if (m_IsServer)
-                    {
-                        if (m_Clients.Count == 0)
+                        // Simple connection check - let TCP error handling manage the rest
+                        if (!m_IsRunning)
                         {
-                            throw new InvalidOperationException("No clients connected");
+                            throw new InvalidOperationException("Connection is not running");
                         }
-                        await SendAsServerAsync(message, progress, token);
-                    }
-                    else
-                    {
-                        // Client always sends to server
-                        if (m_IsConnected && _tcpClient != null && _tcpClient.Connected)
+
+                        if (m_IsServer)
                         {
-                            await SendDataToStreamAsync(_tcpClient.GetStream(), message, progress, token, _tcpClient);
+                            if (m_Clients.Count == 0)
+                            {
+                                throw new InvalidOperationException("No clients connected");
+                            }
+                            // Pass shouldReturnBuffer flag - will be returned after all clients receive
+                            await SendAsServerAsync(message, messageLength, progress, token, shouldReturnBuffer: usePool);
                         }
                         else
                         {
-                            throw new InvalidOperationException("Client is not connected");
+                            // Client always sends to server
+                            if (m_IsConnected && _tcpClient != null && _tcpClient.Connected)
+                            {
+                                await SendDataToStreamAsync(_tcpClient.GetStream(), message, messageLength, progress, token, _tcpClient, shouldReturnBuffer: usePool);
+                            }
+                            else
+                            {
+                                throw new InvalidOperationException("Client is not connected");
+                            }
                         }
-                    }
 
-                    success = true; // If we reach here, send was successful
+                        success = true; // If we reach here, send was successful
 
-                    // Log successful send
-                    if (m_LogSend)
-                    {
-                        if (retryCount > 0)
-                        {
-                            Log($"✅ Data sent successfully after {retryCount} retries: Action={action}");
-                        }
-                        else
-                        {
-                            Log($"✅ Data sent successfully: Action={action}");
-                        }
-                    }
-                }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
-                                                           ex.Message.Contains("Stream disposed") ||
-                                                           ex.Message.Contains("Connection is not healthy") ||
-                                                           ex.Message.Contains("Client is not connected"))
-                {
-                    // Connection issues - don't retry, just exit gracefully
-                    Log($"Send operation aborted: {ex.Message}");
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    retryCount++;
-                    if (retryCount > m_MaxRetryCount)
-                    {
+                        // Log successful send
                         if (m_LogSend)
                         {
-                            Log($"❌ Send Data Failed after {m_MaxRetryCount} retries: Action={action}, Error={ex.Message}");
+                            if (retryCount > 0)
+                            {
+                                Log($"✅ Data sent successfully after {retryCount} retries: Action={action}");
+                            }
+                            else
+                            {
+                                Log($"✅ Data sent successfully: Action={action}");
+                            }
                         }
-                        ReportError(ErrorInfo.ErrorType.DataTransmission, $"Data send failed after {m_MaxRetryCount} retries", ex);
+                    }
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
+                                                               ex.Message.Contains("Stream disposed") ||
+                                                               ex.Message.Contains("Connection is not healthy") ||
+                                                               ex.Message.Contains("Client is not connected"))
+                    {
+                        // Connection issues - don't retry, just exit gracefully
+                        Log($"Send operation aborted: {ex.Message}");
                         break;
                     }
-                    else
+                    catch (OperationCanceledException)
                     {
-                        if (m_LogSend)
+                        break;
+                    }
+                    catch (Exception ex)
+                    {
+                        retryCount++;
+                        if (retryCount > m_MaxRetryCount)
                         {
-                            Log($"⚠️ Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: Action={action}, Error={ex.Message}");
+                            if (m_LogSend)
+                            {
+                                Log($"❌ Send Data Failed after {m_MaxRetryCount} retries: Action={action}, Error={ex.Message}");
+                            }
+                            ReportError(ErrorInfo.ErrorType.DataTransmission, $"Data send failed after {m_MaxRetryCount} retries", ex);
+                            break;
                         }
-                        await UniTask.Delay(m_RetryDelay, cancellationToken: token);
+                        else
+                        {
+                            if (m_LogSend)
+                            {
+                                Log($"⚠️ Send Data Failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: Action={action}, Error={ex.Message}");
+                            }
+                            await UniTask.Delay(m_RetryDelay, cancellationToken: token);
+                        }
                     }
                 }
-            }
 
-            // Log final result if failed
-            if (!success && m_LogSend)
+                // Log final result if failed
+                if (!success && m_LogSend)
+                {
+                    Log($"❌ Send operation failed completely: Action={action}");
+                }
+            }
+            finally
             {
-                Log($"❌ Send operation failed completely: Action={action}");
+                // If buffer was pooled but send failed (never made it to SendDataToStreamAsync/SendAsServerAsync),
+                // return it here. If send succeeded, buffer already returned by those methods.
+                // Check if buffer needs cleanup on retry failures.
+                if (usePool && !success && message != null)
+                {
+                    ReturnBuffer(message);
+                }
             }
 
             return success;
@@ -1782,19 +1798,21 @@ namespace Modules.Utilities
         /// <summary>
         /// Handles server-side message sending to all connected clients
         /// </summary>
-        private async UniTask SendAsServerAsync(byte[] message, IProgress<float> progress, CancellationToken token)
+        private async UniTask SendAsServerAsync(byte[] message, int messageLength, IProgress<float> progress, CancellationToken token, bool shouldReturnBuffer = false)
         {
-            await SendAsServerAsync(message, null, progress, token);
+            await SendAsServerAsync(message, messageLength, null, progress, token, shouldReturnBuffer);
         }
 
         /// <summary>
         /// Handles server-side message sending to specific clients or all clients
         /// </summary>
         /// <param name="message">Message to send</param>
+        /// <param name="messageLength">Actual message length (may be less than message.Length for pooled buffers)</param>
         /// <param name="targetClientIds">Target client IDs. If null, sends to all clients</param>
         /// <param name="progress">Progress reporter</param>
         /// <param name="token">Cancellation token</param>
-        private async UniTask SendAsServerAsync(byte[] message, int[] targetClientIds, IProgress<float> progress, CancellationToken token)
+        /// <param name="shouldReturnBuffer">If true, returns buffer to pool after send completes</param>
+        private async UniTask SendAsServerAsync(byte[] message, int messageLength, int[] targetClientIds, IProgress<float> progress, CancellationToken token, bool shouldReturnBuffer = false)
         {
             List<TcpClient> clientsToSend = new List<TcpClient>();
 
@@ -1833,6 +1851,12 @@ namespace Modules.Utilities
             {
                 string targetInfo = targetClientIds == null ? "all clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
                 Log($"No connected clients to send data to ({targetInfo})");
+                
+                // Return buffer if pooled, even if no clients to send to
+                if (shouldReturnBuffer && message != null)
+                {
+                    ReturnBuffer(message);
+                }
                 return;
             }
 
@@ -1841,7 +1865,8 @@ namespace Modules.Utilities
             {
                 try
                 {
-                    await SendDataToStreamAsync(client.GetStream(), message, progress, token, client);
+                    // Note: Don't return buffer here - will be returned after all sends complete
+                    await SendDataToStreamAsync(client.GetStream(), message, messageLength, progress, token, client, shouldReturnBuffer: false);
 
                     return true; // Success
                 }
@@ -1852,31 +1877,44 @@ namespace Modules.Utilities
                 }
             }).ToList();
 
-            var results = await UniTask.WhenAll(sendTasks);
+            try
+            {
+                var results = await UniTask.WhenAll(sendTasks);
 
-            // Check if at least one client received the data successfully
-            int successfulSends = results.Count(r => r);
-            if (successfulSends == 0)
-            {
-                string targetInfo = targetClientIds == null ? $"{clientsToSend.Count} connected clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
-                throw new InvalidOperationException($"Failed to send data to any of {targetInfo}");
+                // Check if at least one client received the data successfully
+                int successfulSends = results.Count(r => r);
+                if (successfulSends == 0)
+                {
+                    string targetInfo = targetClientIds == null ? $"{clientsToSend.Count} connected clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                    throw new InvalidOperationException($"Failed to send data to any of {targetInfo}");
+                }
+                else if (successfulSends < results.Length)
+                {
+                    string targetInfo = targetClientIds == null ? "clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                    Log($"Data sent successfully to {successfulSends}/{results.Length} {targetInfo}");
+                }
+                else
+                {
+                    string targetInfo = targetClientIds == null ? "all clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
+                    Log($"Data sent successfully to {successfulSends} {targetInfo}");
+                }
             }
-            else if (successfulSends < results.Length)
+            finally
             {
-                string targetInfo = targetClientIds == null ? "clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
-                Log($"Data sent successfully to {successfulSends}/{results.Length} {targetInfo}");
-            }
-            else
-            {
-                string targetInfo = targetClientIds == null ? "all clients" : $"targeted clients [{string.Join(", ", targetClientIds)}]";
-                Log($"Data sent successfully to {successfulSends} {targetInfo}");
+                // Return buffer after all sends complete (success or failure)
+                if (shouldReturnBuffer && message != null)
+                {
+                    ReturnBuffer(message);
+                }
             }
         }
 
         /// <summary>
         /// Sends data to a specific NetworkStream with progress reporting.
         /// </summary>
-        private async UniTask SendDataToStreamAsync(NetworkStream stream, byte[] message, IProgress<float> progress = null, CancellationToken token = default, TcpClient client = null)
+        /// <param name="actualLength">Actual data length to send (may be less than message.Length for pooled buffers)</param>
+        /// <param name="shouldReturnBuffer">If true, returns message buffer to pool after send completes (for pooled buffers)</param>
+        private async UniTask SendDataToStreamAsync(NetworkStream stream, byte[] message, int actualLength, IProgress<float> progress = null, CancellationToken token = default, TcpClient client = null, bool shouldReturnBuffer = false)
         {
             if (stream == null || !stream.CanWrite)
             {
@@ -1887,14 +1925,15 @@ namespace Modules.Utilities
             bool lockAcquired = false;
 
             // Use configured buffer size for optimal performance
-            int chunkSize = Math.Min(m_BufferSize, message.Length);
+            // CRITICAL: Use actualLength, NOT message.Length (buffer may be larger when pooled)
+            int chunkSize = Math.Min(m_BufferSize, actualLength);
             int offset = 0;
             
             // Log for large transfers
-            bool isLargeTransfer = message.Length > m_BufferSize * 2;
+            bool isLargeTransfer = actualLength > m_BufferSize * 2;
             if (isLargeTransfer && m_LogSend)
             {
-                Log($"📤 Sending large data: {message.Length:N0} bytes (will send in {Math.Ceiling((double)message.Length / chunkSize)} chunks)");
+                Log($"📤 Sending large data: {actualLength:N0} bytes (will send in {Math.Ceiling((double)actualLength / chunkSize)} chunks)");
             }
 
             // Create timeout token source
@@ -1912,24 +1951,24 @@ namespace Modules.Utilities
                     lockAcquired = true;
                 }
 
-                while (offset < message.Length && !linkedCts.Token.IsCancellationRequested)
+                while (offset < actualLength && !linkedCts.Token.IsCancellationRequested)
                 {
-                    int bytesToSend = Math.Min(chunkSize, message.Length - offset);
+                    int bytesToSend = Math.Min(chunkSize, actualLength - offset);
                     await stream.WriteAsync(message, offset, bytesToSend, linkedCts.Token);
                     offset += bytesToSend;
 
                     // Report progress as percentage (0.0 to 1.0)
-                    float progressPercentage = (float)offset / message.Length;
+                    float progressPercentage = (float)offset / actualLength;
                     progress?.Report(progressPercentage);
                     
                     // Log progress for large transfers (every 25%)
                     if (isLargeTransfer && m_LogSend)
                     {
                         int currentProgress = (int)(progressPercentage * 100);
-                        if (currentProgress >= lastLoggedProgress + 25 || offset >= message.Length)
+                        if (currentProgress >= lastLoggedProgress + 25 || offset >= actualLength)
                         {
                             lastLoggedProgress = currentProgress;
-                            Log($"📤 Send progress: {currentProgress}% ({offset:N0}/{message.Length:N0} bytes)");
+                            Log($"📤 Send progress: {currentProgress}% ({offset:N0}/{actualLength:N0} bytes)");
                         }
                     }
                 }
@@ -1940,7 +1979,7 @@ namespace Modules.Utilities
             catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
             {
                 // Timeout occurred
-                throw new TimeoutException($"Send operation timed out after {m_SendTimeout}ms at offset {offset}/{message.Length}", ex);
+                throw new TimeoutException($"Send operation timed out after {m_SendTimeout}ms at offset {offset}/{actualLength}", ex);
             }
             catch (SocketException ex) when (ex.SocketErrorCode == SocketError.OperationAborted ||
                                              ex.SocketErrorCode == SocketError.ConnectionAborted ||
@@ -1964,7 +2003,7 @@ namespace Modules.Utilities
             }
             catch (Exception ex)
             {
-                Log($"Stream write error at offset {offset}/{message.Length}: {ex.GetType().Name} - {ex.Message}");
+                Log($"Stream write error at offset {offset}/{actualLength}: {ex.GetType().Name} - {ex.Message}");
                 throw; // Re-throw to be handled by retry logic
             }
             finally
@@ -1973,6 +2012,12 @@ namespace Modules.Utilities
                 if (lockAcquired)
                 {
                     sendLock?.Release();
+                }
+                
+                // Return buffer to pool if requested (after lock is released)
+                if (shouldReturnBuffer && message != null)
+                {
+                    ReturnBuffer(message);
                 }
             }
         }
@@ -2173,59 +2218,72 @@ namespace Modules.Utilities
                 return false;
             }
 
-            // Server-side targeting logic
-            byte[] message = CreatePacket(action, data);
+            // Server-side targeting logic - use buffer pool
+            bool usePool = true;
+            var (message, messageLength) = CreatePacket(action, data, usePool);
             int retryCount = 0;
             bool success = false;
 
-            while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
+            try
             {
-                try
+                while (retryCount <= m_MaxRetryCount && !success && !token.IsCancellationRequested)
                 {
-                    // Simple connection check - let TCP error handling manage the rest
-                    if (!m_IsRunning)
+                    try
                     {
-                        throw new InvalidOperationException("Connection is not running");
-                    }
+                        // Simple connection check - let TCP error handling manage the rest
+                        if (!m_IsRunning)
+                        {
+                            throw new InvalidOperationException("Connection is not running");
+                        }
 
-                    if (m_Clients.Count == 0)
-                    {
-                        throw new InvalidOperationException("No clients connected");
-                    }
+                        if (m_Clients.Count == 0)
+                        {
+                            throw new InvalidOperationException("No clients connected");
+                        }
 
-                    await SendAsServerAsync(message, targetClientIds, progress, token);
-                    success = true;
+                        // Pass shouldReturnBuffer flag - will be returned after send completes
+                        await SendAsServerAsync(message, messageLength, targetClientIds, progress, token, shouldReturnBuffer: usePool);
+                        success = true;
 
-                    if (retryCount > 0)
-                    {
-                        Log($"Data sent successfully to targeted clients after {retryCount} retries");
+                        if (retryCount > 0)
+                        {
+                            Log($"Data sent successfully to targeted clients after {retryCount} retries");
+                        }
                     }
-                }
-                catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
-                                                           ex.Message.Contains("Stream disposed"))
-                {
-                    Log($"Send operation aborted due to connection closure");
-                    break;
-                }
-                catch (OperationCanceledException)
-                {
-                    Log($"Send operation cancelled");
-                    break;
-                }
-                catch (Exception ex)
-                {
-                    retryCount++;
-                    if (retryCount > m_MaxRetryCount)
+                    catch (InvalidOperationException ex) when (ex.Message.Contains("Connection closed") ||
+                                                               ex.Message.Contains("Stream disposed"))
                     {
-                        Log($"Send Data to targeted clients failed after {m_MaxRetryCount} retries: {ex.Message}");
-                        ReportError(ErrorInfo.ErrorType.DataTransmission, $"Targeted data send failed after {m_MaxRetryCount} retries", ex);
+                        Log($"Send operation aborted due to connection closure");
                         break;
                     }
-                    else
+                    catch (OperationCanceledException)
                     {
-                        Log($"Send Data to targeted clients failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: {ex.Message}");
-                        await UniTask.Delay(m_RetryDelay, cancellationToken: token);
+                        Log($"Send operation cancelled");
+                        break;
                     }
+                    catch (Exception ex)
+                    {
+                        retryCount++;
+                        if (retryCount > m_MaxRetryCount)
+                        {
+                            Log($"Send Data to targeted clients failed after {m_MaxRetryCount} retries: {ex.Message}");
+                            ReportError(ErrorInfo.ErrorType.DataTransmission, $"Targeted data send failed after {m_MaxRetryCount} retries", ex);
+                            break;
+                        }
+                        else
+                        {
+                            Log($"Send Data to targeted clients failed (attempt {retryCount}/{m_MaxRetryCount}), retrying in {m_RetryDelay}ms: {ex.Message}");
+                            await UniTask.Delay(m_RetryDelay, cancellationToken: token);
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                // If buffer was pooled but send failed, return it here
+                if (usePool && !success && message != null)
+                {
+                    ReturnBuffer(message);
                 }
             }
 
@@ -2307,19 +2365,44 @@ namespace Modules.Utilities
         /// <summary>
         /// Creates a TCP packet with length prefix for stream protocol
         /// </summary>
-        private byte[] CreatePacket(ushort action, byte[] data)
+        /// <param name="action">Action identifier</param>
+        /// <param name="data">Payload data</param>
+        /// <param name="usePool">If true, uses buffer pool (caller must return buffer). If false, creates new buffer (fire-and-forget).</param>
+        /// <returns>Tuple of (buffer, actualLength). Buffer may be larger than actualLength when pooled. Caller MUST use actualLength, not buffer.Length.</returns>
+        private (byte[] buffer, int length) CreatePacket(ushort action, byte[] data, bool usePool = false)
         {
-            byte[] packet = CreateCorePacket(action, data);
-
-            // TCP needs length prefix for stream protocol
-            byte[] lengthPrefix = BitConverter.GetBytes(packet.Length);
-            byte[] finalMessage = new byte[4 + packet.Length];
-
-            Buffer.BlockCopy(lengthPrefix, 0, finalMessage, 0, 4);
-            Buffer.BlockCopy(packet, 0, finalMessage, 4, packet.Length);
+            data ??= Array.Empty<byte>();
+            
+            // Calculate total size: 4 bytes (length prefix) + PACKET_HEADER_SIZE + data length
+            int packetSize = PACKET_HEADER_SIZE + data.Length;
+            int totalSize = 4 + packetSize;
+            
+            // Use buffer pool or allocate new buffer
+            // WARNING: Pooled buffer may be LARGER than totalSize!
+            byte[] finalMessage = usePool ? GetBuffer(totalSize) : new byte[totalSize];
+            
+            // Write length prefix (first 4 bytes)
+            Buffer.BlockCopy(BitConverter.GetBytes(packetSize), 0, finalMessage, 0, 4);
+            
+            int offset = 4; // Start after length prefix
+            
+            // Write message ID (4 bytes)
+            Buffer.BlockCopy(BitConverter.GetBytes(new System.Random().Next()), 0, finalMessage, offset, 4);
+            offset += 4;
+            
+            // Write action (2 bytes)
+            Buffer.BlockCopy(BitConverter.GetBytes(action), 0, finalMessage, offset, 2);
+            offset += 2;
+            
+            // Write payload data
+            if (data.Length > 0)
+            {
+                Buffer.BlockCopy(data, 0, finalMessage, offset, data.Length);
+            }
 
             // Log removed for performance - was logging every packet creation
-            return finalMessage;
+            // Return both buffer and ACTUAL length (critical for pooled buffers!)
+            return (finalMessage, totalSize);
         }
 
         /// <summary>
@@ -2391,6 +2474,12 @@ namespace Modules.Utilities
             /// </summary>
             public int senderId;
             public ushort action;
+            
+            /// <summary>
+            /// Payload data. This buffer is owned by the event handler.
+            /// ⚠️ WARNING: Do not retain references to this buffer beyond the event handler scope.
+            /// For future optimization compatibility, always deserialize or copy data immediately within the handler.
+            /// </summary>
             public byte[] data;
             public IPEndPoint remoteEndPoint;
 
