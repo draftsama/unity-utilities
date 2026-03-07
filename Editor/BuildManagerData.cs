@@ -22,6 +22,7 @@ namespace Modules.Utilities.Editor
         
         public bool isNotify = false;
         public bool isSoundNotify = false;
+        public bool developmentBuild = false;
 
         /// <summary>
         /// Load data from profile settings into this data object.
@@ -49,6 +50,8 @@ namespace Modules.Utilities.Editor
             copyFilePaths = profileSettings.copyFilePaths != null 
                 ? new List<string>(profileSettings.copyFilePaths) 
                 : new List<string>();
+
+            developmentBuild = profileSettings.developmentBuild;
 
             // Load global settings
             if (globalSettings != null)
@@ -80,6 +83,8 @@ namespace Modules.Utilities.Editor
             
             profileSettings.enableCopyFiles = enableCopyFiles;
             profileSettings.copyFilePaths = new List<string>(copyFilePaths);
+
+            profileSettings.developmentBuild = developmentBuild;
 
             // Save global settings
             if (globalSettings != null)

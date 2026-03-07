@@ -38,6 +38,9 @@ namespace Modules.Utilities.Editor
             [Header("Copy Files (Windows Only)")]
             public bool enableCopyFiles = true;
             public List<string> copyFilePaths = new List<string>();
+
+            [Header("Build Options")]
+            public bool developmentBuild = false;
             
             public ProfileSettings(string name)
             {
@@ -50,6 +53,7 @@ namespace Modules.Utilities.Editor
                 copyFolderPaths = new List<string>();
                 enableCopyFiles = true;
                 copyFilePaths = new List<string>();
+                developmentBuild = false;
             }
             
             public bool IsValid()
