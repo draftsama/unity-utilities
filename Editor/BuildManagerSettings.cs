@@ -8,8 +8,7 @@ namespace Modules.Utilities.Editor
     [CreateAssetMenu(fileName = "BuildManagerSettings", menuName = "Build Manager/Settings")]
     public class BuildManagerSettings : ScriptableObject
     {
-        [Header("Profile Settings")]
-        public int selectedBuildProfileIndex = 0;
+     
         
         [Header("Global Build Configuration")]
         public bool isNotify = false;

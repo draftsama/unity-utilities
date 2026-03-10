@@ -90,6 +90,15 @@ namespace Modules.Utilities.Editor
 
         void LoadOrCreateSettings()
         {
+            // Force reimport from disk to avoid stale in-memory cache.
+            // AssetDatabase.LoadAssetAtPath returns a cached reference if the asset is
+            // already in memory, so without this, external changes (git, etc.) are invisible
+            // until Unity is restarted.
+            if (!string.IsNullOrEmpty(AssetDatabase.AssetPathToGUID(SETTINGS_PATH)))
+            {
+                AssetDatabase.ImportAsset(SETTINGS_PATH, ImportAssetOptions.ForceUpdate);
+            }
+
             settings = AssetDatabase.LoadAssetAtPath<BuildManagerSettings>(SETTINGS_PATH);
             if (settings == null)
             {
