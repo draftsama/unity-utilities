@@ -5,6 +5,8 @@ using Cysharp.Threading.Tasks;
 using Modules.Utilities;
 using UnityEngine;
 using Object = UnityEngine.Object;
+using System.Collections.Generic;
+
 #if UNITY_EDITOR
 using UnityEditor;
 using System.Reflection;
@@ -16,16 +18,28 @@ namespace Modules.Utilities
     [RequireComponent(typeof(CanvasGroup))]
     public class UIPage : MonoBehaviour
     {
+        private static readonly Dictionary<string, List<UIPage>> s_PageRegistry = new();
 
+#if UNITY_EDITOR
+        static UIPage()
+        {
+            UnityEditor.EditorApplication.playModeStateChanged += state =>
+            {
+                if (state == UnityEditor.PlayModeStateChange.EnteredEditMode)
+                    s_PageRegistry.Clear();
+            };
+        }
+#endif
 
-
-        [SerializeField][HideInInspector] public string m_GroupName = "Default";
-        [SerializeField][HideInInspector] public bool m_IsDefault;
-        [SerializeField][HideInInspector] public bool m_IsOpened;
-        [SerializeField][HideInInspector] public bool m_IsTransitionPage;
+        [SerializeField][HideInInspector] private string m_GroupName = "Default";
+        public string GroupName => m_GroupName;
+        [SerializeField][HideInInspector] private bool m_IsDefault;
+        public bool IsDefault => m_IsDefault;
+        [SerializeField][HideInInspector] private bool m_IsOpened;
+        public bool IsOpened => m_IsOpened;
+        [SerializeField][HideInInspector] private bool m_IsTransitionPage;
+        public bool IsTransitionPage => m_IsTransitionPage;
         [SerializeField][HideInInspector] public TransitionInfo m_TransitionInfo;
-
-
 
 
         public CanvasGroup m_CanvasGroup { get; private set; }
@@ -40,10 +54,37 @@ namespace Modules.Utilities
         {
             m_CanvasGroup = GetComponent<CanvasGroup>();
             m_RectTransform = GetComponent<RectTransform>();
-            SetShow(m_IsDefault);
-            if (m_IsDefault)
+
+            // Register into group
+            if (!s_PageRegistry.TryGetValue(m_GroupName, out var list))
+            {
+                list = new List<UIPage>();
+                s_PageRegistry[m_GroupName] = list;
+            }
+            if (!list.Contains(this))
+                list.Add(this);
+
+            // Show only if default AND no other page is already open in this group
+            var hasOpened = list.Any(_ => _ != this && _.m_IsOpened);
+            var shouldShow = m_IsDefault && !hasOpened;
+
+            SetShow(shouldShow);
+            if (shouldShow)
                 foreach (var pe in GetComponents<IPageShowEnd>())
                     pe.OnEndShowPage();
+        }
+
+        protected virtual void OnDestroy()
+        {
+            if (!s_PageRegistry.TryGetValue(m_GroupName, out var list)) return;
+            list.Remove(this);
+
+            // If this page was open, try to show the default page instead
+            if (m_IsOpened)
+            {
+                var defaultPage = list.FirstOrDefault(_ => _ != null && _.m_IsDefault);
+                defaultPage?.SetShow(true);
+            }
         }
 
 
@@ -66,10 +107,9 @@ namespace Modules.Utilities
             if (m_IsOpened) return;
             if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
-            await UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, _token);
+            await TransitionPageAsync(this, _overrideTransitionInfo, _token);
 
         }
-
 
 
         public void OpenPage(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
@@ -77,7 +117,7 @@ namespace Modules.Utilities
             if (m_IsOpened) return;
             if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
-            UIPageHelper.TransitionPageAsync(this, _overrideTransitionInfo, _token).Forget();
+            TransitionPageAsync(this, _overrideTransitionInfo, _token).Forget();
 
         }
 
@@ -108,26 +148,95 @@ namespace Modules.Utilities
             m_IsOpened = _isShow;
         }
 
+        public void SetDefault(bool _value = true)
+        {
+            if (m_IsDefault == _value) return;
+            m_IsDefault = _value;
+
+            if (_value)
+            {
+                foreach (var p in GetPages(m_GroupName))
+                    if (p != this) p.SetDefault(false);
+            }
+        }
+
+        public void SetGroupName(string _groupName)
+        {
+            if (m_GroupName == _groupName) return;
+
+            // Unregister from old group
+            if (s_PageRegistry.TryGetValue(m_GroupName, out var oldList))
+                oldList.Remove(this);
+
+            m_GroupName = _groupName;
+
+            // Register into new group
+            if (!s_PageRegistry.TryGetValue(m_GroupName, out var newList))
+            {
+                newList = new List<UIPage>();
+                s_PageRegistry[m_GroupName] = newList;
+            }
+            if (!newList.Contains(this))
+                newList.Add(this);
+        }
+
+
+        #region Static Methods
+
         public static T GetPage<T>(string _groupName = "Default") where T : UIPage
         {
-            //get page by type
-            var pages = Object.FindObjectsByType<T>(FindObjectsSortMode.None);
-            return pages.FirstOrDefault(_ => _.m_GroupName == _groupName);
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                var pages = Object.FindObjectsByType<T>(FindObjectsSortMode.None);
+                return pages.FirstOrDefault(_ => _.m_GroupName == _groupName);
+            }
+#endif
+            if (!s_PageRegistry.TryGetValue(_groupName, out var list)) return null;
+            return list.OfType<T>().FirstOrDefault();
         }
+
+
+        public static UIPage GetPageByName(string _name, string _groupName = "Default")
+        {
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+            {
+                var pages = Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None);
+                return pages.FirstOrDefault(_ => _.m_GroupName == _groupName && _.name == _name);
+            }
+#endif
+            if (!s_PageRegistry.TryGetValue(_groupName, out var list)) return null;
+            return list.FirstOrDefault(_ => _ != null && _.name == _name);
+
+        }
+        
+
+
 
         public static UIPage GetCurrentPage(string _groupName = "Default")
         {
-            return Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-                .FirstOrDefault(_ => _.m_GroupName == _groupName && _.m_IsOpened);
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                return Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                    .FirstOrDefault(_ => _.m_GroupName == _groupName && _.m_IsOpened);
+#endif
+            if (!s_PageRegistry.TryGetValue(_groupName, out var list)) return null;
+            return list.FirstOrDefault(_ => _ != null && _.m_IsOpened);
         }
 
         public static UIPage[] GetPages(string _groupName = "Default")
         {
-            return Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-                .Where(_ => _.m_GroupName == _groupName).ToArray();
+#if UNITY_EDITOR
+            if (!Application.isPlaying)
+                return Object.FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                    .Where(_ => _.m_GroupName == _groupName).ToArray();
+#endif
+            if (!s_PageRegistry.TryGetValue(_groupName, out var list)) return Array.Empty<UIPage>();
+            return list.Where(_ => _ != null).ToArray();
         }
 
-         public static bool ResetUIPagesWithoutNotify(string _groupName)
+        public static bool ResetUIPagesWithoutNotify(string _groupName)
         {
             var uiPages = GetPages(_groupName);
 
@@ -140,14 +249,7 @@ namespace Modules.Utilities
             return true;
         }
 
-
-    }
-
-
-    public static class UIPageHelper
-    {
-
-        public static async UniTask TransitionPageAsync(UIPage _target, TransitionInfo _overrideTransition = null, CancellationToken _token = default)
+         public static async UniTask TransitionPageAsync(UIPage _target, TransitionInfo _overrideTransition = null, CancellationToken _token = default)
         {
             var current = UIPage.GetCurrentPage(_target.m_GroupName);
             // Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
@@ -255,19 +357,13 @@ namespace Modules.Utilities
 
         }
 
-        public static bool ResetUIPagesWithoutNotify(string _groupName)
-        {
-            var uiPages = UIPage.GetPages(_groupName);
+        #endregion
 
-            foreach (var p in uiPages)
-            {
-                p.SetShow(p.m_IsDefault);
 
-            }
-
-            return true;
-        }
     }
+
+
+  
 
 
     public interface IPageShowBegin
@@ -306,11 +402,11 @@ namespace Modules.Utilities.Editor
             serializedObject.Update();
             var script = (UIPage)target;
 
-            var groupName = serializedObject.FindProperty(nameof(script.m_GroupName));
-            var isDefault = serializedObject.FindProperty(nameof(script.m_IsDefault));
+            var groupName = serializedObject.FindProperty("m_GroupName");
+            var isDefault = serializedObject.FindProperty("m_IsDefault");
             var transitionInfo = serializedObject.FindProperty(nameof(script.m_TransitionInfo));
-            var isTransitionPage = serializedObject.FindProperty(nameof(script.m_IsTransitionPage));
-            var isOpened = serializedObject.FindProperty(nameof(script.m_IsOpened));
+            var isTransitionPage = serializedObject.FindProperty("m_IsTransitionPage");
+            var isOpened = serializedObject.FindProperty("m_IsOpened");
 
 
 
@@ -327,8 +423,8 @@ namespace Modules.Utilities.Editor
                     var gameObject = script.gameObject;
 
                     // Save current values
-                    var savedGroupName = script.m_GroupName;
-                    var savedIsDefault = script.m_IsDefault;
+                    var savedGroupName = script.GroupName;
+                    var savedIsDefault = script.IsDefault;
                     var savedTransitionInfo = script.m_TransitionInfo;
 
                     // Remove old component and add new one
@@ -339,8 +435,8 @@ namespace Modules.Utilities.Editor
                     // Restore values
                     if (newComponent != null)
                     {
-                        newComponent.m_GroupName = savedGroupName;
-                        newComponent.m_IsDefault = savedIsDefault;
+                        newComponent.SetGroupName(savedGroupName);
+                        if (savedIsDefault) newComponent.SetDefault();
                         newComponent.m_TransitionInfo = savedTransitionInfo;
 
                         // Move component to original position
@@ -362,11 +458,11 @@ namespace Modules.Utilities.Editor
             //draw properties
             EditorGUILayout.PropertyField(groupName);
 
-            var uiPagesByGroup = UIPage.GetPages(script.m_GroupName);
+            var uiPagesByGroup = UIPage.GetPages(script.GroupName);
 
             var groupCount = uiPagesByGroup.Count();
 
-            var currentDefault = uiPagesByGroup.FirstOrDefault(_ => _.m_IsDefault);
+            var currentDefault = uiPagesByGroup.FirstOrDefault(_ => _.IsDefault);
             EditorGUILayout.LabelField("UI Pages in Group : " + groupCount);
 
 
@@ -375,6 +471,15 @@ namespace Modules.Utilities.Editor
             {
                 isDefault.boolValue = true;
 
+                var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                                   .Where(_ => _.GroupName == script.GroupName && _ != script);
+
+                foreach (var p in allPages)
+                {
+                    p.SetShow(false);
+                }
+
+                script.SetShow(true);
             }
 
 
@@ -420,7 +525,7 @@ namespace Modules.Utilities.Editor
             if (GUILayout.Button("Show Only"))
             {
                 var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-                    .Where(_ => _.m_GroupName == script.m_GroupName && _ != script);
+                    .Where(_ => _.GroupName == script.GroupName && _ != script);
 
                 foreach (var p in allPages)
                 {
@@ -458,16 +563,17 @@ namespace Modules.Utilities.Editor
 
             if (GUI.changed)
             {
-
-
                 if (isDefault.boolValue)
                 {
                     var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-                        .Where(_ => _.m_GroupName == script.m_GroupName && _ != script);
+                        .Where(_ => _.GroupName == script.GroupName && _ != script);
+
+            
 
                     foreach (var p in allPages)
                     {
-                        p.m_IsDefault = false;
+                        p.SetDefault(false);
+                        EditorUtility.SetDirty(p);
                     }
                 }
 
@@ -480,6 +586,92 @@ namespace Modules.Utilities.Editor
 
         }
 
+    }
+
+    [UnityEditor.InitializeOnLoad]
+    public static class UIPageHierarchyIndicator
+    {
+        private static Texture2D s_CircleTexture;
+
+        static UIPageHierarchyIndicator()
+        {
+            EditorApplication.hierarchyWindowItemOnGUI += OnHierarchyGUI;
+        }
+
+        private static Texture2D GetCircleTexture()
+        {
+            if (s_CircleTexture != null) return s_CircleTexture;
+
+            const int size = 32;
+            s_CircleTexture = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            s_CircleTexture.filterMode = FilterMode.Bilinear;
+            float center = size * 0.5f;
+            float radius = center - 1f;
+            for (int y = 0; y < size; y++)
+                for (int x = 0; x < size; x++)
+                {
+                    float dx = x - center + 0.5f;
+                    float dy = y - center + 0.5f;
+                    float alpha = Mathf.Clamp01(radius - Mathf.Sqrt(dx * dx + dy * dy) + 0.5f);
+                    s_CircleTexture.SetPixel(x, y, new Color(1f, 1f, 1f, alpha));
+                }
+            s_CircleTexture.Apply();
+            return s_CircleTexture;
+        }
+
+        private static readonly GUIStyle s_BadgeStyle = new GUIStyle
+        {
+            alignment = TextAnchor.MiddleCenter,
+            fontSize = 9,
+            fontStyle = FontStyle.Bold,
+        };
+
+        private static void DrawBadge(Rect rect, Color textColor, string text, string tooltip)
+        {
+            var prev = GUI.color;
+            GUI.color = new Color(0.18f, 0.18f, 0.18f, 0.92f);
+            GUI.DrawTexture(rect, GetCircleTexture());
+            GUI.color = prev;
+
+            s_BadgeStyle.normal.textColor = textColor;
+            GUI.Label(rect, new GUIContent(text, tooltip), s_BadgeStyle);
+        }
+
+        private static void OnHierarchyGUI(int instanceID, Rect selectionRect)
+        {
+            var go = EditorUtility.EntityIdToObject(instanceID) as GameObject;
+            if (go == null) return;
+
+            var uiPage = go.GetComponent<UIPage>();
+            if (uiPage == null) return;
+
+            const float iconSize = 15f;
+            const float padding = 2f;
+
+            float offsetX = selectionRect.xMax - padding;
+
+            if (uiPage.IsTransitionPage)
+            {
+                offsetX -= iconSize;
+                DrawBadge(new Rect(offsetX, selectionRect.y + 1, iconSize, iconSize),
+                    new Color(1f, 0.6f, 0f), "T", "UIPage: Transitioning");
+                offsetX -= padding;
+            }
+            else if (uiPage.IsOpened)
+            {
+                offsetX -= iconSize;
+                DrawBadge(new Rect(offsetX, selectionRect.y + 1, iconSize, iconSize),
+                    new Color(0.3f, 1f, 0.3f), "O", "UIPage: Opened");
+                offsetX -= padding;
+            }
+
+            if (uiPage.IsDefault)
+            {
+                offsetX -= iconSize;
+                DrawBadge(new Rect(offsetX, selectionRect.y + 1, iconSize, iconSize),
+                    new Color(0.4f, 0.7f, 1f), "D", "UIPage: Default");
+            }
+        }
     }
 
 }
