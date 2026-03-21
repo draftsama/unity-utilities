@@ -170,6 +170,11 @@ namespace Modules.Utilities
 
         }
 
+        public static string GetCurrentBGMName()
+        {
+            return _CurrentBGMAudio != null && _CurrentBGMAudio.clip != null ? _CurrentBGMAudio.clip.name : string.Empty;
+        }
+
 
 
 
