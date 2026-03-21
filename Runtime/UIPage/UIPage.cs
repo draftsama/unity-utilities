@@ -592,10 +592,21 @@ namespace Modules.Utilities.Editor
     public static class UIPageHierarchyIndicator
     {
         private static Texture2D s_CircleTexture;
+        private static double s_NextRepaintTime;
+        private const double k_RepaintInterval = 0.1;
 
         static UIPageHierarchyIndicator()
         {
             EditorApplication.hierarchyWindowItemOnGUI += OnHierarchyGUI;
+            EditorApplication.update += OnEditorUpdate;
+        }
+
+        private static void OnEditorUpdate()
+        {
+            if (!Application.isPlaying) return;
+            if (EditorApplication.timeSinceStartup < s_NextRepaintTime) return;
+            s_NextRepaintTime = EditorApplication.timeSinceStartup + k_RepaintInterval;
+            EditorApplication.RepaintHierarchyWindow();
         }
 
         private static Texture2D GetCircleTexture()
