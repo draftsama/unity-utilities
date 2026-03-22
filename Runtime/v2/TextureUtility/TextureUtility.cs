@@ -169,7 +169,9 @@ public static class TextureUtility
     /// <returns>Configured RenderTexture</returns>
     private static RenderTexture CreateRenderTexture(int width, int height)
     {
-        RenderTexture rt = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32);
+           // RenderTextureReadWrite.Linear prevents platform-dependent sRGB auto-conversion
+           // (Default inherits project color space and behaves differently on DX vs Metal)
+           RenderTexture rt = new RenderTexture(width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.Linear);
         rt.enableRandomWrite = true;
         rt.filterMode = FilterMode.Bilinear;
         rt.Create();
@@ -183,12 +185,22 @@ public static class TextureUtility
     /// <returns>Texture2D copy of the RenderTexture</returns>
     private static Texture2D RenderTextureToTexture2D(RenderTexture rt)
     {
-        Texture2D result = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, false);
-        RenderTexture.active = rt;
-        result.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
-        result.Apply();
-        RenderTexture.active = null;
-        return result;
+           // rt is linear (created by CreateRenderTexture with RenderTextureReadWrite.Linear).
+           // ReadPixels is a raw byte copy — it does NOT apply linear→sRGB conversion.
+           // We must blit into an explicit sRGB RT first so the driver performs the
+           // linear→sRGB conversion correctly and consistently on all platforms (DX / Metal).
+           RenderTexture srgbRT = RenderTexture.GetTemporary(
+              rt.width, rt.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+           Graphics.Blit(rt, srgbRT);
+
+           Texture2D result = new Texture2D(rt.width, rt.height, TextureFormat.RGBA32, false);
+           RenderTexture.active = srgbRT;
+           result.ReadPixels(new Rect(0, 0, rt.width, rt.height), 0, 0);
+           result.Apply();
+           RenderTexture.active = null;
+
+           RenderTexture.ReleaseTemporary(srgbRT);
+           return result;
     }
     
     /// <summary>
@@ -300,29 +312,21 @@ public static class TextureUtility
         int width = source.width;
         int height = source.height;
         
-        // Create render textures for input and output
-        RenderTexture inputRT = CreateRenderTexture(width, height);
-        RenderTexture outputRT = CreateRenderTexture(width, height);
+           RenderTexture outputRT = CreateRenderTexture(width, height);
         
-        // Copy source texture to input RenderTexture
-        Graphics.Blit(source, inputRT);
-        
-        // Set compute shader parameters
-        textureOperationsShader.SetTexture(kernelFlipX, PropSource, inputRT);
+           // Pass source directly — avoids the sRGB conversion that Graphics.Blit introduces
+           // when blitting an sRGB texture into a Linear RT (DX vs Metal behave differently)
+           textureOperationsShader.SetTexture(kernelFlipX, PropSource, source);
         textureOperationsShader.SetTexture(kernelFlipX, PropResult, outputRT);
         textureOperationsShader.SetInt(PropWidth, width);
         textureOperationsShader.SetInt(PropHeight, height);
         
-        // Dispatch compute shader (calculate thread groups for 8x8 threads)
         int threadGroupsX = CalculateThreadGroups(width);
         int threadGroupsY = CalculateThreadGroups(height);
         textureOperationsShader.Dispatch(kernelFlipX, threadGroupsX, threadGroupsY, 1);
         
-        // Convert result to Texture2D
         Texture2D result = RenderTextureToTexture2D(outputRT);
         
-        // Cleanup
-        inputRT.Release();
         outputRT.Release();
         
         return result;
@@ -343,29 +347,21 @@ public static class TextureUtility
         int width = source.width;
         int height = source.height;
         
-        // Create render textures for input and output
-        RenderTexture inputRT = CreateRenderTexture(width, height);
-        RenderTexture outputRT = CreateRenderTexture(width, height);
+           RenderTexture outputRT = CreateRenderTexture(width, height);
         
-        // Copy source texture to input RenderTexture
-        Graphics.Blit(source, inputRT);
-        
-        // Set compute shader parameters
-        textureOperationsShader.SetTexture(kernelFlipY, PropSource, inputRT);
+           // Pass source directly — avoids the sRGB conversion that Graphics.Blit introduces
+           // when blitting an sRGB texture into a Linear RT (DX vs Metal behave differently)
+           textureOperationsShader.SetTexture(kernelFlipY, PropSource, source);
         textureOperationsShader.SetTexture(kernelFlipY, PropResult, outputRT);
         textureOperationsShader.SetInt(PropWidth, width);
         textureOperationsShader.SetInt(PropHeight, height);
         
-        // Dispatch compute shader (calculate thread groups for 8x8 threads)
         int threadGroupsX = CalculateThreadGroups(width);
         int threadGroupsY = CalculateThreadGroups(height);
         textureOperationsShader.Dispatch(kernelFlipY, threadGroupsX, threadGroupsY, 1);
         
-        // Convert result to Texture2D
         Texture2D result = RenderTextureToTexture2D(outputRT);
         
-        // Cleanup
-        inputRT.Release();
         outputRT.Release();
         
         return result;
@@ -535,30 +531,21 @@ public static class TextureUtility
                 return null;
         }
         
-        // Create render textures with appropriate dimensions
-        RenderTexture inputRT = CreateRenderTexture(sourceWidth, sourceHeight);
-        RenderTexture outputRT = CreateRenderTexture(outputWidth, outputHeight);
+                RenderTexture outputRT = CreateRenderTexture(outputWidth, outputHeight);
         
-        // Copy source texture to input RenderTexture
-        Graphics.Blit(source, inputRT);
-        
-        // Set compute shader parameters
-        // For rotation, Width/Height refer to SOURCE dimensions
-        textureOperationsShader.SetTexture(kernel, PropSource, inputRT);
+                // Pass source directly — avoids sRGB conversion from Graphics.Blit (DX vs Metal differ)
+                // Width/Height refer to SOURCE dimensions for rotation kernels
+                textureOperationsShader.SetTexture(kernel, PropSource, source);
         textureOperationsShader.SetTexture(kernel, PropResult, outputRT);
         textureOperationsShader.SetInt(PropWidth, sourceWidth);
         textureOperationsShader.SetInt(PropHeight, sourceHeight);
         
-        // Dispatch compute shader using OUTPUT dimensions for thread groups
         int threadGroupsX = CalculateThreadGroups(outputWidth);
         int threadGroupsY = CalculateThreadGroups(outputHeight);
         textureOperationsShader.Dispatch(kernel, threadGroupsX, threadGroupsY, 1);
         
-        // Convert result to Texture2D
         Texture2D result = RenderTextureToTexture2D(outputRT);
         
-        // Cleanup
-        inputRT.Release();
         outputRT.Release();
         
         return result;
@@ -604,7 +591,10 @@ public static class TextureUtility
         }
         
         // Create temporary RenderTexture with source size
-        RenderTexture tempRT = RenderTexture.GetTemporary(source.width, source.height, 0, RenderTextureFormat.ARGB32);
+        // Use an explicit sRGB RT — Blit from an sRGB source to an sRGB RT is a raw copy
+        // (no gamma conversion), so ReadPixels gets the exact original values on every platform
+        RenderTexture tempRT = RenderTexture.GetTemporary(
+            source.width, source.height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
         Graphics.Blit(source, tempRT);
         
         // Read only the cropped region
@@ -657,13 +647,10 @@ public static class TextureUtility
         int cropHeight = Mathf.Min(diameter, height - cropY);
         
         // Create temporary RenderTexture for the full image with circle mask
-        RenderTexture inputRT = CreateRenderTexture(width, height);
         RenderTexture maskedRT = CreateRenderTexture(width, height);
         
-        Graphics.Blit(source, inputRT);
-        
-        // Apply circle mask using compute shader
-        textureCropShader.SetTexture(kernelCropCircle, PropSource, inputRT);
+        // Pass source directly — avoids sRGB conversion from Graphics.Blit (DX vs Metal differ)
+        textureCropShader.SetTexture(kernelCropCircle, PropSource, source);
         textureCropShader.SetTexture(kernelCropCircle, PropResult, maskedRT);
         textureCropShader.SetInt(PropWidth, width);
         textureCropShader.SetInt(PropHeight, height);
@@ -674,16 +661,19 @@ public static class TextureUtility
         int threadGroupsY = CalculateThreadGroups(height);
         textureCropShader.Dispatch(kernelCropCircle, threadGroupsX, threadGroupsY, 1);
         
-        // Read only the circular region (bounding box)
-        RenderTexture.active = maskedRT;
+        // Blit linear maskedRT → sRGB RT so ReadPixels gets a raw byte copy (no conversion)
+        RenderTexture srgbRT = RenderTexture.GetTemporary(
+            width, height, 0, RenderTextureFormat.ARGB32, RenderTextureReadWrite.sRGB);
+        Graphics.Blit(maskedRT, srgbRT);
+
+        RenderTexture.active = srgbRT;
         Texture2D result = new Texture2D(cropWidth, cropHeight, TextureFormat.RGBA32, false);
         result.ReadPixels(new Rect(cropX, cropY, cropWidth, cropHeight), 0, 0);
         result.Apply();
         RenderTexture.active = null;
         
-        // Cleanup
-        inputRT.Release();
         maskedRT.Release();
+        RenderTexture.ReleaseTemporary(srgbRT);
         
         return result;
     }
@@ -724,30 +714,21 @@ public static class TextureUtility
         int width = source.width;
         int height = source.height;
         
-        // Create render textures
-        RenderTexture inputRT = CreateRenderTexture(width, height);
-        RenderTexture outputRT = CreateRenderTexture(width, height);
+           RenderTexture outputRT = CreateRenderTexture(width, height);
         
-        // Copy source texture to input RenderTexture
-        Graphics.Blit(source, inputRT);
-        
-        // Set compute shader parameters
-        textureCropShader.SetTexture(kernelCropRoundedCorners, PropSource, inputRT);
+           // Pass source directly — avoids sRGB conversion from Graphics.Blit (DX vs Metal differ)
+           textureCropShader.SetTexture(kernelCropRoundedCorners, PropSource, source);
         textureCropShader.SetTexture(kernelCropRoundedCorners, PropResult, outputRT);
         textureCropShader.SetInt(PropWidth, width);
         textureCropShader.SetInt(PropHeight, height);
         textureCropShader.SetVector(PropCornerRadii, cornerRadii);
         
-        // Dispatch compute shader
         int threadGroupsX = CalculateThreadGroups(width);
         int threadGroupsY = CalculateThreadGroups(height);
         textureCropShader.Dispatch(kernelCropRoundedCorners, threadGroupsX, threadGroupsY, 1);
         
-        // Convert result to Texture2D
         Texture2D result = RenderTextureToTexture2D(outputRT);
         
-        // Cleanup
-        inputRT.Release();
         outputRT.Release();
         
         return result;
