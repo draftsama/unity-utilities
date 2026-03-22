@@ -77,6 +77,7 @@ namespace Modules.Utilities.Editor
         void MarkDirty()
         {
             isDirty = true;
+            UpdateCurrentProfileSettings();
         }
 
         void SaveIfDirty()
@@ -268,7 +269,9 @@ namespace Modules.Utilities.Editor
         {
             GUILayout.BeginHorizontal();
             GUILayout.Label("Build Folder: ", EditorStyles.label);
+            EditorGUI.BeginChangeCheck();
             data.buildFolderPath = GUILayout.TextField(data.buildFolderPath);
+            if (EditorGUI.EndChangeCheck()) MarkDirty();
 
             if (GUILayout.Button("Browse", GUILayout.Width(60)))
             {
