@@ -216,6 +216,9 @@ namespace Modules.Utilities.Editor
                 case PathType.Absolute:
                     _ResourceFolder = _FolderNameProperty.stringValue;
                     break;
+                case PathType.URL:
+                    _ResourceFolder = string.Empty;
+                    break;
             }
         }
 
@@ -223,68 +226,87 @@ namespace Modules.Utilities.Editor
         {
             EditorGUILayout.BeginVertical("box");
 
-            // Show resource folder info
-            EditorGUILayout.BeginHorizontal();
-            GUI.enabled = false;
-            EditorGUILayout.TextField("Search Folder", _ResourceFolder);
-            GUI.enabled = true;
-
-            if (GUILayout.Button("📁", GUILayout.Width(30)))
-            {
-                if (Directory.Exists(_ResourceFolder))
-                {
-                    EditorUtility.RevealInFinder(_ResourceFolder);
-                }
-                else
-                {
-                    EditorUtility.DisplayDialog("Folder Not Found", $"Folder does not exist:\n{_ResourceFolder}", "OK");
-                }
-            }
-            EditorGUILayout.EndHorizontal();
-
             // PathType field
             EditorGUI.BeginChangeCheck();
             EditorGUILayout.PropertyField(_PathTypeProperty);
             bool pathTypeChanged = EditorGUI.EndChangeCheck();
 
-            // FolderName field with validation
-            EditorGUI.BeginChangeCheck();
-            EditorGUILayout.PropertyField(_FolderNameProperty);
-            bool folderChanged = EditorGUI.EndChangeCheck();
+            var currentPathType = (PathType)_PathTypeProperty.enumValueIndex;
 
-            if (pathTypeChanged || folderChanged)
+            if (currentPathType == PathType.URL)
             {
-                UpdateResourceFolder();
-            }
-
-            // Show warning if folder doesn't exist
-            if (!string.IsNullOrEmpty(_ResourceFolder) && !Directory.Exists(_ResourceFolder))
-            {
-                EditorGUILayout.HelpBox($"Warning: Folder does not exist!\nPath: {_ResourceFolder}", MessageType.Warning);
-            }
-
-            // File name input with autocomplete using EditorGUIHelper
-            string[] videoExtensions = { ".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv" };
-            EditorGUIHelper.DrawFileSearchField(
-                _FileNameProperty,
-                Path.Combine(_ResourceFolder, _FolderNameProperty.stringValue),
-                videoExtensions,
-                _FileSearchState,
-                (filePath) =>
+                if (pathTypeChanged)
                 {
+                    UpdateResourceFolder();
+                }
 
-                    //update foloder name based on selected file
-                    var dicrectorPath = Path.GetDirectoryName(filePath);
-                    var fileName = Path.GetFileName(filePath);
-
-                    _FolderNameProperty.stringValue = Path.GetRelativePath(_ResourceFolder, dicrectorPath);
+                // For URL type: show a plain URL text field, no folder/file-browser UI
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.PropertyField(_FileNameProperty, new GUIContent("Video URL"));
+                if (EditorGUI.EndChangeCheck())
+                {
                     serializedObject.ApplyModifiedProperties();
-
-
-                    instance.SetupURL(fileName, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
+                    instance.SetupURL(_FileNameProperty.stringValue, PathType.URL, string.Empty);
                     EditorUtility.SetDirty(instance);
                 }
-            );
+            }
+            else
+            {
+                // Show resource folder info
+                EditorGUILayout.BeginHorizontal();
+                GUI.enabled = false;
+                EditorGUILayout.TextField("Search Folder", _ResourceFolder);
+                GUI.enabled = true;
+
+                if (GUILayout.Button("📁", GUILayout.Width(30)))
+                {
+                    if (Directory.Exists(_ResourceFolder))
+                    {
+                        EditorUtility.RevealInFinder(_ResourceFolder);
+                    }
+                    else
+                    {
+                        EditorUtility.DisplayDialog("Folder Not Found", $"Folder does not exist:\n{_ResourceFolder}", "OK");
+                    }
+                }
+                EditorGUILayout.EndHorizontal();
+
+                // FolderName field with validation
+                EditorGUI.BeginChangeCheck();
+                EditorGUILayout.PropertyField(_FolderNameProperty);
+                bool folderChanged = EditorGUI.EndChangeCheck();
+
+                if (pathTypeChanged || folderChanged)
+                {
+                    UpdateResourceFolder();
+                }
+
+                // Show warning if folder doesn't exist
+                if (!string.IsNullOrEmpty(_ResourceFolder) && !Directory.Exists(_ResourceFolder))
+                {
+                    EditorGUILayout.HelpBox($"Warning: Folder does not exist!\nPath: {_ResourceFolder}", MessageType.Warning);
+                }
+
+                // File name input with autocomplete using EditorGUIHelper
+                string[] videoExtensions = { ".mp4", ".mov", ".avi", ".webm", ".mkv", ".flv", ".wmv" };
+                EditorGUIHelper.DrawFileSearchField(
+                    _FileNameProperty,
+                    Path.Combine(_ResourceFolder, _FolderNameProperty.stringValue),
+                    videoExtensions,
+                    _FileSearchState,
+                    (filePath) =>
+                    {
+                        var dicrectorPath = Path.GetDirectoryName(filePath);
+                        var fileName = Path.GetFileName(filePath);
+
+                        _FolderNameProperty.stringValue = Path.GetRelativePath(_ResourceFolder, dicrectorPath);
+                        serializedObject.ApplyModifiedProperties();
+
+                        instance.SetupURL(fileName, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);
+                        EditorUtility.SetDirty(instance);
+                    }
+                );
+            }
 
             EditorGUILayout.EndVertical();
         }

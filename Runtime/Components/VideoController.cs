@@ -220,6 +220,15 @@ namespace Modules.Utilities
 
         public bool SetupFullURL(string _filePath)
         {
+            if (_filePath.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ||
+                _filePath.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            {
+                // Auto-detect URL by prefix
+                m_PathType = PathType.URL;
+                m_FolderName = string.Empty;
+                return SetupURL(_filePath, PathType.URL, string.Empty);
+            }
+
             m_FileName = Path.GetFileName(_filePath);
             m_PathType = PathType.Absolute;
             m_FolderName = Path.GetDirectoryName(_filePath);
@@ -237,9 +246,19 @@ namespace Modules.Utilities
                 return false;
             }
 
+
             m_FileName = _filename;
             m_PathType = _pathType;
             m_FolderName = _foldername;
+
+            // Handle URL type — assign directly, no file-system check
+            if (m_PathType == PathType.URL)
+            {
+                if (_VideoPlayer == null)
+                    _VideoPlayer = GetComponent<VideoPlayer>();
+                _VideoPlayer.url = m_FileName;
+                return true;
+            }
 
             var filePath = string.Empty;
 
@@ -268,7 +287,7 @@ namespace Modules.Utilities
                 filePath = Path.Combine(externalResourcesPath, m_FolderName, m_FileName);
             }
 
-            if (string.IsNullOrEmpty(filePath) || !File.Exists(filePath))
+            if (string.IsNullOrEmpty(filePath) || (!File.Exists(filePath) && m_PathType != PathType.URL))
             {
                 Debug.LogWarning($"[{name}] Video file not found: {filePath}");
                 return false;

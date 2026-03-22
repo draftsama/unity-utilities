@@ -6,7 +6,8 @@ namespace Modules.Utilities
         StreamingAssets,
         Relative,
         Absolute,
-        ExternalResources
+        ExternalResources,
+        URL
     }
 
     public enum ContentSizeMode
