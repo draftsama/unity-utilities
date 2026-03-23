@@ -27,3 +27,8 @@
 ## [1.0.6] - 2025-05-10
 ### Fixed
 - Fixed a bug in ResourceTextureLoader
+
+
+## [1.0.8] - 2025-05-20
+### Fixed
+- Fixed TextureUtilties
