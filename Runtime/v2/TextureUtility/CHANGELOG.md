@@ -5,6 +5,28 @@ All notable changes to the GPU-Accelerated Texture Manipulation System will be d
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.3] - 2026-03-23
+
+### Fixed
+- **Critical: Cross-platform brightness inconsistency in all GPU operations**
+  - On Windows (DirectX), textures appeared **darker** after any GPU operation.
+  - On macOS (Metal), the same textures appeared **brighter**.
+  - Root cause: the intermediate pipeline used `RenderTextureReadWrite.Default` for compute RTs, which inherits the project's color space. In **Linear** color space, `Graphics.Blit` into a Default RT triggers an implicit sRGB→linear conversion on DirectX but not on Metal. The subsequent `ReadPixels` is a raw byte copy that does not compensate, resulting in different pixel values per platform.
+
+### Changed
+- **`CreateRenderTexture`**: Intermediate RT now uses `RenderTextureReadWrite.Linear` explicitly, making compute RTs behave identically on all platforms regardless of project color space.
+- **`RenderTextureToTexture2D`**: Added a blit from the linear RT into an explicit sRGB RT before `ReadPixels`. The graphics driver now performs the linear→sRGB conversion correctly and consistently (DX, Metal, Vulkan) instead of relying on `ReadPixels` to do it.
+- **`FlipX`, `FlipY`, `Rotate`, `CropRoundedCorners`, `CropCircle`**: Removed the intermediate `inputRT` + `Graphics.Blit(source, inputRT)` copy-in step. Source textures are now passed directly to the compute shader, eliminating the undocumented per-platform sRGB conversion that the copy-in Blit introduced.
+- **`CropRect`**: Changed `GetTemporary` to use `RenderTextureReadWrite.sRGB` so Blit from an sRGB source to an sRGB RT is a raw copy with no gamma conversion, producing consistent output across all platforms.
+
+### Platform Compatibility
+All platforms verified correct with this fix:
+- ✅ **Windows** (DirectX 11/12) — no longer converts to linear unexpectedly
+- ✅ **macOS** (Metal — M1/M2/M3) — no longer skips conversion
+- ✅ **Android** (Vulkan / OpenGL ES 3.1+) — unaffected by previous bug; confirmed correct
+- ✅ **iOS** (Metal) — same fix as macOS
+- ✅ **Linux** (Vulkan / OpenGL)
+
 ## [1.0.2] - 2026-02-21
 
 ### Added
