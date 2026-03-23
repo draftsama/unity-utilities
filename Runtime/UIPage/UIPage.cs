@@ -650,7 +650,11 @@ namespace Modules.Utilities.Editor
 
         private static void OnHierarchyGUI(int instanceID, Rect selectionRect)
         {
+#if UNITY_6000_3_OR_NEWER
             var go = EditorUtility.EntityIdToObject(instanceID) as GameObject;
+#else
+            var go = EditorUtility.InstanceIDToObject(instanceID) as GameObject;
+#endif
             if (go == null) return;
 
             var uiPage = go.GetComponent<UIPage>();
