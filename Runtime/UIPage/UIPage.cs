@@ -16,6 +16,7 @@ namespace Modules.Utilities
 {
 
     [RequireComponent(typeof(CanvasGroup))]
+    [DisallowMultipleComponent]
     public class UIPage : MonoBehaviour
     {
         private static readonly Dictionary<string, List<UIPage>> s_PageRegistry = new();
@@ -104,7 +105,7 @@ namespace Modules.Utilities
 
         public async UniTask OpenPageAsync(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
-            if (m_IsOpened) return;
+            if (m_IsOpened || m_IsTransitionPage) return;
             if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
             await TransitionPageAsync(this, _overrideTransitionInfo, _token);
@@ -114,7 +115,7 @@ namespace Modules.Utilities
 
         public void OpenPage(TransitionInfo _overrideTransitionInfo = null, CancellationToken _token = default)
         {
-            if (m_IsOpened) return;
+            if (m_IsOpened || m_IsTransitionPage) return;
             if (_token == default)
                 _token = this.GetCancellationTokenOnDestroy();
             TransitionPageAsync(this, _overrideTransitionInfo, _token).Forget();
@@ -210,7 +211,7 @@ namespace Modules.Utilities
             return list.FirstOrDefault(_ => _ != null && _.name == _name);
 
         }
-        
+
 
 
 
@@ -249,7 +250,7 @@ namespace Modules.Utilities
             return true;
         }
 
-         public static async UniTask TransitionPageAsync(UIPage _target, TransitionInfo _overrideTransition = null, CancellationToken _token = default)
+        public static async UniTask TransitionPageAsync(UIPage _target, TransitionInfo _overrideTransition = null, CancellationToken _token = default)
         {
             var current = UIPage.GetCurrentPage(_target.m_GroupName);
             // Debug.Log($"TransitionPageAsync current:{current}  - target:{_target}");
@@ -363,7 +364,7 @@ namespace Modules.Utilities
     }
 
 
-  
+
 
 
     public interface IPageShowBegin
@@ -483,7 +484,7 @@ namespace Modules.Utilities.Editor
             }
 
 
-            if (currentDefault != null && currentDefault != script && GUILayout.Button("Go to Default Page"))
+            if (currentDefault != null && currentDefault != script && GUILayout.Button("Select Default Page"))
             {
                 Selection.activeObject = currentDefault;
             }
@@ -503,39 +504,35 @@ namespace Modules.Utilities.Editor
             EditorGUILayout.EndHorizontal();
 
 
-            // EditorGUILayout.PropertyField(isDefault);
+            //open page
+            GUI.color = script.IsOpened ? Color.green : Color.white;
+            string openButtonText = script.IsOpened ? "Page is Opened" : "Open Page";
 
-
-            //horizontal layout
-            EditorGUILayout.BeginHorizontal();
-
-            //button to show page
-            if (GUILayout.Button("Show"))
+            if (GUILayout.Button(openButtonText))
             {
-                script.SetShow(true);
-            }
-
-            //button to hide page
-            if (GUILayout.Button("Hide"))
-            {
-                script.SetShow(false);
-            }
-
-            //show show only page
-            if (GUILayout.Button("Show Only"))
-            {
-                var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
-                    .Where(_ => _.GroupName == script.GroupName && _ != script);
-
-                foreach (var p in allPages)
+                if (Application.isPlaying)
                 {
-                    p.SetShow(false);
+
+                    script.OpenPage();
                 }
+                else
+                {
+                    var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                        .Where(_ => _.GroupName == script.GroupName && _ != script);
 
-                script.SetShow(true);
+                    foreach (var p in allPages)
+                    {
+                        p.SetShow(false);
+                    }
+
+                    script.SetShow(true);
+                }
             }
-
-            EditorGUILayout.EndHorizontal();
+            GUI.color = Color.white;
+            // if (GUILayout.Button("Hide"))
+            // {
+            //     script.SetShow(false);
+            // }
 
             GUI.enabled = false;
             EditorGUILayout.PropertyField(isTransitionPage);
@@ -545,11 +542,6 @@ namespace Modules.Utilities.Editor
             EditorGUILayout.PropertyField(transitionInfo);
 
 
-
-
-
-
-            //
             EditorGUILayout.Space(10);
             EditorGUILayout.BeginVertical("box");
             DrawPropertiesExcluding(serializedObject, "m_Script", "m_GroupName", "m_IsDefault", "m_TransitionInfo", "m_IsTransitionPage", "m_IsOpened");
@@ -568,7 +560,7 @@ namespace Modules.Utilities.Editor
                     var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
                         .Where(_ => _.GroupName == script.GroupName && _ != script);
 
-            
+
 
                     foreach (var p in allPages)
                     {
