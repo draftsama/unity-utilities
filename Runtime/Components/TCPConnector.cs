@@ -346,6 +346,24 @@ namespace Modules.Utilities
         /// Logs network information for debugging build vs editor differences
         /// </summary>
 
+        /// <summary>
+        /// Checks if a TCP port is already in use by another process.
+        /// </summary>
+        private bool IsPortInUse(int port)
+        {
+            try
+            {
+                using var testSocket = new Socket(AddressFamily.InterNetwork, SocketType.Stream, ProtocolType.Tcp);
+                testSocket.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, false);
+                testSocket.Bind(new IPEndPoint(IPAddress.Any, port));
+                return false; // Port is available
+            }
+            catch (SocketException)
+            {
+                return true; // Port is in use
+            }
+        }
+
         public async UniTask StartConnection()
         {
             if (m_IsRunning) return;
@@ -455,6 +473,12 @@ namespace Modules.Utilities
                     return;
                 }
 
+                // Check if port is already in use by another process
+                if (IsPortInUse(m_Port))
+                {
+                    Log($"⚠️ Port {m_Port} is currently in use by another process. Attempting to bind with ReuseAddress...");
+                }
+
                 // Start UDP broadcast for discovery if enabled
                 if (m_EnableDiscovery)
                 {
@@ -462,6 +486,8 @@ namespace Modules.Utilities
                 }
 
                 _tcpListener = new TcpListener(IPAddress.Any, m_Port);
+                _tcpListener.Server.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                _tcpListener.ExclusiveAddressUse = false;
 
                 try
                 {
@@ -476,8 +502,8 @@ namespace Modules.Utilities
                 }
                 catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AccessDenied)
                 {
-                    Log($"❌ Access denied for port {m_Port}. May require administrator privileges");
-                    ReportError(ErrorInfo.ErrorType.Connection, $"Access denied for port {m_Port}", ex);
+                    Log($"❌ Access denied for port {m_Port}. Check: 1) Windows Firewall allows this app, 2) No other process is using this port (netstat -ano | findstr {m_Port}), 3) Port is not in Windows excluded range (netsh interface ipv4 show excludedportrange protocol=tcp), 4) Try running as Administrator");
+                    ReportError(ErrorInfo.ErrorType.Connection, $"Access denied for port {m_Port}. Check Windows Firewall, other processes using this port, or try running as Administrator.", ex);
                     return;
                 }
                 catch (SocketException ex) when (ex.SocketErrorCode == SocketError.AddressNotAvailable)
@@ -1313,7 +1339,9 @@ namespace Modules.Utilities
         {
             try
             {
-                using var udpClient = new UdpClient(m_DiscoveryPort);
+                using var udpClient = new UdpClient();
+                udpClient.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+                udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, m_DiscoveryPort));
 
                 // Use ConfigureAwait(false) to avoid SynchronizationContext issues
                 var receiveResult = await udpClient.ReceiveAsync().ConfigureAwait(false);
