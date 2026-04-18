@@ -574,6 +574,15 @@ namespace Modules.Utilities
             _Stopping = true;
         }
 
+        public void StopAndHide()
+        {
+            m_IsPlaying = false;
+            m_IsPrepared = false;
+            _IgnoreFadeOut = true;
+            _Stopping = true;
+            ApplyAlpha(0);
+        }
+
         private void ApplyTexture(Texture _texture)
         {
             if (_texture == null) return;
