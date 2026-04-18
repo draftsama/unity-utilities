@@ -583,6 +583,11 @@ namespace Modules.Utilities
             ApplyAlpha(0);
         }
 
+        public void SetAlpha(float _alpha)
+        {
+            ApplyAlpha(_alpha);
+        }
+
         private void ApplyTexture(Texture _texture)
         {
             if (_texture == null) return;
