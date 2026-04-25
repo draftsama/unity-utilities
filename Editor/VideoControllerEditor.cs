@@ -296,10 +296,10 @@ namespace Modules.Utilities.Editor
                     _FileSearchState,
                     (filePath) =>
                     {
-                        var dicrectorPath = Path.GetDirectoryName(filePath);
+                        var directoryPath = Path.GetDirectoryName(filePath);
                         var fileName = Path.GetFileName(filePath);
 
-                        _FolderNameProperty.stringValue = Path.GetRelativePath(_ResourceFolder, dicrectorPath);
+                        _FolderNameProperty.stringValue = Path.GetRelativePath(_ResourceFolder, directoryPath);
                         serializedObject.ApplyModifiedProperties();
 
                         instance.SetupURL(fileName, (PathType)_PathTypeProperty.enumValueIndex, _FolderNameProperty.stringValue);

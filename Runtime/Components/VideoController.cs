@@ -29,7 +29,6 @@ namespace Modules.Utilities
 
         [SerializeField] public int m_FadeTime = 500;
 
-        [SerializeField][ReadOnlyField] private bool m_IsPrepared = false;
         [SerializeField][ReadOnlyField] public float m_Progress = 0f;
         [SerializeField] public bool m_KeepLastframe = false;
 
@@ -56,12 +55,15 @@ namespace Modules.Utilities
 
         private bool _Stopping = false;
         private bool _IgnoreFadeOut = false;
+        private bool _IsPlayStarting = false;
 
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying { private set; get; } = false;
+        public bool m_IsPrepared { private set; get; } = false;
 
         CancellationTokenSource _CancellationTokenSource = new CancellationTokenSource();
+        CancellationTokenSource _LoopCancellationTokenSource = new CancellationTokenSource();
 
         RectTransform _RectTransform;
         Transform _Transform;
@@ -75,13 +77,18 @@ namespace Modules.Utilities
             if (_VideoPlayer != null)
             {
                 _IsResume = m_IsPlaying;
-                if(_VideoPlayer.isPlaying) _VideoPlayer.Pause();
+                if (_VideoPlayer.isPlaying) _VideoPlayer.Pause();
                 _VideoPlayer.targetTexture?.Release();
                 _VideoPlayer.targetTexture = null;
             }
 
             _CancellationTokenSource.Cancel();
+            _CancellationTokenSource.Dispose();
             _CancellationTokenSource = new CancellationTokenSource();
+
+            _LoopCancellationTokenSource.Cancel();
+            _LoopCancellationTokenSource.Dispose();
+            _LoopCancellationTokenSource = new CancellationTokenSource();
 
         }
 
@@ -107,7 +114,7 @@ namespace Modules.Utilities
 
                     _VideoPlayer.Prepare();
                     await UniTask.WaitUntil(() => _VideoPlayer.isPrepared,
-                        cancellationToken: this.GetCancellationTokenOnDestroy());
+                        cancellationToken: _CancellationTokenSource.Token);
 
                     m_IsPrepared = true;
                     if (m_StartMode == VideoStartMode.AutoPlay)
@@ -125,50 +132,61 @@ namespace Modules.Utilities
             }
 
 
-            var token = this.GetCancellationTokenOnDestroy();
-
             if (m_StartMode == VideoStartMode.AutoPlay && _PlayWithParentShow && _ParentCanvasGroup != null)
             {
-                bool isPlaying = false;
+                // Use _CancellationTokenSource.Token so this loop is cancelled on OnDisable,
+                // preventing multiple loops from accumulating across enable/disable cycles.
+                var loopToken = _LoopCancellationTokenSource.Token;
                 try
                 {
                     UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
                     {
-                        if(gameObject.activeInHierarchy == false)
-                        {
+
+
+                        if (gameObject.activeInHierarchy == false)
                             return;
-                        }
+
 
                         if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
                         {
-                            if (!isPlaying)
+                            // Use m_IsPlaying (actual state) instead of local flag to avoid
+                            // desync when video ends naturally or stop fade-out is in progress.
+                            if (!m_IsPlaying && !_Stopping && !_IsPlayStarting)
                             {
                                 PlayAsync().Forget();
-                                isPlaying = true;
                             }
                         }
                         else
                         {
-                            if (isPlaying)
+                            if (m_IsPlaying && !_Stopping)
                             {
-                                isPlaying = false;
                                 Stop();
                             }
                         }
-                    }, token).Forget();
-
+                    }, loopToken).Forget();
                 }
                 catch (OperationCanceledException)
                 {
-                    // Debug.Log(e);
+                    Debug.Log("Parent CanvasGroup monitoring canceled.");
                 }
                 catch (Exception)
                 {
-                    //Debug.Log(e);
+                    Debug.Log("Parent CanvasGroup monitoring error, likely due to missing reference. Stopping monitoring.");
                 }
             }
         }
 
+
+        private void OnDestroy()
+        {
+            _CancellationTokenSource?.Cancel();
+            _CancellationTokenSource?.Dispose();
+            _CancellationTokenSource = null;
+
+            _LoopCancellationTokenSource?.Cancel();
+            _LoopCancellationTokenSource?.Dispose();
+            _LoopCancellationTokenSource = null;
+        }
 
         void Start()
         {
@@ -207,7 +225,7 @@ namespace Modules.Utilities
             await UniTask.NextFrame();
             _VideoPlayer.SetDirectAudioVolume(0, 0);
             _VideoPlayer.Play();
-        
+
             await UniTask.WaitUntil(() => _VideoPlayer.isPlaying,
                 cancellationToken: this.GetCancellationTokenOnDestroy());
             _VideoPlayer.frame = 1;
@@ -266,9 +284,9 @@ namespace Modules.Utilities
             if (m_PathType == PathType.StreamingAssets)
             {
                 if (string.IsNullOrEmpty(m_FolderName))
-                    filePath = Path.Combine("file://", Application.streamingAssetsPath, m_FileName);
+                    filePath = "file://" + Path.Combine(Application.streamingAssetsPath, m_FileName);
                 else
-                    filePath = Path.Combine("file://", Application.streamingAssetsPath, m_FolderName, m_FileName);
+                    filePath = "file://" + Path.Combine(Application.streamingAssetsPath, m_FolderName, m_FileName);
             }
             else if (m_PathType == PathType.Relative)
             {
@@ -280,14 +298,16 @@ namespace Modules.Utilities
             else if (m_PathType == PathType.Absolute)
             {
                 filePath = Path.Combine(m_FolderName, m_FileName);
-            }else if (m_PathType == PathType.ExternalResources)
+            }
+            else if (m_PathType == PathType.ExternalResources)
             {
                 var externalResourcesPath = ResourceManager.GetResourceFolderPath();
 
                 filePath = Path.Combine(externalResourcesPath, m_FolderName, m_FileName);
             }
 
-            if (string.IsNullOrEmpty(filePath) || (!File.Exists(filePath) && m_PathType != PathType.URL))
+            var skipExistCheck = m_PathType == PathType.URL || m_PathType == PathType.StreamingAssets;
+            if (string.IsNullOrEmpty(filePath) || (!skipExistCheck && !File.Exists(filePath)))
             {
                 Debug.LogWarning($"[{name}] Video file not found: {filePath}");
                 return false;
@@ -389,8 +409,10 @@ namespace Modules.Utilities
             if (_VideoPlayer == null)
                 _VideoPlayer = GetComponent<VideoPlayer>();
 
-            if (_VideoPlayer.isPlaying && !_forcePlay)
+            if ((_VideoPlayer.isPlaying || _IsPlayStarting) && !_forcePlay)
                 return;
+
+            _IsPlayStarting = true;
 
             if (!_resume)
             {
@@ -399,6 +421,7 @@ namespace Modules.Utilities
                 _FadeInProgress = 0f;
                 _FadeOutProgress = 0f;
                 _CancellationTokenSource?.Cancel();
+                _CancellationTokenSource?.Dispose();
                 _CancellationTokenSource = new CancellationTokenSource();
 
                 //after cancel token be must wait for next frame
@@ -406,16 +429,13 @@ namespace Modules.Utilities
 
                 if (_token != default)
                 {
-                    _CancellationTokenSource = CancellationTokenSource.CreateLinkedTokenSource(_token);
+                    var linked = CancellationTokenSource.CreateLinkedTokenSource(_token, _CancellationTokenSource.Token);
+                    _CancellationTokenSource.Dispose();
+                    _CancellationTokenSource = linked;
                 }
             }
 
-
-
-
             var token = _CancellationTokenSource.Token;
-
-
 
             _IgnoreFadeOut = _ignoreFadeOut;
 
@@ -533,6 +553,7 @@ namespace Modules.Utilities
             finally
             {
                 _Stopping = false;
+                _IsPlayStarting = false;
                 m_IsPlaying = false;
                 m_IsPrepared = false;
                 if (!m_KeepLastframe)
@@ -561,15 +582,25 @@ namespace Modules.Utilities
 
         public void Stop(bool _ignoreFadeOut = false)
         {
+
             if (!_VideoPlayer || !_VideoPlayer.isPlaying || !m_IsPlaying)
             {
                 ApplyAlpha(0);
                 m_IsPlaying = false;
                 m_IsPrepared = false;
+                _IsPlayStarting = false;
+                return;
+            }
+            if (_IsPlayStarting && !m_IsPlaying)
+            {
+                _CancellationTokenSource?.Cancel();
                 return;
             }
 
-            //  Debug.Log($"Stop Video :{m_FileName} ");
+            if(_Stopping)
+                return;
+
+            // Debug.Log($"Stop Video :{m_FileName} ");
             _IgnoreFadeOut = _ignoreFadeOut;
             _Stopping = true;
         }
@@ -661,11 +692,15 @@ namespace Modules.Utilities
                 return;
             }
 
+            bool wasPaused = _VideoPlayer.isPaused;
             if (!_VideoPlayer.isPlaying)
                 _VideoPlayer.Play();
 
             _VideoPlayer.frame = _frame;
-            m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
+            m_Progress = _frame / (float)_VideoPlayer.frameCount;
+
+            if (wasPaused)
+                _VideoPlayer.Pause();
         }
 
         public void Seek(float _progress)
