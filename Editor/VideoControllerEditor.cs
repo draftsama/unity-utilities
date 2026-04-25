@@ -158,7 +158,7 @@ namespace Modules.Utilities.Editor
                 if (GUILayout.Button("Resume"))
                 {
                     var frame = instance.GetCurrentFrame();
-                    instance.PlayAsync(frame, _resume: true).Forget();
+                    instance.UnPause();
                 }
                 if (GUILayout.Button("Stop"))
                 {

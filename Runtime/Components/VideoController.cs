@@ -17,6 +17,9 @@ namespace Modules.Utilities
         private static readonly int Alpha = Shader.PropertyToID("_Alpha");
         private static readonly int BaseMap = Shader.PropertyToID("_BaseMap");
 
+        private const string ShaderGraphTransparent = "Shader Graphs/TransparentTextureWithColor";
+        private const string UnlitTransparent = "Unlit/TransparentTextureWithColor";
+
         [SerializeField] public string m_FileName;
         [SerializeField] public string m_FolderName = "Resources";
         [SerializeField] public PathType m_PathType = PathType.Relative;
@@ -55,18 +58,18 @@ namespace Modules.Utilities
 
         private bool _Stopping = false;
         private bool _IgnoreFadeOut = false;
-        private bool _IsPlayStarting = false;
+        private bool _IsPreparing = false;
+        private bool _IsPaused = false;
 
 
         public VideoPlayer m_VideoPlayer => _VideoPlayer;
         public bool m_IsPlaying { private set; get; } = false;
         public bool m_IsPrepared { private set; get; } = false;
 
-        CancellationTokenSource _CancellationTokenSource = new CancellationTokenSource();
-        CancellationTokenSource _LoopCancellationTokenSource = new CancellationTokenSource();
+        private CancellationTokenSource _CancellationTokenSource = new CancellationTokenSource();
+        private CancellationTokenSource _LoopCancellationTokenSource = new CancellationTokenSource();
 
-        RectTransform _RectTransform;
-        Transform _Transform;
+        private RectTransform _RectTransform;
 
         private bool _IsResume = false;
 
@@ -76,7 +79,7 @@ namespace Modules.Utilities
         {
             if (_VideoPlayer != null)
             {
-                _IsResume = m_IsPlaying;
+                _IsResume = m_IsPlaying || _IsPreparing;
                 if (_VideoPlayer.isPlaying) _VideoPlayer.Pause();
                 _VideoPlayer.targetTexture?.Release();
                 _VideoPlayer.targetTexture = null;
@@ -90,6 +93,8 @@ namespace Modules.Utilities
             _LoopCancellationTokenSource.Dispose();
             _LoopCancellationTokenSource = new CancellationTokenSource();
 
+            _IsPaused = false;
+
         }
 
 
@@ -99,7 +104,7 @@ namespace Modules.Utilities
             Init();
             if (_IsResume)
             {
-                PlayAsync(_resume: true).Forget();
+                PlayAsync().Forget();
             }
             else if (m_StartMode != VideoStartMode.None)
             {
@@ -134,8 +139,6 @@ namespace Modules.Utilities
 
             if (m_StartMode == VideoStartMode.AutoPlay && _PlayWithParentShow && _ParentCanvasGroup != null)
             {
-                // Use _CancellationTokenSource.Token so this loop is cancelled on OnDisable,
-                // preventing multiple loops from accumulating across enable/disable cycles.
                 var loopToken = _LoopCancellationTokenSource.Token;
                 try
                 {
@@ -149,18 +152,17 @@ namespace Modules.Utilities
 
                         if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
                         {
-                            // Use m_IsPlaying (actual state) instead of local flag to avoid
-                            // desync when video ends naturally or stop fade-out is in progress.
-                            if (!m_IsPlaying && !_Stopping && !_IsPlayStarting)
+                            if (!m_IsPlaying && !_Stopping && !_IsPreparing && !_IsPaused)
                             {
                                 PlayAsync().Forget();
                             }
                         }
                         else
                         {
+                            _IsPaused = false;
                             if (m_IsPlaying && !_Stopping)
                             {
-                                Stop();
+                                StopCore();
                             }
                         }
                     }, loopToken).Forget();
@@ -187,11 +189,6 @@ namespace Modules.Utilities
             _LoopCancellationTokenSource?.Dispose();
             _LoopCancellationTokenSource = null;
         }
-
-        void Start()
-        {
-        }
-
 
         public async UniTask<bool> Prepare(CancellationToken _token = default)
         {
@@ -326,14 +323,13 @@ namespace Modules.Utilities
             if (_VideoPlayer == null) _VideoPlayer = GetComponent<VideoPlayer>();
 
             _RectTransform = GetComponent<RectTransform>();
-            _Transform = transform;
 
             if (m_OutputType == VideoOutputType.RawImage)
             {
                 //remove unused component
-                if (_MeshFilter != null) DestroyImmediate(_MeshFilter);
-                if (_MeshRenderer != null) DestroyImmediate(_MeshRenderer);
-                if (_Material != null) DestroyImmediate(_Material);
+                if (_MeshFilter != null) Destroy(_MeshFilter);
+                if (_MeshRenderer != null) Destroy(_MeshRenderer);
+                if (_Material != null) Destroy(_Material);
 
                 if (_RawImage == null) _RawImage = GetComponent<RawImage>();
                 if (_CanvasGroup == null) _CanvasGroup = GetComponent<CanvasGroup>();
@@ -346,15 +342,15 @@ namespace Modules.Utilities
             else if (m_OutputType == VideoOutputType.Renderer)
             {
                 //remove unused component
-                if (_RawImage != null) DestroyImmediate(_RawImage);
-                if (_CanvasGroup != null) DestroyImmediate(_CanvasGroup);
+                if (_RawImage != null) Destroy(_RawImage);
+                if (_CanvasGroup != null) Destroy(_CanvasGroup);
 
 
                 if (_Material == null)
                 {
-                    _Material = Shader.Find($"Shader Graphs/TransparentTextureWithColor") == null
-                        ? new Material(Shader.Find("Unlit/TransparentTextureWithColor"))
-                        : new Material(Shader.Find($"Shader Graphs/TransparentTextureWithColor"));
+                    _Material = Shader.Find(ShaderGraphTransparent) == null
+                        ? new Material(Shader.Find(UnlitTransparent))
+                        : new Material(Shader.Find(ShaderGraphTransparent));
                 }
 
 
@@ -404,38 +400,30 @@ namespace Modules.Utilities
         //------------------------------------ Public Method ----------------------------------
 
         public async UniTask PlayAsync(int _frame = 0, bool _ignoreFadeIn = false, bool _ignoreFadeOut = false,
-            bool _forcePlay = false, bool _resume = false, CancellationToken _token = default)
+            bool _forcePlay = false, CancellationToken _token = default)
         {
             if (_VideoPlayer == null)
                 _VideoPlayer = GetComponent<VideoPlayer>();
 
-            if ((_VideoPlayer.isPlaying || _IsPlayStarting) && !_forcePlay)
+            if ((_VideoPlayer.isPlaying || _IsPreparing) && !_forcePlay)
                 return;
 
-            _IsPlayStarting = true;
+            _IsPaused = false;
+            _IsPreparing = true;
 
-            if (!_resume)
-            {
-                _VideoPlayer.Stop();
-                _Stopping = false;
-                _FadeInProgress = 0f;
-                _FadeOutProgress = 0f;
-                _CancellationTokenSource?.Cancel();
-                _CancellationTokenSource?.Dispose();
-                _CancellationTokenSource = new CancellationTokenSource();
+            _VideoPlayer.Stop();
+            _Stopping = false;
+            _FadeInProgress = 0f;
+            _FadeOutProgress = 0f;
+            // Only hide before play when fade-in is active; otherwise keep current alpha
+            // to avoid flicker when coming from FirstFrameReady (alpha is already 1)
+            if (m_FadeVideo && !_ignoreFadeIn) ApplyAlpha(0);
 
-                //after cancel token be must wait for next frame
-                await UniTask.NextFrame();
+            _CancellationTokenSource?.Cancel();
+            _CancellationTokenSource?.Dispose();
+            _CancellationTokenSource = new CancellationTokenSource();
 
-                if (_token != default)
-                {
-                    var linked = CancellationTokenSource.CreateLinkedTokenSource(_token, _CancellationTokenSource.Token);
-                    _CancellationTokenSource.Dispose();
-                    _CancellationTokenSource = linked;
-                }
-            }
-
-            var token = _CancellationTokenSource.Token;
+            var token = CancellationTokenSource.CreateLinkedTokenSource(_CancellationTokenSource.Token, _token).Token;
 
             _IgnoreFadeOut = _ignoreFadeOut;
 
@@ -446,15 +434,21 @@ namespace Modules.Utilities
                 if (!isPrepared)
                 {
                     Debug.LogWarning($"[{name}] Video not prepared with invalid url: " + _VideoPlayer.url);
+                    _IsPreparing = false;
                     return;
                 }
 
                 Debug.Log($"[{name}] Play Video : " + _VideoPlayer.url);
+
+                // if (m_StartMode == VideoStartMode.FirstFrameReady && _frame == 0)
+                //     _frame++; // Skip first frame if already shown in prepare phase
+
                 _VideoPlayer.frame = _frame;
                 _VideoPlayer.Play();
 
                 await UniTask.WaitUntil(() => _VideoPlayer.isPlaying, cancellationToken: token);
                 m_IsPlaying = true;
+                _IsPreparing = false;
 
                 m_Progress = _frame / (float)_VideoPlayer.frameCount;
 
@@ -468,7 +462,6 @@ namespace Modules.Utilities
 
                     m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
 
-
                     if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stopping)
                     {
                         _FadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
@@ -480,9 +473,16 @@ namespace Modules.Utilities
                         ApplyAlpha(m_FadeVideo && !_ignoreFadeIn ? valueProgress : 1);
                         _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 1);
                     }
-                    else if (!m_Loop && _VideoPlayer.time >=
-                             _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) || _Stopping)
+                    else if ((!m_Loop && _VideoPlayer.time >=
+                             _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS)) || _Stopping)
                     {
+
+                        // If stop was called while still in fade-in, start fade-out from the current alpha
+                        // EaseInQuad(p) = p², EaseOutQuad at (1-p) = p²  →  they match seamlessly
+                        if (_FadeOutProgress == 0f && _FadeInProgress < 1f && _Stopping)
+                        {
+                            _FadeOutProgress = 1f - _FadeInProgress;
+                        }
 
                         _FadeOutProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
                         _FadeOutProgress = Mathf.Clamp01(_FadeOutProgress);
@@ -490,9 +490,12 @@ namespace Modules.Utilities
                                 _FadeOutProgress);
 
                         //fade out
-                        if (m_KeepLastframe)
+
+                        // KeepLastframe only applies to natural video end, NOT manual stop
+                        if (m_KeepLastframe && !_Stopping)
                         {
-                            //keep last frame
+                            //keep last frame (natural end): audio fades, alpha stays at 1
+                            _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
                             if (_FadeOutProgress >= 1f)
                             {
                                 Seek(_VideoPlayer.frameCount - 1);
@@ -505,6 +508,7 @@ namespace Modules.Utilities
                         }
                         else
                         {
+
                             ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
                             _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
                             if (_FadeOutProgress >= 1f)
@@ -525,7 +529,7 @@ namespace Modules.Utilities
                     }
 
 
-                    if (!_VideoPlayer.isPlaying && m_Loop)
+                    if (!_VideoPlayer.isPlaying && !_VideoPlayer.isPaused && m_Loop)
                     {
                         // Debug.Log("Video Loop.");
                         _VideoPlayer.frame = 0;
@@ -552,11 +556,14 @@ namespace Modules.Utilities
             }
             finally
             {
+                // Capture before reset: true = user called Stop(), false = natural end or cancelled
+                var wasManualStop = _Stopping;
                 _Stopping = false;
-                _IsPlayStarting = false;
+                _IsPreparing = false;
                 m_IsPlaying = false;
                 m_IsPrepared = false;
-                if (!m_KeepLastframe)
+                // On manual stop, always stop and hide even if m_KeepLastframe is set
+                if (!m_KeepLastframe || wasManualStop)
                 {
                     if (_VideoPlayer != null) _VideoPlayer.Stop();
                     ApplyAlpha(0);
@@ -571,46 +578,59 @@ namespace Modules.Utilities
         public void Pause()
         {
             if (_VideoPlayer && !_VideoPlayer.isPaused)
+            {
+                _IsPaused = true;
                 _VideoPlayer.Pause();
+            }
         }
 
         public void UnPause()
         {
             if (_VideoPlayer && _VideoPlayer.isPaused)
+            {
+                _IsPaused = false;
                 _VideoPlayer.Play();
+            }
         }
 
         public void Stop(bool _ignoreFadeOut = false)
         {
+            _IsPaused = true;
+            StopCore(_ignoreFadeOut);
+        }
 
-            if (!_VideoPlayer || !_VideoPlayer.isPlaying || !m_IsPlaying)
+        private void StopCore(bool _ignoreFadeOut = false)
+        {
+            if (!_VideoPlayer || (!m_IsPlaying && !_IsPreparing))
             {
                 ApplyAlpha(0);
                 m_IsPlaying = false;
                 m_IsPrepared = false;
-                _IsPlayStarting = false;
+                _IsPreparing = false;
                 return;
             }
-            if (_IsPlayStarting && !m_IsPlaying)
+
+            if (_IsPreparing)
             {
                 _CancellationTokenSource?.Cancel();
                 return;
             }
 
-            if(_Stopping)
+            if (_Stopping)
                 return;
 
-            // Debug.Log($"Stop Video :{m_FileName} ");
             _IgnoreFadeOut = _ignoreFadeOut;
             _Stopping = true;
         }
 
         public void StopAndHide()
         {
+            _IsPaused = true;
+            _CancellationTokenSource?.Cancel();
+            _IsPreparing = false;
             m_IsPlaying = false;
             m_IsPrepared = false;
-            _IgnoreFadeOut = true;
-            _Stopping = true;
+            _Stopping = false;
             ApplyAlpha(0);
         }
 
@@ -627,10 +647,6 @@ namespace Modules.Utilities
                 _RectTransform = GetComponent<RectTransform>();
             }
 
-            if (_Transform == null)
-            {
-                _Transform = transform;
-            }
             var ratio = (float)_texture.width / (float)_texture.height;
 
             if (_AspectRatioFitter != null)
