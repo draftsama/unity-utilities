@@ -427,6 +427,7 @@ namespace Modules.Utilities
 
             _IgnoreFadeOut = _ignoreFadeOut;
 
+
             try
             {
 
@@ -461,9 +462,11 @@ namespace Modules.Utilities
                         break;
 
                     m_Progress = (float)_VideoPlayer.time / (float)_VideoPlayer.length;
+                    // Debug.Log($"[{name}] Video Progress: {m_Progress * 100:F2}% {_VideoPlayer.isPlaying}");
 
                     if (_VideoPlayer.time <= (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS) && !_Stopping)
                     {
+                        // Debug.Log("Video Starting...");
                         _FadeInProgress += Time.deltaTime / (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS);
 
                         _FadeInProgress = Mathf.Clamp01(_FadeInProgress);
@@ -476,7 +479,7 @@ namespace Modules.Utilities
                     else if ((!m_Loop && _VideoPlayer.time >=
                              _VideoPlayer.length - (m_FadeTime * GlobalConstant.MILLISECONDS_TO_SECONDS)) || _Stopping)
                     {
-
+                        // Debug.Log("Video Ending...");
                         // If stop was called while still in fade-in, start fade-out from the current alpha
                         // EaseInQuad(p) = p², EaseOutQuad at (1-p) = p²  →  they match seamlessly
                         if (_FadeOutProgress == 0f && _FadeInProgress < 1f && _Stopping)
@@ -524,25 +527,28 @@ namespace Modules.Utilities
                     else
                     {
                         //playing
+
                         ApplyAlpha(1);
                         _VideoPlayer.SetDirectAudioVolume(0, 1);
+
                     }
 
 
-                    if (!_VideoPlayer.isPlaying && !_VideoPlayer.isPaused && m_Loop)
+                    if (m_Loop && _VideoPlayer.isPlaying && !_VideoPlayer.isPaused && !_Stopping && m_Progress > 0.99f)
                     {
                         // Debug.Log("Video Loop.");
+                        _VideoPlayer.Stop();
                         _VideoPlayer.frame = 0;
                         _VideoPlayer.Play();
-
-                        //skip fade in next loop
-                        _ignoreFadeIn = true;
-
+                  
                     }
 
-                    ApplyTexture(_VideoPlayer.texture);
 
+
+
+                    ApplyTexture(_VideoPlayer.texture);
                     await UniTask.Yield(PlayerLoopTiming.Update);
+
                 }
             }
             catch (System.OperationCanceledException)
