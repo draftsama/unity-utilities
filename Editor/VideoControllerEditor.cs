@@ -166,7 +166,7 @@ namespace Modules.Utilities.Editor
                 }
                 if (GUILayout.Button("Prepare with First Frame"))
                 {
-                    instance.PrepareFirstFrame().Forget();
+                    instance.Prepare(firstFrame:true).Forget();
                 }
 
                 if (GUILayout.Button("Prepare"))

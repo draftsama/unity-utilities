@@ -71,7 +71,7 @@ namespace Modules.Utilities
 
         private RectTransform _RectTransform;
 
-        private bool _IsResume = false;
+        private bool _BeCameResume = false;
 
         private float _FadeInProgress = 0f;
         private float _FadeOutProgress = 0f;
@@ -79,7 +79,7 @@ namespace Modules.Utilities
         {
             if (_VideoPlayer != null)
             {
-                _IsResume = m_IsPlaying || _IsPreparing;
+                _BeCameResume = m_IsPlaying || _IsPreparing;
                 if (_VideoPlayer.isPlaying) _VideoPlayer.Pause();
                 _VideoPlayer.targetTexture?.Release();
                 _VideoPlayer.targetTexture = null;
@@ -102,80 +102,73 @@ namespace Modules.Utilities
         private async void OnEnable()
         {
             Init();
-            if (_IsResume)
+            if (m_StartMode == VideoStartMode.None)
             {
-                PlayAsync().Forget();
+                if (_BeCameResume)
+                    PlayAsync().Forget();
             }
-            else if (m_StartMode != VideoStartMode.None)
+            else if (m_StartMode == VideoStartMode.Prepare)
             {
-                if (SetupURL(m_FileName, m_PathType, m_FolderName))
+                Prepare().Forget();
+            }
+            else if (m_StartMode == VideoStartMode.FirstFrameReady)
+            {
+                Prepare(firstFrame: true).Forget();
+            }
+            else if (m_StartMode == VideoStartMode.AutoPlay)
+            {
+                if (!_PlayWithParentShow)
                 {
-
-                    if (string.IsNullOrEmpty(_VideoPlayer.url))
-                    {
-                        //throw exception if url is empty
-                        throw new Exception($"[{gameObject.name}]  Video URL is empty.");
-                    }
-
-                    _VideoPlayer.Prepare();
-                    await UniTask.WaitUntil(() => _VideoPlayer.isPrepared,
-                        cancellationToken: _CancellationTokenSource.Token);
-
-                    m_IsPrepared = true;
-                    if (m_StartMode == VideoStartMode.AutoPlay)
-                    {
-                        if (!_PlayWithParentShow)
-                        {
-                            PlayAsync().Forget();
-                        }
-                    }
-                    else if (m_StartMode == VideoStartMode.FirstFrameReady)
-                    {
-                        await PrepareFirstFrame();
-                    }
+                    PlayAsync().Forget();
                 }
-            }
-
-
-            if (m_StartMode == VideoStartMode.AutoPlay && _PlayWithParentShow && _ParentCanvasGroup != null)
-            {
-                var loopToken = _LoopCancellationTokenSource.Token;
-                try
+                else
                 {
-                    UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
+                    if (_ParentCanvasGroup == null)
                     {
 
-
-                        if (gameObject.activeInHierarchy == false)
-                            return;
-
-
-                        if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
+                        var loopToken = _LoopCancellationTokenSource.Token;
+                        try
                         {
-                            if (!m_IsPlaying && !_Stopping && !_IsPreparing && !_IsPaused)
+                            UniTaskAsyncEnumerable.EveryUpdate().ForEachAsync(_ =>
                             {
-                                PlayAsync().Forget();
-                            }
+
+
+                                if (gameObject.activeInHierarchy == false)
+                                    return;
+
+
+                                if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
+                                {
+                                    if (!m_IsPlaying && !_Stopping && !_IsPreparing && !_IsPaused)
+                                    {
+                                        PlayAsync().Forget();
+                                    }
+                                }
+                                else
+                                {
+                                    _IsPaused = false;
+                                    if (m_IsPlaying && !_Stopping)
+                                    {
+                                        StopCore();
+                                    }
+                                }
+                            }, loopToken).Forget();
                         }
-                        else
+                        catch (OperationCanceledException)
                         {
-                            _IsPaused = false;
-                            if (m_IsPlaying && !_Stopping)
-                            {
-                                StopCore();
-                            }
+                            Debug.Log("Parent CanvasGroup monitoring canceled.");
                         }
-                    }, loopToken).Forget();
-                }
-                catch (OperationCanceledException)
-                {
-                    Debug.Log("Parent CanvasGroup monitoring canceled.");
-                }
-                catch (Exception)
-                {
-                    Debug.Log("Parent CanvasGroup monitoring error, likely due to missing reference. Stopping monitoring.");
+                        catch (Exception)
+                        {
+                            Debug.Log("Parent CanvasGroup monitoring error, likely due to missing reference. Stopping monitoring.");
+                        }
+                    }
                 }
             }
+
+
+
+
         }
 
 
@@ -190,7 +183,7 @@ namespace Modules.Utilities
             _LoopCancellationTokenSource = null;
         }
 
-        public async UniTask<bool> Prepare(CancellationToken _token = default)
+        public async UniTask<bool> Prepare(bool firstFrame = false, CancellationToken _token = default)
         {
             if (!_VideoPlayer.isPrepared || !m_IsPrepared)
             {
@@ -205,6 +198,25 @@ namespace Modules.Utilities
                 await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: _token);
                 m_IsPrepared = true;
 
+
+
+            }
+
+            if (firstFrame)
+            {
+                _VideoPlayer.Stop();
+                await UniTask.NextFrame();
+                _VideoPlayer.SetDirectAudioVolume(0, 0);
+                _VideoPlayer.Play();
+
+                await UniTask.WaitUntil(() => _VideoPlayer.isPlaying,
+                    cancellationToken: this.GetCancellationTokenOnDestroy());
+                _VideoPlayer.frame = 1;
+                await UniTask.WaitUntil(() => _VideoPlayer.texture != null,
+                 cancellationToken: this.GetCancellationTokenOnDestroy());
+                ApplyTexture(_VideoPlayer.texture);
+                ApplyAlpha(1);
+                _VideoPlayer.Pause();
             }
             return true;
 
@@ -254,6 +266,7 @@ namespace Modules.Utilities
 
         public bool SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
         {
+            Debug.Log($"[{name}] SetupURL called with filename: {_filename}, pathType: {_pathType}, folderName: {_foldername}");
 
             if (string.IsNullOrEmpty(_filename))
             {
@@ -302,6 +315,7 @@ namespace Modules.Utilities
 
                 filePath = Path.Combine(externalResourcesPath, m_FolderName, m_FileName);
             }
+
 
             var skipExistCheck = m_PathType == PathType.URL || m_PathType == PathType.StreamingAssets;
             if (string.IsNullOrEmpty(filePath) || (!skipExistCheck && !File.Exists(filePath)))
@@ -431,7 +445,7 @@ namespace Modules.Utilities
             try
             {
 
-                var isPrepared = await Prepare(token);
+                var isPrepared = await Prepare(firstFrame: false, _token: token);
                 if (!isPrepared)
                 {
                     Debug.LogWarning($"[{name}] Video not prepared with invalid url: " + _VideoPlayer.url);
@@ -540,7 +554,7 @@ namespace Modules.Utilities
                         _VideoPlayer.Stop();
                         _VideoPlayer.frame = 0;
                         _VideoPlayer.Play();
-                  
+
                     }
 
 
