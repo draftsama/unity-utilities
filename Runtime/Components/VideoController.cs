@@ -187,6 +187,7 @@ namespace Modules.Utilities
         {
             if (!_VideoPlayer.isPrepared || !m_IsPrepared)
             {
+
                 SetupURL(m_FileName, m_PathType, m_FolderName);
                 if (string.IsNullOrEmpty(_VideoPlayer.url))
                 {
@@ -266,7 +267,7 @@ namespace Modules.Utilities
 
         public bool SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
         {
-            Debug.Log($"[{name}] SetupURL called with filename: {_filename}, pathType: {_pathType}, folderName: {_foldername}");
+
 
             if (string.IsNullOrEmpty(_filename))
             {
@@ -274,6 +275,11 @@ namespace Modules.Utilities
                 return false;
             }
 
+            if (m_FileName == _filename && m_PathType == _pathType && m_FolderName == _foldername)
+            {
+                // Same URL, no need to update
+                return true;
+            }
 
             m_FileName = _filename;
             m_PathType = _pathType;
@@ -548,11 +554,13 @@ namespace Modules.Utilities
                     }
 
 
-                    if (m_Loop && _VideoPlayer.isPlaying && !_VideoPlayer.isPaused && !_Stopping && m_Progress > 0.99f)
+                    if (m_Loop && _VideoPlayer.isPlaying && !_VideoPlayer.isPaused && !_Stopping && _VideoPlayer.frame >= (_VideoPlayer.frameCount - 1f))
                     {
                         // Debug.Log("Video Loop.");
-                        _VideoPlayer.Stop();
+                        _VideoPlayer.Pause();
+                        await UniTask.NextFrame();
                         _VideoPlayer.frame = 0;
+                        await UniTask.NextFrame();
                         _VideoPlayer.Play();
 
                     }
