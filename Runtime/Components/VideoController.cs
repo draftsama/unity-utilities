@@ -268,6 +268,7 @@ namespace Modules.Utilities
         public bool SetupURL(string _filename, PathType _pathType = PathType.Relative, string _foldername = "Resources")
         {
 
+            // Debug.Log($"[{name}] SetupURL: filename={_filename}, pathType={_pathType}, folderName={_foldername}");
 
             if (string.IsNullOrEmpty(_filename))
             {
@@ -275,11 +276,7 @@ namespace Modules.Utilities
                 return false;
             }
 
-            if (m_FileName == _filename && m_PathType == _pathType && m_FolderName == _foldername)
-            {
-                // Same URL, no need to update
-                return true;
-            }
+           
 
             m_FileName = _filename;
             m_PathType = _pathType;
@@ -321,7 +318,6 @@ namespace Modules.Utilities
 
                 filePath = Path.Combine(externalResourcesPath, m_FolderName, m_FileName);
             }
-
 
             var skipExistCheck = m_PathType == PathType.URL || m_PathType == PathType.StreamingAssets;
             if (string.IsNullOrEmpty(filePath) || (!skipExistCheck && !File.Exists(filePath)))
