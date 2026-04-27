@@ -123,7 +123,8 @@ namespace Modules.Utilities
                 }
                 else
                 {
-                    if (_ParentCanvasGroup == null)
+
+                    if (_ParentCanvasGroup != null)
                     {
 
                         var loopToken = _LoopCancellationTokenSource.Token;
@@ -275,8 +276,6 @@ namespace Modules.Utilities
                 Debug.Log($"[{name}] Video filename is empty.");
                 return false;
             }
-
-           
 
             m_FileName = _filename;
             m_PathType = _pathType;
