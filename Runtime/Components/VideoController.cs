@@ -72,6 +72,7 @@ namespace Modules.Utilities
         private RectTransform _RectTransform;
 
         private bool _BeCameResume = false;
+        private bool _FinishedNaturally = false;
 
         private float _FadeInProgress = 0f;
         private float _FadeOutProgress = 0f;
@@ -140,7 +141,7 @@ namespace Modules.Utilities
 
                                 if (_ParentCanvasGroup.alpha >= _CanvasGroupThreshold)
                                 {
-                                    if (!m_IsPlaying && !_Stopping && !_IsPreparing && !_IsPaused)
+                                    if (!m_IsPlaying && !_Stopping && !_IsPreparing && !_IsPaused && !_FinishedNaturally)
                                     {
                                         PlayAsync().Forget();
                                     }
@@ -148,6 +149,7 @@ namespace Modules.Utilities
                                 else
                                 {
                                     _IsPaused = false;
+                                    _FinishedNaturally = false;
                                     if (m_IsPlaying && !_Stopping)
                                     {
                                         StopCore();
@@ -518,20 +520,22 @@ namespace Modules.Utilities
                             {
                                 Seek(_VideoPlayer.frameCount - 1);
                                 Debug.Log($"[{name}] Video End :" + _VideoPlayer.url);
-
+                                _FinishedNaturally = !m_Loop;
                                 _OnEndEventHandler.Invoke();
                                 break;
                             }
 
                         }
                         else
-                        {
+                        {   
+                            
 
-                            ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 0);
+                            ApplyAlpha(m_FadeVideo && !_IgnoreFadeOut ? valueProgress : 1);
                             _VideoPlayer.SetDirectAudioVolume(0, m_FadeAudio ? valueProgress : 0);
                             if (_FadeOutProgress >= 1f)
                             {
                                 Debug.Log($"[{name}] Video End :" + _VideoPlayer.url);
+                                _FinishedNaturally = !m_Loop;
                                 _OnEndEventHandler.Invoke();
                                 break;
                             }
