@@ -428,7 +428,8 @@ namespace Modules.Utilities
             _IsPaused = false;
             _IsPreparing = true;
 
-            _VideoPlayer.Stop();
+            if (!m_IsPrepared || !_VideoPlayer.isPrepared)
+                _VideoPlayer.Stop();
             _Stopping = false;
             _FadeInProgress = 0f;
             _FadeOutProgress = 0f;
