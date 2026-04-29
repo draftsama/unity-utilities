@@ -145,6 +145,12 @@ namespace Modules.Utilities
 
             if (_MeshFilter != null && _MeshFilter.sharedMesh != null)
                 Destroy(_MeshFilter.sharedMesh);
+
+            if (_Material != null)
+            {
+                Destroy(_Material);
+                _Material = null;
+            }
         }
 
         //------------------------------------------------------------
@@ -174,30 +180,54 @@ namespace Modules.Utilities
                 if (_RawImage != null) Destroy(_RawImage);
                 if (_CanvasGroup != null) Destroy(_CanvasGroup);
 
-                if (_Material == null)
+                if (_Material != null)
+                {
+                    if (Application.isPlaying)
+                    {
+                        Destroy(_Material);
+
+                        _Material = Shader.Find(ShaderGraphTransparent) != null
+                            ? new Material(Shader.Find(ShaderGraphTransparent))
+                            : new Material(Shader.Find(UnlitTransparent));
+
+                    }
+
+                    _Material.name = $"{name}_VideoMaterial";
+                }
+                else
                 {
                     _Material = Shader.Find(ShaderGraphTransparent) != null
                         ? new Material(Shader.Find(ShaderGraphTransparent))
                         : new Material(Shader.Find(UnlitTransparent));
+
+                    _Material.name = $"{name}_VideoMaterial";
                 }
 
                 if (_MeshFilter == null) _MeshFilter = GetComponent<MeshFilter>();
-                if (_MeshFilter != null && _MeshFilter.sharedMesh == null)
+                if (_MeshFilter != null)
                 {
-                    _MeshFilter.sharedMesh = new Mesh
+                    bool needNewMesh = Application.isPlaying || _MeshFilter.sharedMesh == null;
+                    if (needNewMesh)
                     {
-                        vertices = new[]
+                        if (Application.isPlaying && _MeshFilter.sharedMesh != null)
+                            Destroy(_MeshFilter.sharedMesh);
+
+                        _MeshFilter.sharedMesh = new Mesh
                         {
-                            new Vector3(-0.5f, -0.5f, 0f), new Vector3(0.5f, -0.5f, 0f),
-                            new Vector3(0.5f,  0.5f, 0f),  new Vector3(-0.5f, 0.5f, 0f)
-                        },
-                        triangles = new[] { 2, 1, 0, 3, 2, 0 },
-                        uv = new[]
-                        {
-                            new Vector2(0, 0), new Vector2(1, 0),
-                            new Vector2(1, 1), new Vector2(0, 1)
-                        }
-                    };
+                            vertices = new[]
+                            {
+                                new Vector3(-0.5f, -0.5f, 0f), new Vector3(0.5f, -0.5f, 0f),
+                                new Vector3(0.5f,  0.5f, 0f),  new Vector3(-0.5f, 0.5f, 0f)
+                            },
+                            triangles = new[] { 2, 1, 0, 3, 2, 0 },
+                            uv = new[]
+                            {
+                                new Vector2(0, 0), new Vector2(1, 0),
+                                new Vector2(1, 1), new Vector2(0, 1)
+                            }
+                        };
+                        _MeshFilter.sharedMesh.name = $"{name}_VideoMesh";
+                    }
                 }
 
                 if (_MeshRenderer == null) _MeshRenderer = GetComponent<MeshRenderer>();
