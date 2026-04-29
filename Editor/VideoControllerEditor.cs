@@ -190,12 +190,80 @@ namespace Modules.Utilities.Editor
 
             serializedObject.ApplyModifiedProperties();
 
-
             if (GUI.changed)
             {
                 instance.Init();
                 EditorUtility.SetDirty(instance);
             }
+
+            if (!Application.isPlaying)
+            {
+                EditorGUILayout.Space(8);
+                GUI.backgroundColor = new Color(0.6f, 0.9f, 1f);
+                if (GUILayout.Button("⬆ Migrate to VideoControllerV2", GUILayout.Height(28)))
+                {
+                    if (EditorUtility.DisplayDialog(
+                        "Migrate to VideoControllerV2",
+                        "This will replace VideoController with VideoControllerV2 and copy all property values.\n\nThis action can be undone.",
+                        "Migrate", "Cancel"))
+                    {
+                        MigrateToV2();
+                    }
+                }
+                GUI.backgroundColor = Color.white;
+            }
+        }
+
+        private void MigrateToV2()
+        {
+            var oldComp = (VideoController)target;
+            var go = oldComp.gameObject;
+
+            Undo.SetCurrentGroupName("Migrate VideoController to VideoControllerV2");
+            int undoGroup = Undo.GetCurrentGroup();
+
+            var newComp = Undo.AddComponent<VideoControllerV2>(go);
+
+            var oldSO = new SerializedObject(oldComp);
+            var newSO = new SerializedObject(newComp);
+
+            string[] fields =
+            {
+                "m_FileName", "m_FolderName", "m_PathType", "m_StartMode",
+                "m_Loop", "m_FadeVideo", "m_FadeAudio", "m_FadeTime",
+                "m_KeepLastframe", "m_OutputType", "_ContentSizeMode",
+                "_RawImage", "_CanvasGroup", "_AspectRatioFitter",
+                "_PlayWithParentShow", "_ParentCanvasGroup", "_CanvasGroupThreshold",
+                "_MeshFilter", "_MeshRenderer", "_Material"
+            };
+
+            oldSO.Update();
+            newSO.Update();
+
+            foreach (var fieldName in fields)
+            {
+                var src = oldSO.FindProperty(fieldName);
+                var dst = newSO.FindProperty(fieldName);
+                if (src == null || dst == null) continue;
+
+                switch (src.propertyType)
+                {
+                    case SerializedPropertyType.String:          dst.stringValue = src.stringValue; break;
+                    case SerializedPropertyType.Boolean:         dst.boolValue = src.boolValue; break;
+                    case SerializedPropertyType.Integer:         dst.intValue = src.intValue; break;
+                    case SerializedPropertyType.Float:           dst.floatValue = src.floatValue; break;
+                    case SerializedPropertyType.Enum:            dst.enumValueIndex = src.enumValueIndex; break;
+                    case SerializedPropertyType.ObjectReference: dst.objectReferenceValue = src.objectReferenceValue; break;
+                }
+            }
+
+            newSO.ApplyModifiedProperties();
+
+            Undo.DestroyObjectImmediate(oldComp);
+            Undo.CollapseUndoOperations(undoGroup);
+
+            EditorUtility.SetDirty(go);
+            Debug.Log($"[{go.name}] Migrated VideoController → VideoControllerV2");
         }
 
         private void UpdateResourceFolder()
