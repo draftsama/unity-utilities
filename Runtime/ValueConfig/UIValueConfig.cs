@@ -483,13 +483,39 @@ public class UIValueConfigEditor : Editor
 
             EditorGUILayout.BeginHorizontal();
 
-
-            //snap to the right
             GUILayout.FlexibleSpace();
+
+            GUI.enabled = i > 0;
+            GUI.color = Color.yellow;
+            if (GUILayout.Button("▲", GUILayout.Width(24)))
+            {
+                m_DataProperty.MoveArrayElement(i, i - 1);
+                GUI.enabled = true;
+                GUI.color = Color.white;
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical();
+                break;
+            }
+
+            GUI.enabled = i < m_DataProperty.arraySize - 1;
+            if (GUILayout.Button("▼", GUILayout.Width(24)))
+            {
+                m_DataProperty.MoveArrayElement(i, i + 1);
+                GUI.enabled = true;
+                GUI.color = Color.white;
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical();
+                break;
+            }
+
+            GUI.enabled = true;
             GUI.color = Color.red;
             if (GUILayout.Button("Remove"))
             {
                 m_DataProperty.DeleteArrayElementAtIndex(i);
+                GUI.color = Color.white;
+                EditorGUILayout.EndHorizontal();
+                EditorGUILayout.EndVertical();
                 break;
             }
             GUI.color = Color.white;

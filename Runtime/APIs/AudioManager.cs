@@ -72,6 +72,20 @@ namespace Modules.Utilities
             ResourcesIsLoaded = true;
         }
 
+        void OnDestroy()
+        {
+            if (_Instance == this)
+            {
+                foreach (var player in m_AudioPlayerList)
+                {
+                    if (player != null)
+                        Destroy(player.gameObject);
+                }
+                m_AudioPlayerList.Clear();
+                m_Audiolist.Clear();
+            }
+        }
+
 
         public IUniTaskAsyncEnumerable<AsyncUnit> OnLoadRequireCompleted(CancellationToken _token)
         {
@@ -82,8 +96,31 @@ namespace Modules.Utilities
         {
             if (_Instance == null)
             {
-                GameObject go = new GameObject("AudioManager", typeof(AudioManager));
-                _Instance = go.GetComponent<AudioManager>();
+                _Instance = FindFirstObjectByType<AudioManager>();
+
+                
+
+                if (_Instance == null)
+                {
+
+                    GameObject go = new GameObject("AudioManager", typeof(AudioManager));
+                    _Instance = go.GetComponent<AudioManager>();
+
+                }
+                else
+                {
+                    //clear audio player list in case of duplicate instance
+                    foreach (var player in _Instance.m_AudioPlayerList)
+                    {
+                        if (player != null)
+                            Destroy(player.gameObject);
+                    }
+
+                    _Instance.m_AudioPlayerList.Clear();
+                    _Instance.m_Audiolist.Clear();
+                    
+                }
+                
             }
 
             return _Instance;
@@ -113,9 +150,6 @@ namespace Modules.Utilities
             {
 
                 await UniTask.WaitUntil(() => ResourcesIsLoaded, cancellationToken: _token);
-
-                // Debug.Log($"PlayBGM: {_name}");
-
 
                 var clip = instance.m_Audiolist.FirstOrDefault(_ => _.name == _name);
 
