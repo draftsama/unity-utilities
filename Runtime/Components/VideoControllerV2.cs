@@ -539,7 +539,7 @@ namespace Modules.Utilities
                 if (m_Loop && _VideoPlayer.isPlaying && !_VideoPlayer.isPaused &&
                     !_StopRequested && _VideoPlayer.frame >= _VideoPlayer.frameCount - 1f)
                 {
-                    _FadeInProgress = 0f;
+                    _FadeInProgress = 1f;
                     _VideoPlayer.Pause();
                     await UniTask.NextFrame(token);
                     _VideoPlayer.frame = 0;
