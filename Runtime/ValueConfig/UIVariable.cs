@@ -97,9 +97,9 @@ public class UIVariable : MonoBehaviour
                 m_InputFields[0].text = m_Data.variable.floatValue.ToString();
                 break;
             case Variable.Type.Boolean:
-                m_Dropdowns.value = m_Data.variable.boolValue ? 0 : 1;
                 m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("True"));
                 m_Dropdowns.options.Add(new TMP_Dropdown.OptionData("False"));
+                m_Dropdowns.SetValueWithoutNotify(m_Data.variable.boolValue ? 0 : 1);
                 m_Dropdowns.gameObject.SetActive(true);
 
                 break;
