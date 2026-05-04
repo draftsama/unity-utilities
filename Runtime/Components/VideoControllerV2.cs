@@ -186,20 +186,26 @@ namespace Modules.Utilities
                     {
                         Destroy(_Material);
 
-                        _Material = Shader.Find(ShaderGraphTransparent) != null
-                            ? new Material(Shader.Find(ShaderGraphTransparent))
-                            : new Material(Shader.Find(UnlitTransparent));
-
+                        var shader = Shader.Find(ShaderGraphTransparent) ?? Shader.Find(UnlitTransparent);
+                        if (shader == null)
+                        {
+                            Debug.LogError($"[{name}] Could not find shader '{ShaderGraphTransparent}' or '{UnlitTransparent}'. Add them to Project Settings > Graphics > Always Included Shaders.");
+                            return;
+                        }
+                        _Material = new Material(shader);
                     }
 
                     _Material.name = $"{name}_VideoMaterial";
                 }
                 else
                 {
-                    _Material = Shader.Find(ShaderGraphTransparent) != null
-                        ? new Material(Shader.Find(ShaderGraphTransparent))
-                        : new Material(Shader.Find(UnlitTransparent));
-
+                    var shader = Shader.Find(ShaderGraphTransparent) ?? Shader.Find(UnlitTransparent);
+                    if (shader == null)
+                    {
+                        Debug.LogError($"[{name}] Could not find shader '{ShaderGraphTransparent}' or '{UnlitTransparent}'. Add them to Project Settings > Graphics > Always Included Shaders.");
+                        return;
+                    }
+                    _Material = new Material(shader);
                     _Material.name = $"{name}_VideoMaterial";
                 }
 
