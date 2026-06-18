@@ -41,6 +41,7 @@ namespace Modules.Utilities
         [SerializeField][HideInInspector] private MeshFilter _MeshFilter;
         [SerializeField][HideInInspector] private MeshRenderer _MeshRenderer;
         [SerializeField][HideInInspector] private Material _Material;
+        private bool _OwnsMesh = false;
         [SerializeField][HideInInspector] private ContentSizeMode _ContentSizeMode = ContentSizeMode.None;
 
         // ---- State machine ----
@@ -143,8 +144,11 @@ namespace Modules.Utilities
             _LinkedCTS?.Dispose();
             _LinkedCTS = null;
 
-            if (_MeshFilter != null && _MeshFilter.sharedMesh != null)
+            if (_MeshFilter != null && _MeshFilter.sharedMesh != null && _OwnsMesh)
+            {
                 Destroy(_MeshFilter.sharedMesh);
+                _OwnsMesh = false;
+            }
 
             if (_Material != null)
             {
@@ -215,8 +219,11 @@ namespace Modules.Utilities
                     bool needNewMesh = Application.isPlaying || _MeshFilter.sharedMesh == null;
                     if (needNewMesh)
                     {
-                        if (Application.isPlaying && _MeshFilter.sharedMesh != null)
+                        if (Application.isPlaying && _MeshFilter.sharedMesh != null && _OwnsMesh)
+                        {
                             Destroy(_MeshFilter.sharedMesh);
+                            _OwnsMesh = false;
+                        }
 
                         _MeshFilter.sharedMesh = new Mesh
                         {
@@ -233,6 +240,7 @@ namespace Modules.Utilities
                             }
                         };
                         _MeshFilter.sharedMesh.name = $"{name}_VideoMesh";
+                        _OwnsMesh = true;
                     }
                 }
 
