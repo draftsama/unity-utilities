@@ -68,7 +68,8 @@ namespace Modules.Utilities
         private float _FadeOutProgress = 0f;
 
         // ---- Misc ----
-        private RectTransform _RectTransform;
+        private Transform _Transform;
+
         private UnityEvent _OnEndEventHandler = new UnityEvent();
 
         // ---- Public properties ----
@@ -164,7 +165,6 @@ namespace Modules.Utilities
         public void Init()
         {
             if (_VideoPlayer == null) _VideoPlayer = GetComponent<VideoPlayer>();
-            _RectTransform = GetComponent<RectTransform>();
 
             if (m_OutputType == VideoOutputType.RawImage)
             {
@@ -560,7 +560,6 @@ namespace Modules.Utilities
                     await UniTask.NextFrame(token);
                     _VideoPlayer.Play();
                 }
-
                 ApplyTexture(_VideoPlayer.texture);
                 await UniTask.Yield(PlayerLoopTiming.Update, token);
             }
@@ -695,35 +694,65 @@ namespace Modules.Utilities
 
         private void ApplyTexture(Texture texture)
         {
+
             if (texture == null) return;
 
-            if (_RectTransform == null)
-                _RectTransform = GetComponent<RectTransform>();
+            if (_Transform == null)
+            {
+                _Transform = GetComponent<Transform>();
+            }
+           
+
 
             float ratio = (float)texture.width / texture.height;
 
-            if (_AspectRatioFitter != null)
-            {
+           
                 switch (_ContentSizeMode)
                 {
                     case ContentSizeMode.NativeSize:
-                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
-                        _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, texture.width);
-                        _RectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, texture.height);
+
+                        if (m_OutputType == VideoOutputType.RawImage)
+                        {
+                             if(_AspectRatioFitter != null) _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+                            ((RectTransform)_Transform).SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, texture.width);
+                            ((RectTransform)_Transform).SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, texture.height);
+                        }
+                        else if (m_OutputType == VideoOutputType.Renderer)
+                        {
+                            Debug.Log($"[{name}] NativeSize: {texture.width}x{texture.height}");
+                            _Transform.localScale = new Vector3(texture.width, texture.height, 1f);
+                        }
+
+
                         break;
                     case ContentSizeMode.WidthControlHeight:
-                        _AspectRatioFitter.aspectRatio = ratio;
-                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+                        if (m_OutputType == VideoOutputType.RawImage)
+                        {
+                            if(_AspectRatioFitter != null) _AspectRatioFitter.aspectRatio = ratio;
+                            if(_AspectRatioFitter != null) _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.WidthControlsHeight;
+                        }
+                        else if (m_OutputType == VideoOutputType.Renderer)
+                        {
+                            _Transform.localScale = new Vector3(_Transform.localScale.x, _Transform.localScale.x / ratio, 1f);
+                        }
                         break;
                     case ContentSizeMode.HeightControlWidth:
-                        _AspectRatioFitter.aspectRatio = ratio;
-                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+                        if (m_OutputType == VideoOutputType.RawImage)
+                        {
+                            if(_AspectRatioFitter != null) _AspectRatioFitter.aspectRatio = ratio;
+                            if(_AspectRatioFitter != null) _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.HeightControlsWidth;
+
+                        }
+                        else if (m_OutputType == VideoOutputType.Renderer)
+                        {
+                            _Transform.localScale = new Vector3(_Transform.localScale.y * ratio, _Transform.localScale.y, 1f);
+                        }
                         break;
                     case ContentSizeMode.None:
-                        _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
+                        if(_AspectRatioFitter != null) _AspectRatioFitter.aspectMode = AspectRatioFitter.AspectMode.None;
                         break;
                 }
-            }
+            
 
             if (_RawImage != null) _RawImage.texture = texture;
             if (_Material != null) _Material.SetTexture(BaseMap, texture);
