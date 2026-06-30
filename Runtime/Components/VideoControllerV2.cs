@@ -86,6 +86,7 @@ namespace Modules.Utilities
             if (_VideoPlayer != null)
             {
                 _BeCameResume = m_IsPlaying || _State == VideoState.Preparing;
+                _VideoPlayer.errorReceived -= OnVideoError;
                 if (_VideoPlayer.isPlaying) _VideoPlayer.Pause();
                 _VideoPlayer.targetTexture?.Release();
                 _VideoPlayer.targetTexture = null;
@@ -106,6 +107,8 @@ namespace Modules.Utilities
         private void OnEnable()
         {
             Init();
+            _VideoPlayer.errorReceived -= OnVideoError;
+            _VideoPlayer.errorReceived += OnVideoError;
             switch (m_StartMode)
             {
                 case VideoStartMode.None:
@@ -524,6 +527,26 @@ namespace Modules.Utilities
 
                 m_Progress = (float)(_VideoPlayer.time / _VideoPlayer.length);
 
+                // Reached end while looping: restart before checking fade/unexpected-stop state.
+                // Checked via frame OR isPlaying because the native player (isLooping=false) can
+                // stop itself on the same frame the frame-count check would fire — whichever signal
+                // arrives first must still trigger the manual loop restart.
+                bool reachedEnd = _VideoPlayer.frame >= _VideoPlayer.frameCount - 1f ||
+                    (!_VideoPlayer.isPlaying && !_VideoPlayer.isPaused);
+
+                if (m_Loop && !_StopRequested && reachedEnd)
+                {
+                    _FadeInProgress = 1f;
+                    if (_VideoPlayer.isPlaying) _VideoPlayer.Pause();
+                    await UniTask.NextFrame(token);
+                    _VideoPlayer.frame = 0;
+                    await UniTask.NextFrame(token);
+                    _VideoPlayer.Play();
+                    ApplyTexture(_VideoPlayer.texture);
+                    await UniTask.Yield(PlayerLoopTiming.Update, token);
+                    continue;
+                }
+
                 bool inFadeIn = _VideoPlayer.time <= fadeSeconds && !_StopRequested;
                 bool inFadeOut = (!m_Loop && _VideoPlayer.time >= _VideoPlayer.length - fadeSeconds) || _StopRequested;
 
@@ -546,20 +569,16 @@ namespace Modules.Utilities
                 }
                 else
                 {
+                    if (!_VideoPlayer.isPlaying && !_VideoPlayer.isPaused)
+                    {
+                        Debug.LogWarning($"[{debugName}] Video stopped unexpectedly at time={_VideoPlayer.time:F2}/{_VideoPlayer.length:F2}. Resetting state.");
+                        _OnEndEventHandler.Invoke();
+                        break;
+                    }
                     ApplyAlpha(1f);
                     _VideoPlayer.SetDirectAudioVolume(0, 1f);
                 }
 
-                if (m_Loop && _VideoPlayer.isPlaying && !_VideoPlayer.isPaused &&
-                    !_StopRequested && _VideoPlayer.frame >= _VideoPlayer.frameCount - 1f)
-                {
-                    _FadeInProgress = 1f;
-                    _VideoPlayer.Pause();
-                    await UniTask.NextFrame(token);
-                    _VideoPlayer.frame = 0;
-                    await UniTask.NextFrame(token);
-                    _VideoPlayer.Play();
-                }
                 ApplyTexture(_VideoPlayer.texture);
                 await UniTask.Yield(PlayerLoopTiming.Update, token);
             }
@@ -658,6 +677,11 @@ namespace Modules.Utilities
         //------------------------------------------------------------
         // Stop Core
         //------------------------------------------------------------
+
+        private void OnVideoError(VideoPlayer source, string message)
+        {
+            Debug.LogError($"[{name}] VideoPlayer error: {message}");
+        }
 
         private void StopCore(bool ignoreFadeOut = false)
         {
