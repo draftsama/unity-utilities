@@ -50,6 +50,7 @@ namespace Modules.Utilities
                 Destroy(gameObject);
                 return;
             }
+            m_Audiolist?.Clear();
 
             _Instance = this;
 
@@ -268,7 +269,6 @@ namespace Modules.Utilities
 
                 }
 
-                // Debug.Log($"PlayFX: {_name}");
                 audioPlayer = instance.GetAudioSource();
                 audioPlayer.volume = _volume;
                 audioPlayer.clip = clip;
