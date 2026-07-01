@@ -27,7 +27,14 @@ namespace Modules.Utilities
             UnityEditor.EditorApplication.playModeStateChanged += state =>
             {
                 if (state == UnityEditor.PlayModeStateChange.EnteredEditMode)
+                {
                     s_PageRegistry.Clear();
+
+                    foreach (var page in Object.FindObjectsByType<UIPage>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+                    {
+                        page.m_IsTransitionPage = false;
+                    }
+                }
             };
         }
 #endif
