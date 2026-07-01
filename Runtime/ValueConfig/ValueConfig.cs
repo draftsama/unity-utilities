@@ -9,6 +9,7 @@ namespace Modules.Utilities
 {
     public class ValueConfig
     {
+        public static event Action<string, object> OnValueChanged;
 
         private static VariableCollection _Collection;
         public static VariableCollection GetCollection()
@@ -103,7 +104,7 @@ namespace Modules.Utilities
         }
 
 
-        private static void SaveValueConfig()
+        public static void SaveValueConfig()
         {
             JSONObject jsonObject = new JSONObject();
 
@@ -167,13 +168,17 @@ namespace Modules.Utilities
             File.WriteAllText(path, jsonObject.ToString(true));
         }
 
-        public static bool SetValue<T>(string key, T value)
+        public static bool SetValue<T>(string key, T value , bool saveImmediately = true)
         {
 
-            
+
             if (GetCollection().SetValue(key, value))
             {
-                SaveValueConfig();
+                if (saveImmediately)
+                {
+                    SaveValueConfig();
+                }
+                OnValueChanged?.Invoke(key, value);
                 return true;
             }
             else
@@ -183,6 +188,9 @@ namespace Modules.Utilities
             }
 
         }
+        
+       
+
 
 
 
@@ -195,7 +203,6 @@ namespace Modules.Utilities
 
         public static T GetValue<T>(string key, T defaultValue = default(T))
         {
-
             return GetCollection().GetValue(key, defaultValue);
         }
 

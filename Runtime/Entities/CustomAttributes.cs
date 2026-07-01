@@ -14,16 +14,16 @@ namespace Modules.Utilities
 
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
     public class HelpBoxAttribute : PropertyAttribute
-    {      
-          public string Message { get; private set; }
-          public int MessageType { get; private set; }
+    {
+        public string Message { get; private set; }
+        public int MessageType { get; private set; }
 
         public HelpBoxAttribute(string message, int messageType = 0)
         {
             Message = message;
             MessageType = messageType;
         }
-       
+
     }
 
     [AttributeUsage(AttributeTargets.Method, Inherited = true, AllowMultiple = false)]
@@ -42,30 +42,67 @@ namespace Modules.Utilities
         }
     }
 
+   
+
     [AttributeUsage(AttributeTargets.Field, Inherited = true, AllowMultiple = false)]
     public class DropdownFieldAttribute : PropertyAttribute
     {
         public Dictionary<string, string> m_Options;
-
-
-        public DropdownFieldAttribute(Type type)
+        public enum DropdownValueType
         {
-            m_Options = GetStringConstants(type);
-
+            FieldName,
+            FieldValue
         }
 
-        private Dictionary<string, string> GetStringConstants(Type type)
+        private static readonly Type[] SupportedTypes =
         {
-            // Get all the fields in the class
-            FieldInfo[] fields = type.GetFields(BindingFlags.Public | BindingFlags.Static);
+            typeof(string), typeof(float), typeof(double), typeof(int), typeof(long), typeof(bool)
+        };
+
+
+        public DropdownFieldAttribute(params Type[] types)
+        {
+            m_Options = GetConstantNames(DropdownValueType.FieldValue, types);
+        }
+
+        public DropdownFieldAttribute(DropdownValueType valueType, params Type[] types)
+        {
+            m_Options = GetConstantNames(valueType, types);
+        }
+
+
+
+        // Value stored is the constant's field name (not its literal value),
+        // so it works as a lookup key (e.g. ValueConfig.SetValue(key, ...))
+        // even for non-string constants like ValueConstants.GAME_TIME.
+        private Dictionary<string, string> GetConstantNames(DropdownValueType valueType, Type[] types)
+        {
             Dictionary<string, string> constants = new Dictionary<string, string>();
 
-            foreach (var field in fields)
+            foreach (var type in types)
             {
-                // Check if the field is a string constant
-                if (field.FieldType == typeof(string) && field.IsLiteral && !field.IsInitOnly)
+                FieldInfo[] fields = type.GetFields(BindingFlags.Public | BindingFlags.Static);
+
+                foreach (var field in fields)
                 {
-                    constants.Add(field.Name, (string)field.GetValue(null));
+                    if (field.IsLiteral && !field.IsInitOnly && Array.IndexOf(SupportedTypes, field.FieldType) >= 0)
+                    {
+                        if (valueType == DropdownValueType.FieldName)
+                        {
+                            constants[field.Name] = field.Name;
+                        }
+                        else if (valueType == DropdownValueType.FieldValue)
+                        {
+                            if (field.FieldType == typeof(string) && field.IsLiteral && !field.IsInitOnly)
+                            {
+                                constants.Add(field.Name, (string)field.GetValue(null));
+                            }
+                            else
+                            {
+                                constants.Add(field.Name, $"[Not String Value] - {field.Name}");
+                            }
+                        }
+                    }
                 }
             }
 
@@ -132,9 +169,9 @@ namespace Modules.Utilities.Editor
         public static void DrawButtonMethods(UnityEngine.Object target)
         {
             var targetType = target.GetType();
-            var methods = targetType.GetMethods(BindingFlags.Instance | 
-                                                BindingFlags.Static | 
-                                                BindingFlags.Public | 
+            var methods = targetType.GetMethods(BindingFlags.Instance |
+                                                BindingFlags.Static |
+                                                BindingFlags.Public |
                                                 BindingFlags.NonPublic);
 
             var hasButtons = false;
@@ -149,8 +186,8 @@ namespace Modules.Utilities.Editor
                         hasButtons = true;
                     }
 
-                    var buttonText = string.IsNullOrEmpty(buttonAttribute.ButtonText) 
-                        ? ObjectNames.NicifyVariableName(method.Name) 
+                    var buttonText = string.IsNullOrEmpty(buttonAttribute.ButtonText)
+                        ? ObjectNames.NicifyVariableName(method.Name)
                         : buttonAttribute.ButtonText;
 
                     if (GUILayout.Button(buttonText))
