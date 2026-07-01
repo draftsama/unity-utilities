@@ -53,6 +53,7 @@ namespace Modules.Utilities
         /// </summary>
         protected virtual void Awake()
         {
+            m_IsTransitionPage = false;
             m_CanvasGroup = GetComponent<CanvasGroup>();
             m_RectTransform = GetComponent<RectTransform>();
 
