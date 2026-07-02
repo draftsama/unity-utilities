@@ -168,16 +168,15 @@ namespace Modules.Utilities
             File.WriteAllText(path, jsonObject.ToString(true));
         }
 
-        public static bool SetValue<T>(string key, T value , bool saveImmediately = true)
+        public static bool SetValue<T>(string key, T value)
         {
 
 
             if (GetCollection().SetValue(key, value))
             {
-                if (saveImmediately)
-                {
-                    SaveValueConfig();
-                }
+
+                SaveValueConfig();
+
                 OnValueChanged?.Invoke(key, value);
                 return true;
             }
@@ -188,8 +187,8 @@ namespace Modules.Utilities
             }
 
         }
-        
-       
+
+
 
 
 
