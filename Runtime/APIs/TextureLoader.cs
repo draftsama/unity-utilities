@@ -70,7 +70,8 @@ public class TextureLoader : MonoBehaviour
     }
 
     public static async UniTask<Texture2D> GetTextureAsync(string path, bool reload = false)
-    {
+    {   
+        var fileName = System.IO.Path.GetFileNameWithoutExtension(path);
         path = NormalizePath(path);
 
         //find in list
@@ -92,7 +93,7 @@ public class TextureLoader : MonoBehaviour
 
         //create new loader
         var uuid = System.Guid.NewGuid().ToString();
-        var newLoader = new GameObject("TextureLoader_" + uuid).AddComponent<TextureLoader>();
+        var newLoader = new GameObject($"{fileName}_{uuid}" ).AddComponent<TextureLoader>();
         newLoader.m_Path = path;
 
         if (m_Parent == null)
