@@ -10,38 +10,43 @@ public class TextureLoader : MonoBehaviour
     [SerializeField] private string m_Path;
     [SerializeField] private Texture2D m_Texture;
 
-    private bool _IsFinished = false;
+    private enum State { Idle, Loading, Done, Failed }
+    private State _State = State.Idle;
+    private UniTask<Texture2D> _LoadingTask;
 
-    public async UniTask<Texture2D> LoadTextureAsync(string path)
+    public UniTask<Texture2D> LoadTextureAsync(string path)
     {
+        // dedup: reuse the in-flight load instead of firing a second request
+        if (_State == State.Loading) return _LoadingTask;
 
+        _LoadingTask = LoadTextureInternalAsync(path).Preserve();
+        return _LoadingTask;
+    }
+
+    private async UniTask<Texture2D> LoadTextureInternalAsync(string path)
+    {
+        _State = State.Loading;
         try
         {
-            _IsFinished = false;
-
             using (var request = UnityWebRequestTexture.GetTexture(path))
             {
                 await request.SendWebRequest();
-                if (request.isDone)
-                {
-                    if (m_Texture) DestroyImmediate(m_Texture);
-                    m_Texture = DownloadHandlerTexture.GetContent(request);
-                    m_Texture.name = System.IO.Path.GetFileName(path);
-                    _IsFinished = true;
-                }
-                else
-                {
-                    throw new System.Exception("Failed to load texture");
-                }
+                if (request.result != UnityWebRequest.Result.Success)
+                    throw new System.Exception($"Failed to load texture ({path}): {request.error}");
+
+                if (m_Texture) DestroyImmediate(m_Texture);
+                m_Texture = DownloadHandlerTexture.GetContent(request);
+                m_Texture.name = System.IO.Path.GetFileName(path);
+                _State = State.Done;
+                return m_Texture;
             }
         }
-        catch (System.Exception e)
+        catch
         {
-            throw e;
+            // fault the task so waiters get the exception instead of hanging forever
+            _State = State.Failed;
+            throw;
         }
-
-        return m_Texture;
-
     }
 
 
@@ -56,23 +61,32 @@ public class TextureLoader : MonoBehaviour
     public static Transform m_Parent = null;
 
 
+    // local file paths without a scheme get file:// so UnityWebRequest can read them
+    public static string NormalizePath(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return path;
+        if (path.Contains("://")) return path; // already has a scheme (http/https/file/jar...)
+        return "file://" + path;
+    }
+
     public static async UniTask<Texture2D> GetTextureAsync(string path, bool reload = false)
     {
+        path = NormalizePath(path);
 
         //find in list
         var loader = m_Loaders.Find(x => x.m_Path == path);
         if (loader != null)
         {
-            if (reload)
-            {
-                return await loader.LoadTextureAsync(path);
-            }
+            //in-flight → join the same load (dedup, also covers reload-while-loading)
+            if (loader._State == State.Loading)
+                return await loader._LoadingTask;
 
-            //wait for loading
-            await UniTask.WaitUntil(() => loader._IsFinished);
+            //already loaded and not forcing reload → return cached texture
+            if (loader._State == State.Done && !reload)
+                return loader.m_Texture;
 
-            return await UniTask.FromResult(loader.m_Texture);
-
+            //idle / failed / reload → start a fresh load (also retries after a failure)
+            return await loader.LoadTextureAsync(path);
         }
 
 
