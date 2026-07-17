@@ -12,15 +12,18 @@ public class TextureLoader : MonoBehaviour
 
     private enum State { Idle, Loading, Done, Failed }
     private State _State = State.Idle;
-    private UniTask<Texture2D> _LoadingTask;
+
+    // Task (not UniTask) because a UniTask allows only one pending awaiter,
+    // and callers can join the same in-flight load concurrently.
+    private System.Threading.Tasks.Task<Texture2D> _LoadingTask;
 
     public UniTask<Texture2D> LoadTextureAsync(string path)
     {
         // dedup: reuse the in-flight load instead of firing a second request
-        if (_State == State.Loading) return _LoadingTask;
+        if (_State == State.Loading && _LoadingTask != null) return _LoadingTask.AsUniTask();
 
-        _LoadingTask = LoadTextureInternalAsync(path).Preserve();
-        return _LoadingTask;
+        _LoadingTask = LoadTextureInternalAsync(path).AsTask();
+        return _LoadingTask.AsUniTask();
     }
 
     private async UniTask<Texture2D> LoadTextureInternalAsync(string path)
@@ -79,8 +82,8 @@ public class TextureLoader : MonoBehaviour
         if (loader != null)
         {
             //in-flight → join the same load (dedup, also covers reload-while-loading)
-            if (loader._State == State.Loading)
-                return await loader._LoadingTask;
+            if (loader._State == State.Loading && loader._LoadingTask != null)
+                return await loader._LoadingTask.AsUniTask();
 
             //already loaded and not forcing reload → return cached texture
             if (loader._State == State.Done && !reload)
