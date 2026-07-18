@@ -44,11 +44,13 @@ public class TextureLoader : MonoBehaviour
                 return m_Texture;
             }
         }
-        catch
+        catch (System.Exception ex)
         {
             // fault the task so waiters get the exception instead of hanging forever
             _State = State.Failed;
-            throw;
+            // SendWebRequest() throws UnityWebRequestException before the result check,
+            // so wrap it to surface which path failed (e.g. 404) instead of a bare status.
+            throw new System.Exception($"<color=red>Failed to load texture ({path})</color> : {ex.Message} ", ex);
         }
     }
 
