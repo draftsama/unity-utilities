@@ -1,5 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
+using System.Threading;
 using Cysharp.Threading.Tasks;
 using UnityEngine;
 using UnityEngine.Networking;
@@ -17,23 +18,24 @@ public class TextureLoader : MonoBehaviour
     // and callers can join the same in-flight load concurrently.
     private System.Threading.Tasks.Task<Texture2D> _LoadingTask;
 
-    public UniTask<Texture2D> LoadTextureAsync(string path)
+    public UniTask<Texture2D> LoadTextureAsync(string path, CancellationToken cancellationToken = default)
     {
         // dedup: reuse the in-flight load instead of firing a second request
-        if (_State == State.Loading && _LoadingTask != null) return _LoadingTask.AsUniTask();
+        if (_State == State.Loading && _LoadingTask != null)
+            return _LoadingTask.AsUniTask().AttachExternalCancellation(cancellationToken);
 
-        _LoadingTask = LoadTextureInternalAsync(path).AsTask();
-        return _LoadingTask.AsUniTask();
+        _LoadingTask = LoadTextureInternalAsync(path, cancellationToken).AsTask();
+        return _LoadingTask.AsUniTask().AttachExternalCancellation(cancellationToken);
     }
 
-    private async UniTask<Texture2D> LoadTextureInternalAsync(string path)
+    private async UniTask<Texture2D> LoadTextureInternalAsync(string path, CancellationToken cancellationToken)
     {
         _State = State.Loading;
         try
         {
             using (var request = UnityWebRequestTexture.GetTexture(path))
             {
-                await request.SendWebRequest();
+                await request.SendWebRequest().WithCancellation(cancellationToken);
                 if (request.result != UnityWebRequest.Result.Success)
                     throw new System.Exception($"Failed to load texture ({path}): {request.error}");
 
@@ -74,7 +76,7 @@ public class TextureLoader : MonoBehaviour
         return "file://" + path;
     }
 
-    public static async UniTask<Texture2D> GetTextureAsync(string path, bool reload = false)
+    public static async UniTask<Texture2D> GetTextureAsync(string path, bool reload = false, CancellationToken cancellationToken = default)
     {   
         var fileName = System.IO.Path.GetFileNameWithoutExtension(path);
         path = NormalizePath(path);
@@ -85,14 +87,14 @@ public class TextureLoader : MonoBehaviour
         {
             //in-flight → join the same load (dedup, also covers reload-while-loading)
             if (loader._State == State.Loading && loader._LoadingTask != null)
-                return await loader._LoadingTask.AsUniTask();
+                return await loader._LoadingTask.AsUniTask().AttachExternalCancellation(cancellationToken);
 
             //already loaded and not forcing reload → return cached texture
             if (loader._State == State.Done && !reload)
                 return loader.m_Texture;
 
             //idle / failed / reload → start a fresh load (also retries after a failure)
-            return await loader.LoadTextureAsync(path);
+            return await loader.LoadTextureAsync(path, cancellationToken);
         }
 
 
@@ -111,7 +113,7 @@ public class TextureLoader : MonoBehaviour
 
         m_Loaders.Add(newLoader);
 
-        return await newLoader.LoadTextureAsync(path);
+        return await newLoader.LoadTextureAsync(path, cancellationToken);
 
     }
 
