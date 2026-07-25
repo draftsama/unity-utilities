@@ -792,11 +792,11 @@ namespace Modules.Utilities.Editor
             // Sync selectedBuildProfileIndex with active profile
             var activeProfile = GetActiveProfileAndSyncIndex();
             if (activeProfile == null) return;
-            var profileSettings = settings?.GetOrCreateProfileSettings(activeProfile.name);
-            var enableCopyFolders = profileSettings?.enableCopyFolders ?? false;
-            var copyFolders = profileSettings?.copyFolderPaths ?? new List<string>();
-            var enableCopyFiles = profileSettings?.enableCopyFiles ?? false;
-            var copyFiles = profileSettings?.copyFilePaths ?? new List<string>();
+            // Copy paths are machine-specific, stored in PlayerPrefs (not the shared asset)
+            var enableCopyFolders = BuildManagerPathPrefs.GetEnableCopyFolders(activeProfile.name);
+            var copyFolders = BuildManagerPathPrefs.GetCopyFolders(activeProfile.name);
+            var enableCopyFiles = BuildManagerPathPrefs.GetEnableCopyFiles(activeProfile.name);
+            var copyFiles = BuildManagerPathPrefs.GetCopyFiles(activeProfile.name);
             var buildFileFolder = Path.GetDirectoryName(report.summary.outputPath);
 
             if (IsStandaloneBuild(report.summary.platform) && enableCopyFolders && copyFolders.Count > 0)

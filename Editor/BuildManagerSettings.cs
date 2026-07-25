@@ -25,33 +25,22 @@ namespace Modules.Utilities.Editor
             public string profileName;
             
             [Header("Build Settings")]
-            public string buildFolderPath = "";
+            // NOTE: buildFolderPath and copy folder/file paths are machine-specific and
+            // stored in PlayerPrefs via BuildManagerPathPrefs, not here. Keeping them out of
+            // this committed asset prevents wrong paths when the project moves to another machine.
             public string buildName = "";
             public string buildSuffix = "";
             public string buildVersion = "";
-            
-            [Header("Copy Folders (Windows Only)")]
-            public bool enableCopyFolders = true;
-            public List<string> copyFolderPaths = new List<string>();
-            
-            [Header("Copy Files (Windows Only)")]
-            public bool enableCopyFiles = true;
-            public List<string> copyFilePaths = new List<string>();
 
             [Header("Build Options")]
             public bool developmentBuild = false;
-            
+
             public ProfileSettings(string name)
             {
                 profileName = name;
-                buildFolderPath = string.Empty;
                 buildName = name;
                 buildSuffix = string.Empty;
                 buildVersion = UnityEditor.PlayerSettings.bundleVersion;
-                enableCopyFolders = true;
-                copyFolderPaths = new List<string>();
-                enableCopyFiles = true;
-                copyFilePaths = new List<string>();
                 developmentBuild = false;
             }
             

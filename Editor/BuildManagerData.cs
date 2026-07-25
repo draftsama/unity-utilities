@@ -1,8 +1,64 @@
+using System;
 using System.Collections.Generic;
 using UnityEditor;
+using UnityEngine;
 
 namespace Modules.Utilities.Editor
 {
+    /// <summary>
+    /// Stores machine-specific path settings in PlayerPrefs instead of the shared
+    /// BuildManagerSettings asset. Absolute paths differ per machine, so keeping them
+    /// in the committed asset breaks when the same project is opened on another machine.
+    /// Keyed by profile name.
+    /// </summary>
+    public static class BuildManagerPathPrefs
+    {
+        private const string PREFIX = "BuildManager_Path_";
+
+        [Serializable]
+        private class StringListWrapper { public List<string> items = new List<string>(); }
+
+        private static string Key(string profileName, string field) => $"{PREFIX}{profileName}_{field}";
+
+        private static string SerializeList(List<string> list)
+        {
+            var wrapper = new StringListWrapper { items = list ?? new List<string>() };
+            return JsonUtility.ToJson(wrapper);
+        }
+
+        private static List<string> DeserializeList(string json)
+        {
+            if (string.IsNullOrEmpty(json)) return new List<string>();
+            var wrapper = JsonUtility.FromJson<StringListWrapper>(json);
+            return wrapper?.items ?? new List<string>();
+        }
+
+        public static string GetBuildFolder(string profileName) =>
+            PlayerPrefs.GetString(Key(profileName, "buildFolderPath"), string.Empty);
+        public static void SetBuildFolder(string profileName, string value) =>
+            PlayerPrefs.SetString(Key(profileName, "buildFolderPath"), value ?? string.Empty);
+
+        public static bool GetEnableCopyFolders(string profileName) =>
+            PlayerPrefs.GetInt(Key(profileName, "enableCopyFolders"), 1) == 1;
+        public static void SetEnableCopyFolders(string profileName, bool value) =>
+            PlayerPrefs.SetInt(Key(profileName, "enableCopyFolders"), value ? 1 : 0);
+
+        public static List<string> GetCopyFolders(string profileName) =>
+            DeserializeList(PlayerPrefs.GetString(Key(profileName, "copyFolderPaths"), string.Empty));
+        public static void SetCopyFolders(string profileName, List<string> value) =>
+            PlayerPrefs.SetString(Key(profileName, "copyFolderPaths"), SerializeList(value));
+
+        public static bool GetEnableCopyFiles(string profileName) =>
+            PlayerPrefs.GetInt(Key(profileName, "enableCopyFiles"), 1) == 1;
+        public static void SetEnableCopyFiles(string profileName, bool value) =>
+            PlayerPrefs.SetInt(Key(profileName, "enableCopyFiles"), value ? 1 : 0);
+
+        public static List<string> GetCopyFiles(string profileName) =>
+            DeserializeList(PlayerPrefs.GetString(Key(profileName, "copyFilePaths"), string.Empty));
+        public static void SetCopyFiles(string profileName, List<string> value) =>
+            PlayerPrefs.SetString(Key(profileName, "copyFilePaths"), SerializeList(value));
+    }
+
     /// <summary>
     /// Data container for Build Manager settings.
     /// Separates data from UI logic to create a single source of truth.
@@ -35,23 +91,20 @@ namespace Modules.Utilities.Editor
                 return;
             }
 
-            // Load profile-specific settings
-            buildFolderPath = profileSettings.buildFolderPath ?? string.Empty;
+            // Load profile-specific settings from the shared asset
             buildName = profileSettings.buildName ?? string.Empty;
             buildSuffix = profileSettings.buildSuffix ?? string.Empty;
             buildVersion = profileSettings.buildVersion ?? PlayerSettings.bundleVersion;
-            
-            enableCopyFolders = profileSettings.enableCopyFolders;
-            copyFolderPaths = profileSettings.copyFolderPaths != null 
-                ? new List<string>(profileSettings.copyFolderPaths) 
-                : new List<string>();
-            
-            enableCopyFiles = profileSettings.enableCopyFiles;
-            copyFilePaths = profileSettings.copyFilePaths != null 
-                ? new List<string>(profileSettings.copyFilePaths) 
-                : new List<string>();
 
             developmentBuild = profileSettings.developmentBuild;
+
+            // Load machine-specific paths from PlayerPrefs (not shared across machines)
+            string profileName = profileSettings.profileName;
+            buildFolderPath = BuildManagerPathPrefs.GetBuildFolder(profileName);
+            enableCopyFolders = BuildManagerPathPrefs.GetEnableCopyFolders(profileName);
+            copyFolderPaths = BuildManagerPathPrefs.GetCopyFolders(profileName);
+            enableCopyFiles = BuildManagerPathPrefs.GetEnableCopyFiles(profileName);
+            copyFilePaths = BuildManagerPathPrefs.GetCopyFiles(profileName);
 
             // Load global settings
             if (globalSettings != null)
@@ -72,19 +125,21 @@ namespace Modules.Utilities.Editor
                 return;
             }
 
-            // Save profile-specific settings
-            profileSettings.buildFolderPath = buildFolderPath;
+            // Save profile-specific settings to the shared asset
             profileSettings.buildName = buildName;
             profileSettings.buildSuffix = buildSuffix;
             profileSettings.buildVersion = buildVersion;
-            
-            profileSettings.enableCopyFolders = enableCopyFolders;
-            profileSettings.copyFolderPaths = new List<string>(copyFolderPaths);
-            
-            profileSettings.enableCopyFiles = enableCopyFiles;
-            profileSettings.copyFilePaths = new List<string>(copyFilePaths);
 
             profileSettings.developmentBuild = developmentBuild;
+
+            // Save machine-specific paths to PlayerPrefs (not shared across machines)
+            string profileName = profileSettings.profileName;
+            BuildManagerPathPrefs.SetBuildFolder(profileName, buildFolderPath);
+            BuildManagerPathPrefs.SetEnableCopyFolders(profileName, enableCopyFolders);
+            BuildManagerPathPrefs.SetCopyFolders(profileName, copyFolderPaths);
+            BuildManagerPathPrefs.SetEnableCopyFiles(profileName, enableCopyFiles);
+            BuildManagerPathPrefs.SetCopyFiles(profileName, copyFilePaths);
+            PlayerPrefs.Save();
 
             // Save global settings
             if (globalSettings != null)
