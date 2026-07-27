@@ -1,5 +1,11 @@
 using System;
+using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
+using System.Text;
+using System.Threading;
+using System.Threading.Tasks;
+using Newtonsoft.Json;
 
 namespace Modules.Utilities
 {
@@ -246,6 +252,159 @@ namespace Modules.Utilities
 
             fullPath = combined;
             return true;
+        }
+    }
+
+    public readonly struct FileTransferFrame
+    {
+        public readonly byte Code;
+        public readonly byte Flags;
+        public readonly FileTransferMeta Meta;
+
+        public FileTransferFrame(byte code, byte flags, FileTransferMeta meta)
+        {
+            Code = code;
+            Flags = flags;
+            Meta = meta;
+        }
+
+        public FileTransferStatus Status => (FileTransferStatus)Code;
+        public FileTransferOpcode Opcode => (FileTransferOpcode)Code;
+    }
+
+    public static partial class FileTransferProtocol
+    {
+        private const int PROGRESS_INTERVAL_MS = 100;
+
+        private static readonly JsonSerializerSettings _jsonSettings = new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Ignore,
+            DefaultValueHandling = DefaultValueHandling.Ignore,
+        };
+
+        public static async Task WriteFrameAsync(Stream stream, byte code, byte flags, FileTransferMeta meta, CancellationToken ct)
+        {
+            var metaBytes = meta == null
+                ? Array.Empty<byte>()
+                : Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(meta, _jsonSettings));
+
+            if (metaBytes.Length > MAX_META_BYTES)
+                throw new InvalidDataException($"frame metadata is {metaBytes.Length}B, over the {MAX_META_BYTES}B limit");
+
+            var header = BuildHeader(code, flags, metaBytes.Length);
+
+            await stream.WriteAsync(header, 0, header.Length, ct).ConfigureAwait(false);
+            if (metaBytes.Length > 0)
+                await stream.WriteAsync(metaBytes, 0, metaBytes.Length, ct).ConfigureAwait(false);
+            await stream.FlushAsync(ct).ConfigureAwait(false);
+        }
+
+        public static async Task<FileTransferFrame> ReadFrameAsync(Stream stream, CancellationToken ct)
+        {
+            var header = new byte[HEADER_SIZE];
+            await ReadExactAsync(stream, header, 0, HEADER_SIZE, ct).ConfigureAwait(false);
+
+            if (!TryParseHeader(header, out var code, out var flags, out var metaLen))
+                throw new InvalidDataException("bad frame header (magic, version, or metadata length)");
+
+            FileTransferMeta meta = null;
+            if (metaLen > 0)
+            {
+                var metaBytes = new byte[metaLen];
+                await ReadExactAsync(stream, metaBytes, 0, metaLen, ct).ConfigureAwait(false);
+                meta = JsonConvert.DeserializeObject<FileTransferMeta>(Encoding.UTF8.GetString(metaBytes));
+            }
+
+            return new FileTransferFrame(code, flags, meta ?? new FileTransferMeta());
+        }
+
+        public static async Task ReadExactAsync(Stream stream, byte[] buffer, int offset, int count, CancellationToken ct)
+        {
+            var read = 0;
+            while (read < count)
+            {
+                var n = await stream.ReadAsync(buffer, offset + read, count - read, ct).ConfigureAwait(false);
+                if (n <= 0)
+                    throw new EndOfStreamException($"connection closed after {read} of {count} expected bytes");
+                read += n;
+            }
+        }
+
+        /// <summary>
+        /// Moves exactly <paramref name="total"/> bytes from source to destination through one
+        /// reusable buffer, hashing as it goes so neither side reads the payload twice.
+        /// </summary>
+        public static async Task<byte[]> PumpAsync(
+            Stream source,
+            Stream destination,
+            long total,
+            int bufferSize,
+            bool computeHash,
+            string displayName,
+            IProgress<FileTransferProgress> progress,
+            CancellationToken ct)
+        {
+            if (bufferSize <= 0) bufferSize = 81920;
+
+            var buffer = new byte[bufferSize];
+            var hasher = computeHash ? IncrementalHash.CreateHash(HashAlgorithmName.SHA256) : null;
+
+            try
+            {
+                var moved = 0L;
+                var stopwatch = Stopwatch.StartNew();
+                var lastReportMs = (long)-PROGRESS_INTERVAL_MS;
+
+                while (moved < total)
+                {
+                    ct.ThrowIfCancellationRequested();
+
+                    var want = (int)Math.Min(buffer.Length, total - moved);
+                    var n = await source.ReadAsync(buffer, 0, want, ct).ConfigureAwait(false);
+                    if (n <= 0)
+                        throw new EndOfStreamException($"stream ended after {moved} of {total} bytes");
+
+                    await destination.WriteAsync(buffer, 0, n, ct).ConfigureAwait(false);
+                    if (hasher != null) hasher.AppendData(buffer, 0, n);
+                    moved += n;
+
+                    if (progress == null) continue;
+
+                    var elapsedMs = stopwatch.ElapsedMilliseconds;
+                    if (elapsedMs - lastReportMs < PROGRESS_INTERVAL_MS && moved < total) continue;
+
+                    lastReportMs = elapsedMs;
+                    var seconds = elapsedMs / 1000f;
+                    var rate = seconds > 0f ? moved / seconds : 0f;
+                    progress.Report(new FileTransferProgress(displayName, moved, total, rate));
+                }
+
+                await destination.FlushAsync(ct).ConfigureAwait(false);
+                return hasher != null ? hasher.GetHashAndReset() : null;
+            }
+            finally
+            {
+                if (hasher != null) hasher.Dispose();
+            }
+        }
+
+        public static bool HashEquals(byte[] a, byte[] b)
+        {
+            if (a == null || b == null) return false;
+            if (a.Length != b.Length) return false;
+
+            var diff = 0;
+            for (var i = 0; i < a.Length; i++) diff |= a[i] ^ b[i];
+            return diff == 0;
+        }
+
+        public static string ToHex(byte[] bytes)
+        {
+            if (bytes == null) return string.Empty;
+
+            var sb = new StringBuilder(bytes.Length * 2);
+            for (var i = 0; i < bytes.Length; i++) sb.Append(bytes[i].ToString("x2"));
+            return sb.ToString();
         }
     }
 }
