@@ -648,6 +648,15 @@ namespace Modules.Utilities
             if (!_endpointToPeerId.TryRemove(key, out var peerId)) return;
             if (_peers.TryRemove(peerId, out var peer))
                 DispatchMain(() => m_OnPeerDisconnected?.Invoke(peer.ToInfo()));
+
+            // Client received a graceful disconnect from the server: trigger reconnect
+            // instead of silently staying "connected" to a peer that no longer exists.
+            if (!m_IsServer && peerId == SERVER_PEER_ID)
+            {
+                m_IsConnected = false;
+                StopInternal(fireEvents: false);
+                if (m_AutoReconnect) ScheduleReconnect();
+            }
         }
 
         private void HandlePing(IPEndPoint sender)
@@ -751,11 +760,16 @@ namespace Modules.Utilities
                             _endpointToPeerId.TryRemove(EndpointKey(peer.EndPoint), out _);
                             DispatchMain(() => m_OnPeerDisconnected?.Invoke(peer.ToInfo()));
 
-                            // Client lost server: trigger reconnect.
+                            // Client lost server: tear down the session fully before reconnecting.
+                            // Without StopInternal, m_IsRunning stays true and StartAsync() no-ops
+                            // on its guard, so the reconnect loop would spin forever without ever
+                            // actually re-attempting the handshake.
                             if (!m_IsServer && peer.Id == SERVER_PEER_ID)
                             {
                                 m_IsConnected = false;
+                                StopInternal(fireEvents: false);
                                 if (m_AutoReconnect) ScheduleReconnect();
+                                return;
                             }
                         }
                     }
@@ -851,7 +865,13 @@ namespace Modules.Utilities
 
         private void ScheduleReconnect()
         {
-            if (m_IsServer || !m_AutoReconnect) return;
+            // Re-entrancy guard: TimeoutLoop, PerformClientHandshake (on timeout), StartAsync's
+            // catch block, and HandleFin can all request a reconnect around the same disconnect
+            // event. Only one ReconnectAsync loop may be active at a time — otherwise overlapping
+            // StartAsync/PerformClientHandshake calls race on shared handshake state
+            // (_handshakeReceived, _pendingAssignedPeerId) and on the m_IsRunning guard, producing
+            // endless duplicate handshake attempts that never converge.
+            if (m_IsServer || !m_AutoReconnect || m_IsReconnecting) return;
             ReconnectAsync().Forget();
         }
 
