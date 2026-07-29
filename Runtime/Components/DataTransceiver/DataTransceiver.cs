@@ -37,7 +37,7 @@ namespace Modules.Utilities
         public string m_Host = "127.0.0.1";
 
         [SerializeField, Tooltip("UDP port")]
-        public int m_Port = 55555;
+        public int m_Port = 54321;
 
         [SerializeField, Tooltip("Server mode (true) or client mode (false)")]
         public bool m_IsServer = false;
@@ -63,8 +63,8 @@ namespace Modules.Utilities
         [SerializeField] public int[] m_ReconnectDelaysMs = new int[] { 1000, 2000, 5000, 10000, 30000 };
 
         [Header("Discovery (UDP broadcast)")]
-        [SerializeField] public bool m_EnableDiscovery = false;
-        [SerializeField] public int m_DiscoveryPort = 55556;
+        [SerializeField] public bool m_EnableDiscovery = true;
+        [SerializeField] public int m_DiscoveryPort = 54322;
         [SerializeField, Range(200, 10000)] public int m_DiscoveryIntervalMs = 1000;
         [SerializeField] public string m_DiscoveryTag = "DT-DISCOVER";
 
@@ -203,16 +203,23 @@ namespace Modules.Utilities
 
             try
             {
-                if (m_IsServer) StartServerSocket();
-                else StartClientSocket();
+                if (m_IsServer)
+                {
+                    StartServerSocket();
+                }
+                else
+                {
+                    // Discovery must complete BEFORE the socket is created: StartClientSocket
+                    // freezes m_Host into _serverEndpoint, so a host discovered afterwards
+                    // would never be dialed and the handshake would time out against the
+                    // stale (usually loopback) address.
+                    if (m_EnableDiscovery) await DiscoverServerAsync(token);
+                    StartClientSocket();
+                }
 
                 m_IsRunning = true;
 
-                if (m_EnableDiscovery)
-                {
-                    if (m_IsServer) DiscoveryServerLoop(token).Forget();
-                    else DiscoveryClientLoop(token).Forget();
-                }
+                if (m_IsServer && m_EnableDiscovery) DiscoveryServerLoop(token).Forget();
 
                 ReceiveLoop(token).Forget();
                 RetransmitLoop(token).Forget();
@@ -822,13 +829,18 @@ namespace Modules.Utilities
             }
         }
 
-        private async UniTaskVoid DiscoveryClientLoop(CancellationToken ct)
+        /// <summary>
+        /// Blocks until a server broadcast is heard, then rewrites m_Host/m_Port so the
+        /// client socket is created against the discovered address. Returns on cancellation.
+        /// </summary>
+        private async UniTask DiscoverServerAsync(CancellationToken ct)
         {
             try
             {
                 _discoveryUdp = new UdpClient();
                 _discoveryUdp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
                 _discoveryUdp.Client.Bind(new IPEndPoint(IPAddress.Any, m_DiscoveryPort));
+                Log($"Waiting for server broadcast on discovery port {m_DiscoveryPort}...");
 
                 while (!ct.IsCancellationRequested)
                 {
@@ -844,12 +856,10 @@ namespace Modules.Utilities
                     if (parts.Length < 2) continue;
                     if (!int.TryParse(parts[1], out var serverPort)) continue;
 
-                    var newHost = res.RemoteEndPoint.Address.ToString();
-                    if (m_IsConnected || m_Host == newHost) continue;
-
-                    m_Host = newHost;
+                    m_Host = res.RemoteEndPoint.Address.ToString();
                     m_Port = serverPort;
-                    Log($"Discovered server at {newHost}:{serverPort}");
+                    Log($"Discovered server at {m_Host}:{serverPort}");
+                    return;
                 }
             }
             finally
@@ -901,9 +911,17 @@ namespace Modules.Utilities
 
         private void StartServerSocket()
         {
+            // m_Host doubles as "server to dial" for clients, so its default (127.0.0.1) is a
+            // client-side value. Binding a server to loopback silently blocks every remote peer,
+            // so only an explicit non-loopback address narrows the bind.
             var bindAddr = IPAddress.Any;
-            if (!string.IsNullOrEmpty(m_Host) && m_Host != "0.0.0.0" && !IPAddress.TryParse(m_Host, out bindAddr))
-                bindAddr = IPAddress.Any;
+            if (!string.IsNullOrEmpty(m_Host) && m_Host != "0.0.0.0" && m_Host != "localhost")
+            {
+                if (!IPAddress.TryParse(m_Host, out var parsed) || IPAddress.IsLoopback(parsed))
+                    bindAddr = IPAddress.Any;
+                else
+                    bindAddr = parsed;
+            }
             _udp = new UdpClient(new IPEndPoint(bindAddr, m_Port));
             _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
             Log($"Server bound on {bindAddr}:{m_Port}");
