@@ -202,7 +202,13 @@ namespace Modules.Utilities
 
         public static T GetValue<T>(string key, T defaultValue = default(T))
         {
-            return GetCollection().GetValue(key, defaultValue);
+            var collection = GetCollection();
+            if (!collection.ContainsKey(key))
+            {
+                collection.SetValue(key, defaultValue);
+                SaveValueConfig();
+            }
+            return collection.GetValue(key, defaultValue);
         }
 
 
