@@ -886,7 +886,7 @@ namespace Modules.Utilities.Editor
         }
 
 
-        private const string _API_MESSAGE = "https://api.telegram.org/bot1671713978:AAGGuzmbA2IQlZlQz66Z9yNWtckivBZZuuw/sendMessage?chat_id=1575164820&text=";
+        private const string _API_MESSAGE = "https://api.telegram.org/bot1671713978:AAG3PtLM9rR5rbmHlRLESgidMcHaclAVAmI/sendMessage?chat_id=1575164820&text=";
         private void SendMessage(string _message)
         {
             //4096 //characters limit for telegram message
