@@ -1,3 +1,5 @@
+#if ENABLE_UIPAGE_OLD
+
 using UnityEngine;
 namespace Modules.Utilities
 {
@@ -9,3 +11,5 @@ namespace Modules.Utilities
     }
 
 }
+
+#endif

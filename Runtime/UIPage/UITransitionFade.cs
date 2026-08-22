@@ -1,3 +1,5 @@
+#if ENABLE_UIPAGE_OLD
+
 using System.Threading;
 using Cysharp.Threading.Tasks;
 using Modules.Utilities;
@@ -83,3 +85,5 @@ namespace Modules.Utilities
 
     }
 }
+
+#endif
