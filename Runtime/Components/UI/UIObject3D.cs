@@ -79,10 +79,11 @@ namespace Modules.Utilities
 
         }
 
-        public void SetTarget(Transform target, string layerName)
+        public void SetTarget(Transform target, string layerName, bool lookAt)
         {
             m_Target = target;
             m_LayerMask = LayerMask.GetMask(layerName);
+            m_LookAt = lookAt;
 
         }
 
