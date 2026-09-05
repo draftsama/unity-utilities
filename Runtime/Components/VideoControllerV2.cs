@@ -77,6 +77,8 @@ namespace Modules.Utilities
         public bool m_IsPlaying => _State == VideoState.Playing;
         public bool m_IsPrepared => _IsPrepared;
 
+        public string m_VideoPath => _VideoPlayer?.url;
+
         //------------------------------------------------------------
         // Unity Lifecycle
         //------------------------------------------------------------
