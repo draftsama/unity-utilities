@@ -48,7 +48,7 @@ namespace Modules.Utilities.Editor
         private void DrawMethodButton(MonoBehaviour monoBehaviour, MethodInfo method)
         {
             ParameterInfo[] parameters = method.GetParameters();
-            string methodKey = $"{monoBehaviour.GetInstanceID()}_{method.Name}";
+            string methodKey = $"{monoBehaviour.GetEntityId()}_{method.Name}";
 
             // Get button attribute to check for custom button text
             ButtonAttribute buttonAttr = method.GetCustomAttribute<ButtonAttribute>();
