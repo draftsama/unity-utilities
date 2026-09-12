@@ -119,8 +119,10 @@ namespace Modules.Utilities
             }
 
             _RenderTexture.Create();
-            _Camera.Render();
 
+            // _Camera renders every frame on its own since it's enabled with a target texture;
+            // calling Camera.Render() here can happen mid-SRP-frame (layout rebuild triggered
+            // during rendering) and Unity forbids nested Camera.Render calls in SRP.
             _Camera.targetTexture = _RenderTexture;
             _RawImage.texture = _RenderTexture;
 
