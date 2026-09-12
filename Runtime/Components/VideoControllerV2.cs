@@ -276,6 +276,7 @@ namespace Modules.Utilities
                 }
 
                 _VideoPlayer.Prepare();
+                Debug.Log($"[{name}] Preparing video: {_VideoPlayer.url}");
                 await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: token);
                 _IsPrepared = true;
             }
