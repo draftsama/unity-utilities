@@ -84,7 +84,7 @@ namespace Modules.Utilities.Editor
             {
                 isDefault.boolValue = true;
 
-                var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                var allPages = FindObjectsByType<UIPage>(FindObjectsInactive.Include)
                                    .Where(_ => _.GroupName == script.GroupName && _ != script);
 
                 foreach (var p in allPages)
@@ -129,7 +129,7 @@ namespace Modules.Utilities.Editor
                 }
                 else
                 {
-                    var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                    var allPages = FindObjectsByType<UIPage>(FindObjectsInactive.Include)
                         .Where(_ => _.GroupName == script.GroupName && _ != script);
 
                     foreach (var p in allPages)
@@ -169,7 +169,7 @@ namespace Modules.Utilities.Editor
             {
                 if (isDefault.boolValue)
                 {
-                    var allPages = FindObjectsByType<UIPage>(FindObjectsSortMode.None)
+                    var allPages = FindObjectsByType<UIPage>(FindObjectsInactive.Include)
                         .Where(_ => _.GroupName == script.GroupName && _ != script);
 
 
@@ -201,7 +201,11 @@ namespace Modules.Utilities.Editor
 
         static UIPageHierarchyIndicator()
         {
+#if UNITY_6000_5_OR_NEWER
+            EditorApplication.hierarchyWindowItemByEntityIdOnGUI += OnHierarchyGUI;
+#else
             EditorApplication.hierarchyWindowItemOnGUI += OnHierarchyGUI;
+#endif
             EditorApplication.update += OnEditorUpdate;
         }
 
@@ -252,9 +256,15 @@ namespace Modules.Utilities.Editor
             GUI.Label(rect, new GUIContent(text, tooltip), s_BadgeStyle);
         }
 
+#if UNITY_6000_5_OR_NEWER
+        private static void OnHierarchyGUI(EntityId instanceID, Rect selectionRect)
+        {
+            var go = EditorUtility.EntityIdToObject(instanceID) as GameObject;
+#else
         private static void OnHierarchyGUI(int instanceID, Rect selectionRect)
         {
             var go = EditorUtility.InstanceIDToObject(instanceID) as GameObject;
+#endif
             if (go == null) return;
 
             var uiPage = go.GetComponent<UIPage>();
