@@ -41,3 +41,10 @@
 - FileTransfer enforces server-side path containment, a maximum file size, and a concurrent transfer limit.
 - FileTransfer core (FileTransferProtocol, FileTransferServer, FileTransferClient) has no UnityEngine dependency and can be driven from editor tooling or tests without a GameObject.
 - FileTransfer supports an optional DataTransceiver control channel for host inheritance and file-available notifications on action id 65100.
+
+## [1.0.10] - 2026-09-19
+### Added
+- Added UIMaskSoft, a container UI mask (modeled on Unity's built-in Mask) that modulates child Graphic alpha by a black-white (grayscale) texture, with an invert option and soft edges from the texture gradient.
+- UIMaskSoft takes the mask texture from the Image or RawImage on the same GameObject, and Show Mask toggles whether that mask graphic is drawn (like Mask.showMaskGraphic).
+- UIMaskSoft routes standard children through a shared material via IMaterialModifier (UI/UIMaskSoft shader) and hides content outside the mask rect.
+- UIMaskSoft supports TextMeshPro children via a per-instance SDF material variant (TextMeshPro/UIMaskSoft shader) that preserves font atlas, outline and underlay settings.
