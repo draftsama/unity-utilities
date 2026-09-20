@@ -8,20 +8,34 @@ namespace Modules.Utilities
     /// Routes the graphic through the mask via <see cref="IMaterialModifier"/>:
     /// standard graphics share the owner's UI mask material, while TextMeshPro graphics
     /// get a per-instance variant of their SDF material with the mask shader swapped in.
-    /// Added and removed automatically; not serialized.
+    /// Added and removed automatically, one per masked child; <see cref="IgnoreMask"/> is
+    /// the only field a user should touch, so it stays visible and serialized.
     /// </summary>
     [DisallowMultipleComponent]
     public class UIMaskSoftTarget : MonoBehaviour, IMaterialModifier
     {
+        [Tooltip("Skip masking for this graphic, even though it is a child of the UIMaskSoft.")]
+        [SerializeField] private bool m_IgnoreMask;
+
         private UIMaskSoft m_Owner;
         private Graphic m_Graphic;
         private Material m_TmpVariant;
 
         public Graphic Graphic => m_Graphic != null ? m_Graphic : (m_Graphic = GetComponent<Graphic>());
 
+        public bool IgnoreMask
+        {
+            get => m_IgnoreMask;
+            set
+            {
+                if (m_IgnoreMask == value) return;
+                m_IgnoreMask = value;
+                if (Graphic != null) Graphic.SetMaterialDirty();
+            }
+        }
+
         public void Bind(UIMaskSoft owner)
         {
-            hideFlags = HideFlags.HideAndDontSave;
             m_Owner = owner;
             m_Graphic = GetComponent<Graphic>();
         }
@@ -39,7 +53,7 @@ namespace Modules.Utilities
 
         public Material GetModifiedMaterial(Material baseMaterial)
         {
-            if (m_Owner == null || !m_Owner.isActiveAndEnabled) return baseMaterial;
+            if (m_IgnoreMask || m_Owner == null || !m_Owner.isActiveAndEnabled) return baseMaterial;
 
             if (IsTextMeshPro(baseMaterial))
                 return GetTmpVariant(baseMaterial);
@@ -82,5 +96,12 @@ namespace Modules.Utilities
                 && material.shader != null
                 && material.shader.name.StartsWith("TextMeshPro");
         }
+
+#if UNITY_EDITOR
+        private void OnValidate()
+        {
+            if (Graphic != null) Graphic.SetMaterialDirty();
+        }
+#endif
     }
 }
