@@ -135,11 +135,22 @@ namespace Modules.Utilities
 
         private void OnDisable()
         {
-            ClearTargets();
+            // Don't release targets here: ExecuteAlways fires OnDisable/OnEnable often
+            // (domain reload, prefab mode, undo/redo), and Release() destroys the
+            // UIMaskSoftTarget component, wiping its serialized IgnoreMask on every cycle.
+            // GetModifiedMaterial already falls back to the base material while we're
+            // disabled, so just mark the graphics dirty to pick that up.
             DestroyMaterial(ref m_Material);
             DestroyMaterial(ref m_HideMaterial);
             m_HideSource = null;
             if (m_MaskGraphic != null) m_MaskGraphic.SetMaterialDirty();
+            foreach (var target in m_Targets)
+                if (target != null && target.Graphic != null) target.Graphic.SetMaterialDirty();
+        }
+
+        private void OnDestroy()
+        {
+            ClearTargets();
         }
 
         private void OnCanvasHierarchyChanged()
