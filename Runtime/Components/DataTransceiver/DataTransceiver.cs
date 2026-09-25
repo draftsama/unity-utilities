@@ -286,6 +286,12 @@ namespace Modules.Utilities
             return SendToPeerAsync(peerId, action, data, mode, isRelay: false, ct);
         }
 
+        public UniTask SendToAsync<T>(int peerId, ushort action, T data, ReliabilityMode mode = ReliabilityMode.ReliableOrdered, CancellationToken ct = default)
+        {
+            var json = JsonConvert.SerializeObject(data);
+            return SendToAsync(peerId, action, Encoding.UTF8.GetBytes(json), mode, ct);
+        }
+
         public UniTask BroadcastAsync(ushort action, byte[] data, ReliabilityMode mode = ReliabilityMode.ReliableOrdered, int exceptPeerId = -1, CancellationToken ct = default)
         {
             if (!m_IsServer) throw new InvalidOperationException("BroadcastAsync is server-only.");
