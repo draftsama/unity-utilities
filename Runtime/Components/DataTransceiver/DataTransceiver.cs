@@ -128,7 +128,8 @@ namespace Modules.Utilities
         public bool IsReconnecting => m_IsReconnecting;
         public bool IsServer => m_IsServer;
         public int LocalPeerId => m_LocalPeerId;
-        public int PeerCount => m_PeerCount;
+        // Read live: m_PeerCount is only synced after the dispatch queue drains, so it lags inside peer events.
+        public int PeerCount => _peers.Count;
 
         public IReadOnlyCollection<PeerInfo> Peers
         {
