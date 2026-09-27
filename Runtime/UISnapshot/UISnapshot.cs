@@ -7,13 +7,12 @@ using UnityEngine;
 using UnityEngine.UI;
 using System.Linq;
 using System.IO;
-using Draft.HumanSensor.Input;
-using Draft.TextureProcessing;
 
 public class UISnapshot : Singleton<UISnapshot>
 {
 
     private CanvasGroup _CanvasGroup;
+    private ISnapshotSource _SourceDelegate;
 
     [System.Serializable]
     public class SnapshotInfo
@@ -34,13 +33,12 @@ public class UISnapshot : Singleton<UISnapshot>
     [SerializeField] private GameObject m_PortraitContent;
     [SerializeField] private List<RawImage> m_PortraitSnapshotDisplay = new List<RawImage>();
 
-    private SourceInput _SourceInput;
+
     void Start()
     {
         _CanvasGroup = GetComponent<CanvasGroup>();
         _CanvasGroup.SetAlpha(0);
 
-        _SourceInput = FindFirstObjectByType<SourceInput>();
     }
 
     public async UniTask Show(int _duration, CancellationToken _token)
@@ -106,30 +104,32 @@ public class UISnapshot : Singleton<UISnapshot>
 
     }
 
+    public void SetSourceDelegate(ISnapshotSource _source)
+    {
+        _SourceDelegate = _source;
+    }
+
     public bool TakeSnapshot(string _event)
     {
-      
-        Debug.Log($"[UISnapshot] TakeSnapshot : {_event}");
-
-        if (_SourceInput != null)
+        if (_SourceDelegate == null)
         {
-            var texture = _SourceInput.GetInputTexture().ToTexture2D();
-            if (texture != null)
-            {
-
-                m_SnapshotList.Add(new SnapshotInfo()
-                {
-                    texture = texture,
-                    eventName = _event
-                });
-
-                return true;
-
-            }
+            Debug.LogWarning("[UISnapshot] TakeSnapshot skipped: no ISnapshotSource set");
+            return false;
         }
 
-        return false;
+        var texture = _SourceDelegate.GetTexture2D();
+        if (texture == null)
+            return false;
 
+        Debug.Log($"[UISnapshot] TakeSnapshot : {_event}");
+
+        m_SnapshotList.Add(new SnapshotInfo()
+        {
+            texture = texture,
+            eventName = _event
+        });
+
+        return true;
     }
 
     public async UniTaskVoid ProcessSnapshot(CancellationToken _token)
@@ -169,10 +169,6 @@ public class UISnapshot : Singleton<UISnapshot>
         {
             TakeSnapshot($"TimeBasedEvent {m_SnapshotList.Count + 1}");
         }
-
-
-
-
 
 
 
