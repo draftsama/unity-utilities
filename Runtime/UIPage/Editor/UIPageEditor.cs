@@ -160,7 +160,7 @@ namespace Modules.Utilities.Editor
             EditorGUILayout.EndVertical();
 
             // Draw buttons from ButtonAttribute
-            CustomAttributeDrawer.DrawButtonMethods(target);
+            // CustomAttributeDrawer.DrawButtonMethods(target);
 
             serializedObject.ApplyModifiedProperties();
 
