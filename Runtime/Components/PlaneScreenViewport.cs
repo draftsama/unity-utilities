@@ -66,26 +66,17 @@ public class PlaneScreenViewport : MonoBehaviour
             m_AspectRatio = m_Camera.aspect;
         
         
-        var isPerspectiveMode = m_Camera.orthographic == false;
-        var size = 0f;
-        
-        
-        if (isPerspectiveMode)
-        {
-            //Calculate the size of the screen plane based on the camera's field of view and the distance to the screen plane
-            size = 2.0f * m_Distance * Mathf.Tan(m_Camera.fieldOfView * 0.5f * Mathf.Deg2Rad);
-            
-        }
-        else
-        {
-            size = m_Camera.orthographicSize * 2.0f;
-        }
+        // Sample the real viewport so off-axis (lens shift) projection matrices are honoured.
+        var camTr = m_Camera.transform;
+        var bottomLeft = m_Camera.ViewportToWorldPoint(new Vector3(0f, 0f, m_Distance));
+        var bottomRight = m_Camera.ViewportToWorldPoint(new Vector3(1f, 0f, m_Distance));
+        var topLeft = m_Camera.ViewportToWorldPoint(new Vector3(0f, 1f, m_Distance));
+        var topRight = m_Camera.ViewportToWorldPoint(new Vector3(1f, 1f, m_Distance));
 
+        var width = Mathf.Abs(Vector3.Dot(bottomRight - bottomLeft, camTr.right));
+        var height = Mathf.Abs(Vector3.Dot(topLeft - bottomLeft, camTr.up));
+        var centre = (bottomLeft + bottomRight + topLeft + topRight) * 0.25f;
 
-
-        var width = size * m_Camera.aspect;
-        var height = size;
-      
             
         if (m_ControlType == ControlType.WidthControlHeight)
         {
@@ -110,7 +101,7 @@ public class PlaneScreenViewport : MonoBehaviour
         _Tr.localScale = new Vector3(width, height, 1.0f);
 
 
-        _Tr.position = m_Camera.transform.position + m_Camera.transform.forward * m_Distance;
+        _Tr.position = centre;
 
         //look at camera reverse
         _Tr.LookAt(_Tr.position + m_Camera.transform.rotation * Vector3.forward,
