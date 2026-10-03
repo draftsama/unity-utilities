@@ -153,7 +153,10 @@ namespace Modules.Utilities
 
             var texture = _SourceDelegate.GetTexture2D();
             if (texture == null)
+            {
+                Debug.LogWarning("[UISnapshot] TakeSnapshot skipped: texture is null");
                 return false;
+            }
 
             Debug.Log($"[UISnapshot] TakeSnapshot : {_event}");
 
