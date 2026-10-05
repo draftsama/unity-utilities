@@ -1,5 +1,6 @@
-using System.Threading.Tasks;
 using System;
+using System.Threading;
+using Cysharp.Threading.Tasks;
 using UnityEngine;
 using System.Linq;
 using System.Collections;
@@ -58,27 +59,48 @@ namespace Modules.Utilities
 
         public void SetResolution(DisplayModes _displayMode, int _x, int y, int width, int height, int refreshRate)
         {
-            UnityEngine.Debug.LogFormat("Set Resolution: \nX:{0}\nY:{1}\nWidth:{2}\nHeight:{3}", _x, y, width, height);
+            SetResolutionAsync(_displayMode, _x, y, width, height, refreshRate,
+                this.GetCancellationTokenOnDestroy()).Forget();
+        }
+
+        public async UniTask SetResolutionAsync(DisplayModes displayMode, int x, int y, int width, int height,
+            int refreshRate, CancellationToken token)
+        {
+            UnityEngine.Debug.LogFormat("Set Resolution: \nX:{0}\nY:{1}\nWidth:{2}\nHeight:{3}", x, y, width, height);
             SetRefeshRate(refreshRate);
-            if (_displayMode == DisplayModes.Fullscreen)
+            if (displayMode == DisplayModes.Fullscreen)
             {
                 Screen.SetResolution(width, height, true);
                 return;
             }
-            var fromFullscreen = Screen.fullScreen;
-            if (fromFullscreen)
+
+            // Let Unity finish its own switch to a plain window first. Changing the native style while
+            // Unity is still applying a mode change leaves its client-area origin stale, which shows up
+            // as mouse input offset by the title-bar height.
+            if (Screen.fullScreenMode != FullScreenMode.Windowed)
             {
-                Screen.SetResolution(width, height, false);
+                Screen.SetResolution(width, height, FullScreenMode.Windowed);
+                using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
+                timeout.CancelAfterSlim(TimeSpan.FromSeconds(2));
+                try
+                {
+                    await UniTask.WaitUntil(() => !Screen.fullScreen &&
+                                                  Screen.fullScreenMode == FullScreenMode.Windowed,
+                        cancellationToken: timeout.Token);
+                }
+                catch (OperationCanceledException) when (!token.IsCancellationRequested)
+                {
+                    UnityEngine.Debug.LogWarning("Set Resolution: Unity did not switch to windowed mode within 2 s.");
+                }
             }
-            Task.Run(async () =>
-           {
 
-               if (fromFullscreen) await Task.Delay(50);
+            // The mode switch is applied over a few frames even after Screen reports it.
+            await UniTask.DelayFrame(3, cancellationToken: token);
+
 #if !UNITY_EDITOR && UNITY_STANDALONE_WIN
-               _windowsHandler.TrySetDisplayMode(_displayMode, _x, y, width, height);
+            // Win32 window calls must run on the thread that owns the window (Unity's main thread).
+            _windowsHandler.TrySetDisplayMode(displayMode, x, y, width, height);
 #endif
-           });
-
         }
 
 
@@ -244,21 +266,29 @@ namespace Modules.Utilities
 
                     // borderless
                     case DisplayModes.Borderless:
-                        var popupwindow = WS_OVERLAPPED | WS_CAPTION | WS_THICKFRAME;
-                        // FIRST PASS: positions the client window correctly
-                        Flags.Unset<int>(ref flags, popupwindow);
-                        SetWindowLongPtr(Window, GWL_STYLE, flags);
-                        UpdateWindowRect(Window, x, y, resolutionWidth, resolutionHeight);
+                        var window = Window;
+                        if (window == IntPtr.Zero)
+                        {
+                            UnityEngine.Debug.LogWarning("Set Resolution: window '" + _title + "' not found.");
+                            return false;
+                        }
 
-                        // SECOND PASS: ensures that the window has the correct styling
-                        Flags.Unset<int>(ref flags, popupwindow);
-                        SetWindowLongPtr(Window, GWL_STYLE, flags);
-                        //UpdateWindowStyle(Window);                    // for some reason, UpdateWindowStyle does not update the window 
-                        // properly here, and instead resets of the window styles. For 
-                        // some other reason, a secondary call to SetWindowLongPtr does 
-                        // in fact update the window properly. It is not clear why this 
-                        // is, only that it seems to work, for now, in our test environment.                    
-                        SetWindowLongPtr(Window, GWL_STYLE, flags);
+                        Flags.Unset<int>(ref flags, WS_CAPTION | WS_THICKFRAME);
+                        SetWindowLongPtr(window, GWL_STYLE, flags);
+                        // SWP_FRAMECHANGED makes Windows recompute the client area for the new style, so the
+                        // window rect equals the client rect and Unity's mouse mapping follows it.
+                        UpdateWindowRect(window, x, y, resolutionWidth, resolutionHeight);
+
+                        RECT borderlessClient;
+                        GetClientRect(window, out borderlessClient);
+                        int clientWidth = borderlessClient.Right - borderlessClient.Left;
+                        int clientHeight = borderlessClient.Bottom - borderlessClient.Top;
+                        if (clientWidth != resolutionWidth || clientHeight != resolutionHeight)
+                        {
+                            UnityEngine.Debug.LogWarningFormat(
+                                "Set Resolution: borderless client area is {0}x{1}, expected {2}x{3}.",
+                                clientWidth, clientHeight, resolutionWidth, resolutionHeight);
+                        }
 
                         return true;
 
