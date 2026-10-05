@@ -269,32 +269,20 @@ namespace Modules.Utilities
         /// <returns>Vector2 containing the width and height of the bounding box in screen pixels</returns>
         public static Vector2 GetBoundingSizeInScreenView(Bounds _bounds, Camera _camera)
         {
-
-            // Get the corners of the bounding box in world space
-            Vector3[] corners = new Vector3[8];
-            corners[0] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
-            corners[1] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
-            corners[2] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
-            corners[3] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z - _bounds.extents.z);
-            corners[4] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
-            corners[5] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y - _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
-            corners[6] = new Vector3(_bounds.center.x - _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
-            corners[7] = new Vector3(_bounds.center.x + _bounds.extents.x, _bounds.center.y + _bounds.extents.y, _bounds.center.z + _bounds.extents.z);
-
-
-            Vector2[] screenPoints = new Vector2[8];
-            for (int i = 0; i < corners.Length; i++)
+            // Walk the 8 corners without temp arrays; this runs per indicator per frame
+            Vector3 c = _bounds.center;
+            Vector3 e = _bounds.extents;
+            Vector2 min = new Vector2(float.MaxValue, float.MaxValue);
+            Vector2 max = new Vector2(float.MinValue, float.MinValue);
+            for (int i = 0; i < 8; i++)
             {
-                Vector3 screenPoint = _camera.WorldToScreenPoint(corners[i]);
-                screenPoints[i] = new Vector2(screenPoint.x, screenPoint.y);
-            }
-            // Find the min and max screen coordinates
-            Vector2 min = screenPoints[0];
-            Vector2 max = screenPoints[0];
-            for (int i = 1; i < screenPoints.Length; i++)
-            {
-                min = Vector2.Min(min, screenPoints[i]);
-                max = Vector2.Max(max, screenPoints[i]);
+                Vector3 corner = new Vector3(
+                    c.x + ((i & 1) == 0 ? -e.x : e.x),
+                    c.y + ((i & 2) == 0 ? -e.y : e.y),
+                    c.z + ((i & 4) == 0 ? -e.z : e.z));
+                Vector3 screenPoint = _camera.WorldToScreenPoint(corner);
+                min = Vector2.Min(min, screenPoint);
+                max = Vector2.Max(max, screenPoint);
             }
 
             return new Vector2(max.x - min.x, max.y - min.y);

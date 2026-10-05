@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 namespace Modules.Utilities
 {
@@ -18,6 +19,11 @@ namespace Modules.Utilities
         public RectTransform OffScreenRectTransform { get; private set; }
         public RectTransform OffScreenArrowRectTransform { get; private set; }
 
+        // Prefab set this view was built from; only indicators with the same set can reuse it from the pool
+        internal HUDViewKey Key { get; private set; }
+
+        private readonly List<IHUDIndicatorViewHandler> _handlers = new List<IHUDIndicatorViewHandler>();
+
         void Awake()
         {
             RectTransform = GetComponent<RectTransform>();
@@ -29,15 +35,49 @@ namespace Modules.Utilities
 
         public void Initialize(HUDIndicator indicator, HUDRenderer renderer)
         {
-            Indicator = indicator;
             Renderer = renderer;
             
             var data = indicator.m_IndicatorData;
+            Key = HUDViewKey.From(data);
             
             InitializeOnScreenView(data);
             InitializeOffScreenViews(data);
+            GetComponentsInChildren(true, _handlers);
             
             SetupTransform();
+            Bind(indicator);
+        }
+
+        internal void Bind(HUDIndicator indicator)
+        {
+            Indicator = indicator;
+            gameObject.name = indicator.name + " View";
+            gameObject.SetActive(true);
+            Hide(); // Renderer positions and shows it on its next LateUpdate
+
+            for (int i = 0; i < _handlers.Count; i++)
+            {
+                _handlers[i].OnBind(indicator, this);
+            }
+            indicator.NotifyViewBound(this);
+        }
+
+        internal void Unbind()
+        {
+            // Reference check: handlers still get to reset state when the indicator was destroyed
+            var indicator = Indicator;
+            if (!ReferenceEquals(indicator, null))
+            {
+                for (int i = 0; i < _handlers.Count; i++)
+                {
+                    _handlers[i].OnUnbind(indicator, this);
+                }
+                indicator.NotifyViewUnbound(this);
+            }
+
+            Hide();
+            Indicator = null;
+            gameObject.SetActive(false);
         }
 
         private void InitializeOnScreenView(HUDIndicator.HUDIndicatorData data)
@@ -189,6 +229,43 @@ namespace Modules.Utilities
                 OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, size.x);
                 OffScreenRectTransform.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, size.y);
             }
+        }
+    }
+
+    internal readonly struct HUDViewKey : System.IEquatable<HUDViewKey>
+    {
+        private readonly GameObject _onScreen;
+        private readonly GameObject _offScreen;
+        private readonly GameObject _arrow;
+
+        private HUDViewKey(GameObject onScreen, GameObject offScreen, GameObject arrow)
+        {
+            _onScreen = onScreen;
+            _offScreen = offScreen;
+            _arrow = arrow;
+        }
+
+        public static HUDViewKey From(HUDIndicator.HUDIndicatorData data)
+        {
+            // Mirror the Initialize* rules so disabled parts don't split the pool
+            return new HUDViewKey(
+                data.m_UseOnScreen ? data.m_OnScreenPrefab : null,
+                data.m_UseOffScreen ? data.m_OffScreenPrefab : null,
+                data.m_UseOffScreen ? data.m_OffScreenArrowPrefab : null);
+        }
+
+        public bool Equals(HUDViewKey other)
+        {
+            return ReferenceEquals(_onScreen, other._onScreen) &&
+                   ReferenceEquals(_offScreen, other._offScreen) &&
+                   ReferenceEquals(_arrow, other._arrow);
+        }
+
+        public override bool Equals(object obj) => obj is HUDViewKey other && Equals(other);
+
+        public override int GetHashCode()
+        {
+            return System.HashCode.Combine(_onScreen, _offScreen, _arrow);
         }
     }
 }

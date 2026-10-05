@@ -19,7 +19,7 @@ namespace Modules.Utilities
         public float m_MinDistanceLimit = 0f;
         public float m_MaxDistanceLimit = 100f;
         
-        [Tooltip("X = Start Fade Distance, Y = Full Visible Distance")]
+        [Tooltip("Fully visible closer than the smaller value, fading out to hidden at the larger value. Set either to 0 to disable.")]
         [MinMaxSlider("m_MinDistanceLimit", "m_MaxDistanceLimit", 0f, 200f)]
         public Vector2 m_FadeDistance = new Vector2(15f, 20f);
 
@@ -40,6 +40,10 @@ namespace Modules.Utilities
         [Range(1, 10)]
         public int m_SortUpdateFrequency = 1;
 
+        [Tooltip("Released views kept per prefab set for reuse; extras are destroyed")]
+        [Range(0, 256)]
+        public int m_MaxPooledViewsPerType = 32;
+
 
 
         public List<HUDIndicatorView> m_IndicatorViewList = new List<HUDIndicatorView>();
@@ -54,6 +58,31 @@ namespace Modules.Utilities
         private int _frameCounter = 0;
         private System.Comparison<int> _distanceComparison; // Cached to avoid a delegate allocation per sort
 
+        private Canvas _canvas;
+        private readonly Dictionary<HUDIndicator, HUDIndicatorView> _viewByIndicator = new Dictionary<HUDIndicator, HUDIndicatorView>(ReferenceComparer.Instance);
+        private readonly Dictionary<HUDViewKey, Stack<HUDIndicatorView>> _pool = new Dictionary<HUDViewKey, Stack<HUDIndicatorView>>();
+
+        // Registry callbacks can fire mid (de)activation where SetActive is illegal, so changes apply in LateUpdate.
+        // true = add, false = remove.
+        private readonly Dictionary<HUDIndicator, bool> _pendingChanges = new Dictionary<HUDIndicator, bool>(ReferenceComparer.Instance);
+        private readonly List<KeyValuePair<HUDIndicator, bool>> _pendingBuffer = new List<KeyValuePair<HUDIndicator, bool>>();
+
+        private static readonly List<HUDRenderer> s_Active = new List<HUDRenderer>();
+        public static IReadOnlyList<HUDRenderer> ActiveRenderers => s_Active;
+
+        [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+        private static void ResetStatics()
+        {
+            s_Active.Clear();
+        }
+
+        // UnityEngine.Object equality treats any two destroyed objects as equal; keys must stay distinct
+        private sealed class ReferenceComparer : IEqualityComparer<HUDIndicator>
+        {
+            public static readonly ReferenceComparer Instance = new ReferenceComparer();
+            public bool Equals(HUDIndicator x, HUDIndicator y) => ReferenceEquals(x, y);
+            public int GetHashCode(HUDIndicator obj) => System.Runtime.CompilerServices.RuntimeHelpers.GetHashCode(obj);
+        }
 
 
         void Awake()
@@ -66,36 +95,134 @@ namespace Modules.Utilities
             }
         }
 
+        void OnEnable()
+        {
+            s_Active.Add(this);
+            HUDIndicator.Registered += OnIndicatorRegistered;
+            HUDIndicator.Unregistered += OnIndicatorUnregistered;
+
+            // Catch up on indicators that came or went while this renderer was disabled or not yet created
+            var indicators = HUDIndicator.ActiveIndicators;
+            for (int i = 0; i < indicators.Count; i++)
+            {
+                OnIndicatorRegistered(indicators[i]);
+            }
+            for (int i = 0; i < m_IndicatorViewList.Count; i++)
+            {
+                var view = m_IndicatorViewList[i];
+                if (view != null && view.Indicator != null && !view.Indicator.IsRegistered)
+                {
+                    _pendingChanges[view.Indicator] = false;
+                }
+            }
+        }
+
+        void OnDisable()
+        {
+            s_Active.Remove(this);
+            HUDIndicator.Registered -= OnIndicatorRegistered;
+            HUDIndicator.Unregistered -= OnIndicatorUnregistered;
+            // Views stay bound; OnEnable reconciles them
+        }
+
+        private void OnIndicatorRegistered(HUDIndicator indicator)
+        {
+            if (indicator.UsesRenderer(this))
+            {
+                _pendingChanges[indicator] = true;
+            }
+        }
+
+        private void OnIndicatorUnregistered(HUDIndicator indicator)
+        {
+            _pendingChanges[indicator] = false;
+        }
+
+        private void ApplyPendingChanges()
+        {
+            if (_pendingChanges.Count == 0) return;
+
+            // Copy first: handlers invoked by Register/Unregister may queue further changes
+            _pendingBuffer.Clear();
+            foreach (var change in _pendingChanges)
+            {
+                _pendingBuffer.Add(change);
+            }
+            _pendingChanges.Clear();
+
+            for (int i = 0; i < _pendingBuffer.Count; i++)
+            {
+                var change = _pendingBuffer[i];
+                if (change.Value)
+                {
+                    if (change.Key != null && change.Key.IsRegistered)
+                    {
+                        RegisterIndicator(change.Key);
+                    }
+                }
+                else
+                {
+                    UnregisterIndicator(change.Key);
+                }
+            }
+            _pendingBuffer.Clear();
+        }
+
+        private Camera GetCanvasCamera()
+        {
+            if (_canvas == null || _canvas.renderMode == RenderMode.ScreenSpaceOverlay)
+            {
+                return null;
+            }
+            return _canvas.worldCamera != null ? _canvas.worldCamera : m_Camera;
+        }
+
+        private float GetCanvasScaleFactor()
+        {
+            return _canvas != null && _canvas.scaleFactor > 0f ? _canvas.scaleFactor : 1f;
+        }
+
         private int CompareByDistanceDescending(int a, int b)
         {
             return _viewDistances[b].CompareTo(_viewDistances[a]);
         }
 
+        /// <summary>
+        /// Bind a view to the indicator immediately. Indicators register themselves; call this only to
+        /// drive a renderer manually, and not from OnEnable/OnDisable.
+        /// </summary>
         public void RegisterIndicator(HUDIndicator indicator)
         {
+            if (indicator == null || GetIndicatorView(indicator) != null)
+            {
+                return;
+            }
 
-            var go = new GameObject(indicator.name + " View", typeof(RectTransform));
-            go.transform.SetParent(_RectTransform, false);
-            var indicatorView = go.AddComponent<HUDIndicatorView>();
+            if (_RectTransform == null)
+            {
+                _RectTransform = GetComponent<RectTransform>();
+            }
 
-            indicatorView.Initialize(indicator,this);
-
+            var indicatorView = AcquireView(indicator);
             m_IndicatorViewList.Add(indicatorView);
-
-
+            _viewByIndicator[indicator] = indicatorView;
         }
 
+        /// <summary>
+        /// Release the indicator's view to the pool immediately. Same caveats as RegisterIndicator.
+        /// </summary>
         public void UnregisterIndicator(HUDIndicator indicator)
         {
+            if (ReferenceEquals(indicator, null)) return;
+
+            _viewByIndicator.Remove(indicator);
             for (int i = m_IndicatorViewList.Count - 1; i >= 0; i--)
             {
-                if (m_IndicatorViewList[i].Indicator == indicator)
+                var view = m_IndicatorViewList[i];
+                if (view != null && ReferenceEquals(view.Indicator, indicator))
                 {
-                    if (m_IndicatorViewList[i] != null && m_IndicatorViewList[i].gameObject != null)
-                    {
-                        Destroy(m_IndicatorViewList[i].gameObject);
-                    }
                     m_IndicatorViewList.RemoveAt(i);
+                    ReleaseView(view);
                     return;
                 }
             }
@@ -103,14 +230,77 @@ namespace Modules.Utilities
 
         public HUDIndicatorView GetIndicatorView(HUDIndicator indicator)
         {
-            foreach (var view in m_IndicatorViewList)
+            if (ReferenceEquals(indicator, null)) return null;
+            if (_viewByIndicator.TryGetValue(indicator, out var view) && view != null)
             {
-                if (view.Indicator == indicator)
-                {
-                    return view;
-                }
+                return view;
             }
             return null;
+        }
+
+        private HUDIndicatorView AcquireView(HUDIndicator indicator)
+        {
+            var key = HUDViewKey.From(indicator.m_IndicatorData);
+            if (_pool.TryGetValue(key, out var stack))
+            {
+                while (stack.Count > 0)
+                {
+                    var pooled = stack.Pop();
+                    if (pooled != null)
+                    {
+                        pooled.Bind(indicator);
+                        return pooled;
+                    }
+                }
+            }
+
+            var go = new GameObject(indicator.name + " View", typeof(RectTransform));
+            go.transform.SetParent(_RectTransform, false);
+            var indicatorView = go.AddComponent<HUDIndicatorView>();
+            indicatorView.Initialize(indicator, this);
+            return indicatorView;
+        }
+
+        private void ReleaseView(HUDIndicatorView view)
+        {
+            view.Unbind();
+
+            if (!_pool.TryGetValue(view.Key, out var stack))
+            {
+                stack = new Stack<HUDIndicatorView>();
+                _pool.Add(view.Key, stack);
+            }
+
+            if (stack.Count < m_MaxPooledViewsPerType)
+            {
+                stack.Push(view);
+            }
+            else
+            {
+                Destroy(view.gameObject);
+            }
+        }
+
+        // Drop views whose indicator was destroyed without unregistering (e.g. manual registration)
+        private void ReleaseOrphanedViews()
+        {
+            for (int i = m_IndicatorViewList.Count - 1; i >= 0; i--)
+            {
+                var view = m_IndicatorViewList[i];
+                if (view == null)
+                {
+                    m_IndicatorViewList.RemoveAt(i);
+                }
+                else if (view.Indicator == null)
+                {
+                    if (!ReferenceEquals(view.Indicator, null))
+                    {
+                        _viewByIndicator.Remove(view.Indicator);
+                    }
+                    m_IndicatorViewList.RemoveAt(i);
+                    ReleaseView(view);
+                }
+            }
         }
 
         public float TotalMargin
@@ -204,6 +394,15 @@ namespace Modules.Utilities
 
         void LateUpdate()
         {
+            ApplyPendingChanges();
+            ReleaseOrphanedViews();
+
+            if (_canvas == null)
+            {
+                var parentCanvas = GetComponentInParent<Canvas>();
+                _canvas = parentCanvas != null ? parentCanvas.rootCanvas : null;
+            }
+
             // Camera may spawn after Awake
             if (m_Camera == null)
             {
@@ -253,7 +452,7 @@ namespace Modules.Utilities
                     continue;
                 }
 
-                Vector3 worldPos = view.Indicator.m_Transform.position;
+                Vector3 worldPos = view.Indicator.GetWorldPosition();
                 Vector3 cameraToTarget = worldPos - m_Camera.transform.position;
                 float distance = cameraToTarget.magnitude;
                 
@@ -290,6 +489,7 @@ namespace Modules.Utilities
                 
                 // Calculate alpha based on distance
                 float alpha = CalculateAlphaFromDistance(distance);
+                float offScreenAlpha = view.Indicator.m_IndicatorData.m_OffScreenIgnoreDistanceFade ? 1f : alpha;
 
                 // Use cached world position
                 Vector3 worldPos = _worldPositions[viewIndex];
@@ -300,9 +500,9 @@ namespace Modules.Utilities
 
                 bool useOffScreen = view.Indicator.m_IndicatorData.m_UseOffScreen;
 
-                if (alpha <= 0f || (!isInFront && !useOffScreen))
+                if (!isInFront && (!useOffScreen || offScreenAlpha <= 0f))
                 {
-                    view.Hide(); // Hide when too far, or behind camera with no off-screen view
+                    view.Hide(); // Behind the camera with no visible off-screen view
                     continue;
                 }
 
@@ -317,52 +517,59 @@ namespace Modules.Utilities
                     dir = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector2.down;
 
                     Vector2 farCanvasPos = (Vector2)canvasRect.center + dir * (canvasRect.width + canvasRect.height);
-                    ShowOffScreenIndicator(view, farCanvasPos, canvasRect, alpha);
+                    ShowOffScreenIndicator(view, farCanvasPos, canvasRect, offScreenAlpha);
                     continue;
                 }
 
-                // Convert world position to screen position
+                // Convert world position to screen position, then into this rect's local space (works for every canvas mode)
                 Vector3 screenPos = m_Camera.WorldToScreenPoint(worldPos);
-                Vector3 canvasPos = _RectTransform.InverseTransformPoint(screenPos);
-                Vector2 canvasPos2D = new Vector2(canvasPos.x, canvasPos.y);
-
+                if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(_RectTransform, screenPos, GetCanvasCamera(), out Vector2 canvasPos2D))
+                {
+                    view.Hide();
+                    continue;
+                }
 
                 if (view.Indicator.m_IndicatorData.m_AutoSize && view.Indicator.m_IndicatorData.m_BoxCollider != null)
                 {
-                    // Automatically size the BoxCollider to fit the indicator
+                    // Screen pixels to canvas units, so CanvasScaler doesn't inflate the box
                     var size = HelperUtilities.GetBoundingSizeInScreenView(view.Indicator.m_IndicatorData.m_BoxCollider.bounds, m_Camera);
-                    view.SetOnScreenSize(size);
+                    view.SetOnScreenSize(size / GetCanvasScaleFactor());
                 }
 
                 // Check if the object is within the canvas bounds (without margin for visibility check)
-                bool isOnScreen = canvasPos.x >= canvasRect.xMin && canvasPos.x <= canvasRect.xMax &&
-                                 canvasPos.y >= canvasRect.yMin && canvasPos.y <= canvasRect.yMax &&
-                                 screenPos.z > 0;
+                bool isOnScreen = canvasPos2D.x >= canvasRect.xMin && canvasPos2D.x <= canvasRect.xMax &&
+                                 canvasPos2D.y >= canvasRect.yMin && canvasPos2D.y <= canvasRect.yMax;
 
                 // Check if the object is within the display area (with margin for positioning)
-                bool isInDisplayArea = canvasPos.x >= (canvasRect.xMin + TotalMargin) && canvasPos.x <= (canvasRect.xMax - TotalMargin) &&
-                                      canvasPos.y >= (canvasRect.yMin + TotalMargin) && canvasPos.y <= (canvasRect.yMax - TotalMargin) &&
-                                      screenPos.z > 0;
+                bool isInDisplayArea = canvasPos2D.x >= (canvasRect.xMin + TotalMargin) && canvasPos2D.x <= (canvasRect.xMax - TotalMargin) &&
+                                      canvasPos2D.y >= (canvasRect.yMin + TotalMargin) && canvasPos2D.y <= (canvasRect.yMax - TotalMargin);
 
-                if (isInDisplayArea || (isOnScreen && !view.Indicator.m_IndicatorData.m_UseOffScreen))
+                if (isInDisplayArea || (isOnScreen && !useOffScreen))
                 {
+                    if (alpha <= 0f)
+                    {
+                        view.Hide(); // Too far
+                        continue;
+                    }
+
                     // Show on-screen indicator
                     view.UpdateOnScreenPosition(canvasPos2D);
                     view.ShowOnScreen();
                     
-                    // Calculate combined alpha from distance and edge proximity
-                    float distanceAlpha = CalculateAlphaFromDistance(distance);
                     // Only apply edge fade if indicator doesn't use offscreen
-                    float edgeAlpha = view.Indicator.m_IndicatorData.m_UseOffScreen ? 1f : 
+                    float edgeAlpha = useOffScreen ? 1f : 
                                      CalculateAlphaFromEdge(canvasPos2D, canvasRect, TotalMargin);
                     
                     // Use the minimum alpha (most restrictive)
-                    float finalAlpha = Mathf.Min(distanceAlpha, edgeAlpha);
-                    view.CanvasGroup.alpha = finalAlpha;
+                    view.CanvasGroup.alpha = Mathf.Min(alpha, edgeAlpha);
+                }
+                else if (useOffScreen && offScreenAlpha > 0f)
+                {
+                    ShowOffScreenIndicator(view, canvasPos2D, canvasRect, offScreenAlpha);
                 }
                 else
                 {
-                    ShowOffScreenIndicator(view, canvasPos2D, canvasRect, alpha);
+                    view.Hide();
                 }
             }
         }
@@ -385,7 +592,7 @@ namespace Modules.Utilities
             view.SetArrowRotation(angle);
 
             view.ShowOffScreen();
-            view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
+            view.CanvasGroup.alpha = alpha;
         }
 
         private Vector2 ClampToCanvasEdge(Vector2 canvasPos, Rect canvasRect, float margin)
