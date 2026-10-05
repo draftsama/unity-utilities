@@ -2,6 +2,8 @@ using System.Collections.Generic;
 using UnityEngine;
 namespace Modules.Utilities
 {
+    // Run after camera controllers (e.g. Cinemachine) so positions use this frame's camera pose
+    [DefaultExecutionOrder(1000)]
     public class HUDRenderer : MonoBehaviour
     {
 
@@ -50,16 +52,23 @@ namespace Modules.Utilities
         private List<Vector3> _worldPositions = new List<Vector3>(); // Cache world positions
         private List<int> _sortedIndices = new List<int>();
         private int _frameCounter = 0;
+        private System.Comparison<int> _distanceComparison; // Cached to avoid a delegate allocation per sort
 
 
 
         void Awake()
         {
             _RectTransform = GetComponent<RectTransform>();
+            _distanceComparison = CompareByDistanceDescending;
             if (m_Camera == null)
             {
                 m_Camera = Camera.main;
             }
+        }
+
+        private int CompareByDistanceDescending(int a, int b)
+        {
+            return _viewDistances[b].CompareTo(_viewDistances[a]);
         }
 
         public void RegisterIndicator(HUDIndicator indicator)
@@ -193,27 +202,46 @@ namespace Modules.Utilities
             }
         }
 
-        void Update()
+        void LateUpdate()
         {
+            // Camera may spawn after Awake
+            if (m_Camera == null)
+            {
+                m_Camera = Camera.main;
+                if (m_Camera == null)
+                {
+                    for (int i = 0; i < m_IndicatorViewList.Count; i++)
+                    {
+                        var hiddenView = m_IndicatorViewList[i];
+                        if (hiddenView != null)
+                        {
+                            hiddenView.Hide();
+                        }
+                    }
+                    return;
+                }
+            }
+
             _frameCounter++;
-            bool shouldUpdateSorting = (_frameCounter % m_SortUpdateFrequency) == 0;
-            
+            bool shouldUpdateSorting = (_frameCounter % Mathf.Max(1, m_SortUpdateFrequency)) == 0;
+
             // Clear and reuse existing collections to avoid GC allocation
             _activeViews.Clear();
             _viewDistances.Clear();
             _worldPositions.Clear();
-            
-            // Only clear sorted indices if we're updating sorting this frame
-            if (shouldUpdateSorting)
-            {
-                _sortedIndices.Clear();
-            }
-            
+            _sortedIndices.Clear();
+
             // First pass: collect active views and calculate distances
             for (int i = 0; i < m_IndicatorViewList.Count; i++)
             {
                 var view = m_IndicatorViewList[i];
-                
+
+                // Skip destroyed views or views whose indicator is gone
+                if (view == null || view.Indicator == null)
+                {
+                    continue;
+                }
+
                 // Check if the indicator GameObject is active
                 bool isIndicatorActive = view.Indicator.gameObject.activeInHierarchy;
                 // Check if the indicator should be shown based on m_IsShow flag
@@ -232,24 +260,21 @@ namespace Modules.Utilities
                 _activeViews.Add(view);
                 _viewDistances.Add(distance);
                 _worldPositions.Add(worldPos);
-                
-                if (shouldUpdateSorting)
-                {
-                    _sortedIndices.Add(_activeViews.Count - 1);
-                }
+
+                // Rebuilt every frame so indices always match this frame's active list
+                _sortedIndices.Add(_activeViews.Count - 1);
             }
-            
+
             // Sort indices by distance if enabled and updating this frame
             if (m_SortByDistance && shouldUpdateSorting && _activeViews.Count > 1)
             {
                 // Farthest first (lower sibling index = renders behind)
                 // Closest last (higher sibling index = renders on top)
-                _sortedIndices.Sort((a, b) => _viewDistances[b].CompareTo(_viewDistances[a]));
+                _sortedIndices.Sort(_distanceComparison);
             }
 
-            // Use existing sorted order if not updating sorting this frame
-            int processCount = m_SortByDistance ? _sortedIndices.Count : _activeViews.Count;
-            
+            int processCount = _activeViews.Count;
+
             // Process views in sorted order
             for (int i = 0; i < processCount; i++)
             {
@@ -273,9 +298,26 @@ namespace Modules.Utilities
                 // Check if the target is in front of the camera
                 bool isInFront = Vector3.Dot(cameraToTarget, m_Camera.transform.forward) > 0;
 
-                if (!isInFront || alpha <= 0f)
+                bool useOffScreen = view.Indicator.m_IndicatorData.m_UseOffScreen;
+
+                if (alpha <= 0f || (!isInFront && !useOffScreen))
                 {
-                    view.Hide(); // Hide when behind camera or too far
+                    view.Hide(); // Hide when too far, or behind camera with no off-screen view
+                    continue;
+                }
+
+                // Get canvas rect bounds
+                Rect canvasRect = _RectTransform.rect;
+
+                if (!isInFront)
+                {
+                    // WorldToScreenPoint is unstable behind the camera, so aim along the camera-local direction instead
+                    Vector3 local = m_Camera.transform.InverseTransformPoint(worldPos);
+                    Vector2 dir = new Vector2(local.x, local.y);
+                    dir = dir.sqrMagnitude > 1e-6f ? dir.normalized : Vector2.down;
+
+                    Vector2 farCanvasPos = (Vector2)canvasRect.center + dir * (canvasRect.width + canvasRect.height);
+                    ShowOffScreenIndicator(view, farCanvasPos, canvasRect, alpha);
                     continue;
                 }
 
@@ -291,10 +333,6 @@ namespace Modules.Utilities
                     var size = HelperUtilities.GetBoundingSizeInScreenView(view.Indicator.m_IndicatorData.m_BoxCollider.bounds, m_Camera);
                     view.SetOnScreenSize(size);
                 }
-
-
-                // Get canvas rect bounds
-                Rect canvasRect = _RectTransform.rect;
 
                 // Check if the object is within the canvas bounds (without margin for visibility check)
                 bool isOnScreen = canvasPos.x >= canvasRect.xMin && canvasPos.x <= canvasRect.xMax &&
@@ -324,25 +362,39 @@ namespace Modules.Utilities
                 }
                 else
                 {
-                    // Calculate off-screen position 
-                    Vector2 onscreenPos = ClampToCanvasEdge(canvasPos, canvasRect, TotalMargin);
-                    view.UpdateOffScreenPosition(onscreenPos);
-
-                    Vector2 arrowPos = ClampToCanvasEdge(canvasPos, canvasRect, m_ArrowMargin);
-                    view.UpdateOffScreenArrowPosition(arrowPos);
-
-                    // Calculate angle for arrow rotation (from view position to actual object position)
-                    Vector2 viewToObject = canvasPos2D - onscreenPos;
-                    float angle = Mathf.Atan2(viewToObject.y, viewToObject.x) * Mathf.Rad2Deg;
-                    view.SetArrowRotation(angle);
-
-                    view.ShowOffScreen();
-                    view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
+                    ShowOffScreenIndicator(view, canvasPos2D, canvasRect, alpha);
                 }
             }
         }
 
+        private void ShowOffScreenIndicator(HUDIndicatorView view, Vector2 canvasPos2D, Rect canvasRect, float alpha)
+        {
+            // Inset by the view's own extents so the whole box stays on screen, not just its pivot
+            Rect boxRect = view.OffScreenRectTransform != null ? view.OffScreenRectTransform.rect : default;
+            Vector2 onscreenPos = ClampToCanvasEdge(canvasPos2D, canvasRect,
+                TotalMargin - boxRect.xMin, TotalMargin + boxRect.xMax,
+                TotalMargin - boxRect.yMin, TotalMargin + boxRect.yMax);
+            view.UpdateOffScreenPosition(onscreenPos);
+
+            Vector2 arrowPos = ClampToCanvasEdge(canvasPos2D, canvasRect, m_ArrowMargin);
+            view.UpdateOffScreenArrowPosition(arrowPos);
+
+            // Calculate angle for arrow rotation (from view position to actual object position)
+            Vector2 viewToObject = canvasPos2D - onscreenPos;
+            float angle = Mathf.Atan2(viewToObject.y, viewToObject.x) * Mathf.Rad2Deg;
+            view.SetArrowRotation(angle);
+
+            view.ShowOffScreen();
+            view.CanvasGroup.alpha = alpha; // Apply distance-based alpha
+        }
+
         private Vector2 ClampToCanvasEdge(Vector2 canvasPos, Rect canvasRect, float margin)
+        {
+            return ClampToCanvasEdge(canvasPos, canvasRect, margin, margin, margin, margin);
+        }
+
+        private Vector2 ClampToCanvasEdge(Vector2 canvasPos, Rect canvasRect,
+            float leftInset, float rightInset, float bottomInset, float topInset)
         {
             // Calculate the center of the canvas
             Vector2 center = new Vector2(canvasRect.center.x, canvasRect.center.y);
@@ -350,11 +402,15 @@ namespace Modules.Utilities
             // Calculate direction from center to target
             Vector2 direction = (canvasPos - center).normalized;
 
-            // Calculate canvas bounds with margin
-            float left = canvasRect.xMin + margin;
-            float right = canvasRect.xMax - margin;
-            float bottom = canvasRect.yMin + margin;
-            float top = canvasRect.yMax - margin;
+            // Calculate canvas bounds with insets
+            float left = canvasRect.xMin + leftInset;
+            float right = canvasRect.xMax - rightInset;
+            float bottom = canvasRect.yMin + bottomInset;
+            float top = canvasRect.yMax - topInset;
+
+            // A view larger than the canvas can't fit; pin that axis to the center
+            if (left > right) left = right = center.x;
+            if (bottom > top) bottom = top = center.y;
 
             // Calculate intersection with canvas edges
             Vector2 clampedPos = center;
