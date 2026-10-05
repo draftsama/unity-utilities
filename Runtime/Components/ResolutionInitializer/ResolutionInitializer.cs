@@ -74,10 +74,11 @@ namespace Modules.Utilities
                 return;
             }
 
-            // Let Unity finish its own switch to a plain window first. Changing the native style while
-            // Unity is still applying a mode change leaves its client-area origin stale, which shows up
-            // as mouse input offset by the title-bar height.
-            if (Screen.fullScreenMode != FullScreenMode.Windowed)
+            // Let Unity size its own plain window first, even when it already starts windowed (the player
+            // restores the last window size). Changing the native style while Unity is still applying a
+            // mode change leaves its client-area origin stale, which shows up as mouse input offset by the
+            // title-bar height.
+            if (Screen.fullScreenMode != FullScreenMode.Windowed || Screen.width != width || Screen.height != height)
             {
                 Screen.SetResolution(width, height, FullScreenMode.Windowed);
                 using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -85,12 +86,16 @@ namespace Modules.Utilities
                 try
                 {
                     await UniTask.WaitUntil(() => !Screen.fullScreen &&
-                                                  Screen.fullScreenMode == FullScreenMode.Windowed,
+                                                  Screen.fullScreenMode == FullScreenMode.Windowed &&
+                                                  Screen.width == width && Screen.height == height,
                         cancellationToken: timeout.Token);
                 }
                 catch (OperationCanceledException) when (!token.IsCancellationRequested)
                 {
-                    UnityEngine.Debug.LogWarning("Set Resolution: Unity did not switch to windowed mode within 2 s.");
+                    // Unity clamps a window taller than the desktop; the native resize below still applies it.
+                    UnityEngine.Debug.LogWarningFormat(
+                        "Set Resolution: Unity window is {0}x{1} ({2}), expected {3}x{4} windowed.",
+                        Screen.width, Screen.height, Screen.fullScreenMode, width, height);
                 }
             }
 
