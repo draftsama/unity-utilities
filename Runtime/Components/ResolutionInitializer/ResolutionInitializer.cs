@@ -104,8 +104,31 @@ namespace Modules.Utilities
 
 #if !UNITY_EDITOR && UNITY_STANDALONE_WIN
             // Win32 window calls must run on the thread that owns the window (Unity's main thread).
-            _windowsHandler.TrySetDisplayMode(displayMode, x, y, width, height);
+            if (displayMode == DisplayModes.Borderless && IsPopupWindowLaunch())
+            {
+                // Unity created the window borderless itself, so only move it; restyling would desync
+                // Unity's client-area mapping again.
+                _windowsHandler.TryMoveWindow(x, y);
+            }
+            else
+            {
+                if (displayMode == DisplayModes.Borderless)
+                {
+                    UnityEngine.Debug.LogWarning("Set Resolution: borderless without -popupwindow strips the " +
+                                                 "title bar natively; mouse input may be offset. Launch with -popupwindow.");
+                }
+                _windowsHandler.TrySetDisplayMode(displayMode, x, y, width, height);
+            }
 #endif
+        }
+
+        private static bool IsPopupWindowLaunch()
+        {
+            foreach (var arg in Environment.GetCommandLineArgs())
+            {
+                if (string.Equals(arg, "-popupwindow", StringComparison.OrdinalIgnoreCase)) return true;
+            }
+            return false;
         }
 
 
@@ -251,6 +274,28 @@ namespace Modules.Utilities
                 }
             }
 
+
+            public bool TryMoveWindow(int x, int y)
+            {
+                var window = Window;
+                if (window == IntPtr.Zero)
+                {
+                    UnityEngine.Debug.LogWarning("Set Resolution: window '" + _title + "' not found.");
+                    return false;
+                }
+
+                SetWindowPos(window, 0, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+
+                RECT rect;
+                GetWindowRect(window, out rect);
+                if (rect.Left != x || rect.Top != y)
+                {
+                    UnityEngine.Debug.LogWarningFormat("Set Resolution: window is at {0},{1}, expected {2},{3}.",
+                        rect.Left, rect.Top, x, y);
+                }
+
+                return true;
+            }
 
             public bool TrySetDisplayMode(DisplayModes targetDisplayMode, int x, int y, int resolutionWidth, int resolutionHeight)
             {
@@ -405,6 +450,7 @@ namespace Modules.Utilities
                 SWP_NOMOVE = 0x0002,
                 SWP_NOSIZE = 0x0001,
                 SWP_NOZORDER = 0x0004,
+                SWP_NOACTIVATE = 0x0010,
                 SWP_NOOWNERZORDER = 0x0200,
                 SWP_SHOWWINDOW = 0x0040,
                 SWP_NOSENDCHANGING = 0x0400;
