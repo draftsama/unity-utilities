@@ -79,6 +79,9 @@ namespace Modules.Utilities
         /// <exception cref="OperationCanceledException">Thrown when the operation is canceled</exception>
         /// <exception cref="Exception">Thrown when an error occurs during the download</exception>
         
+        private const int DownloadHeaderTimeoutSeconds = 15;
+        private const int DownloadStallTimeoutSeconds = 30;
+
         public static async Task<byte[]> DownloadFileAsync(string _url, IProgress<float> _progress = null, CancellationToken _cancellationToken = default)
         {
             if (!NetworkUtility.IsValidURL(_url))
@@ -86,9 +89,21 @@ namespace Modules.Utilities
                 throw new FileNotFoundException("url is invalid", _url);
             }
 
-            using (var httpClient = new HttpClient())
+            // HttpClient.Timeout only covers waiting for the response headers here; the body is guarded per read below.
+            using (var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(DownloadHeaderTimeoutSeconds) })
             {
-                var response = await httpClient.GetAsync(_url, HttpCompletionOption.ResponseHeadersRead, _cancellationToken);
+                HttpResponseMessage response;
+                try
+                {
+                    response = await httpClient.GetAsync(_url, HttpCompletionOption.ResponseHeadersRead, _cancellationToken);
+                }
+                catch (OperationCanceledException) when (!_cancellationToken.IsCancellationRequested)
+                {
+                    throw new TimeoutException($"No response from {_url} within {DownloadHeaderTimeoutSeconds}s");
+                }
+
+                using (response)
+                {
                 response.EnsureSuccessStatusCode();
 
                 var totalBytes = response.Content.Headers.ContentLength;
@@ -107,7 +122,18 @@ namespace Modules.Utilities
                             _cancellationToken.ThrowIfCancellationRequested();
                         }
 
-                        bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, _cancellationToken);
+                        using (var stallCts = CancellationTokenSource.CreateLinkedTokenSource(_cancellationToken))
+                        {
+                            stallCts.CancelAfter(TimeSpan.FromSeconds(DownloadStallTimeoutSeconds));
+                            try
+                            {
+                                bytesRead = await stream.ReadAsync(buffer, 0, buffer.Length, stallCts.Token);
+                            }
+                            catch (OperationCanceledException) when (!_cancellationToken.IsCancellationRequested)
+                            {
+                                throw new TimeoutException($"Download from {_url} stalled for {DownloadStallTimeoutSeconds}s");
+                            }
+                        }
 
                         if (bytesRead == 0)
                         {
@@ -117,15 +143,23 @@ namespace Modules.Utilities
                         await memoryStream.WriteAsync(buffer, 0, bytesRead, _cancellationToken);
                         bytesDownloaded += bytesRead;
 
-                        if (_progress != null)
+                        // Content-Length is absent for chunked responses, so there is nothing to compute a percentage from
+                        if (_progress != null && totalBytes.HasValue && totalBytes.Value > 0)
                         {
-                            var percentage = (float)bytesDownloaded / (float)totalBytes;
+                            var percentage = (float)bytesDownloaded / totalBytes.Value;
                             _progress.Report(percentage);
                         }
 
                     } while (true);
 
+                    if (totalBytes.HasValue && bytesDownloaded != totalBytes.Value)
+                    {
+                        throw new IOException(
+                            $"Incomplete download: received {bytesDownloaded} of {totalBytes.Value} bytes from {_url}");
+                    }
+
                     return memoryStream.ToArray();
+                }
                 }
             }
         }
