@@ -215,6 +215,48 @@ namespace Modules.Utilities
     }
 
     /// <summary>
+    /// Deletes a file from the FTP server asynchronously.
+    /// </summary>
+    /// <param name="remotePath">The full path of the file on the FTP server (e.g., public_html/qrcode/image.png).</param>
+    /// <param name="cancellationToken">Optional: Token to cancel the delete operation.</param>
+    /// <exception cref="WebException">The server rejected the delete, e.g. the file does not exist.</exception>
+    public async UniTask DeleteFileAsync(string remotePath, System.Threading.CancellationToken cancellationToken = default)
+    {
+        string currentHost = host;
+        string currentUser = username;
+        string currentPass = password;
+        string targetUri = $"{currentHost}/{remotePath.TrimStart('/')}";
+
+        await UniTask.RunOnThreadPool(async () =>
+        {
+            try
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                FtpWebRequest request = (FtpWebRequest)WebRequest.Create(targetUri);
+                request.Method = WebRequestMethods.Ftp.DeleteFile;
+                request.Credentials = new NetworkCredential(currentUser, currentPass);
+                request.KeepAlive = false;
+
+                using (FtpWebResponse response = (FtpWebResponse)await request.GetResponseAsync())
+                {
+                    Debug.Log($"[FTP] Delete Complete: {remotePath} ({response.StatusDescription?.Trim()})");
+                }
+            }
+            catch (OperationCanceledException)
+            {
+                Debug.LogWarning($"[FTP] Delete Cancelled: {remotePath}");
+                throw;
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[FTP] Delete Error: {ex.Message}");
+                throw;
+            }
+        });
+    }
+
+    /// <summary>
     /// Helper method to retrieve the file size from the FTP server.
     /// </summary>
     private async UniTask<long> GetFileSizeAsync(string targetUri, string user, string pass, System.Threading.CancellationToken cancellationToken = default)
