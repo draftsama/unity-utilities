@@ -97,7 +97,6 @@ namespace Modules.Utilities
         private UdpClient _discoveryUdp;
         private IPEndPoint _serverEndpoint;
         private CancellationTokenSource _cts;
-        private SemaphoreSlim _sendLock;
 
         private readonly ConcurrentDictionary<int, PeerState> _peers = new ConcurrentDictionary<int, PeerState>();
         private readonly ConcurrentDictionary<string, int> _endpointToPeerId = new ConcurrentDictionary<string, int>();
@@ -195,7 +194,6 @@ namespace Modules.Utilities
 
             _cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             var token = SafeToken();
-            _sendLock = new SemaphoreSlim(1, 1);
             _peers.Clear();
             _endpointToPeerId.Clear();
             _nextServerPeerId = 0;
@@ -369,24 +367,20 @@ namespace Modules.Utilities
             if (tasks.Count > 0) await UniTask.WhenAll(tasks);
         }
 
-        private async UniTask SendBytesToEndpoint(byte[] bytes, IPEndPoint endpoint, CancellationToken ct)
+        private UniTask SendBytesToEndpoint(byte[] bytes, IPEndPoint endpoint, CancellationToken ct)
         {
-            if (_udp == null) return;
-            await _sendLock.WaitAsync(ct);
+            var udp = _udp;
+            if (udp == null || ct.IsCancellationRequested) return UniTask.CompletedTask;
             try
             {
-                await _udp.SendAsync(bytes, bytes.Length, endpoint).AsUniTask().AttachExternalCancellation(ct);
+                udp.Send(bytes, bytes.Length, endpoint);
             }
-            catch (OperationCanceledException) { }
             catch (ObjectDisposedException) { }
             catch (Exception ex)
             {
                 Log($"SendBytes error: {ex.Message}");
             }
-            finally
-            {
-                if (_sendLock != null) _sendLock.Release();
-            }
+            return UniTask.CompletedTask;
         }
 
         private List<byte[]> Fragment(byte[] payload)
@@ -429,14 +423,34 @@ namespace Modules.Utilities
                     continue;
                 }
 
+                SafeHandleIncoming(result.Buffer, result.RemoteEndPoint, ct);
+
                 try
                 {
-                    HandleIncoming(result.Buffer, result.RemoteEndPoint, ct);
+                    while (_udp != null && _udp.Available > 0)
+                    {
+                        IPEndPoint sender = null;
+                        var buffer = _udp.Receive(ref sender);
+                        SafeHandleIncoming(buffer, sender, ct);
+                    }
                 }
+                catch (ObjectDisposedException) { return; }
                 catch (Exception ex)
                 {
-                    Log($"Handle error: {ex.Message}");
+                    Log($"Receive error: {ex.Message}");
                 }
+            }
+        }
+
+        private void SafeHandleIncoming(byte[] buffer, IPEndPoint sender, CancellationToken ct)
+        {
+            try
+            {
+                HandleIncoming(buffer, sender, ct);
+            }
+            catch (Exception ex)
+            {
+                Log($"Handle error: {ex.Message}");
             }
         }
 
@@ -506,7 +520,8 @@ namespace Modules.Utilities
             Buffer.BlockCopy(buffer, HEADER_SIZE, payload, 0, payloadLen);
 
             byte[] complete = null;
-            if ((flags & FLAG_FRAGMENTED) == 0 || fragTotal <= 1)
+            var isFragmented = (flags & FLAG_FRAGMENTED) != 0 && fragTotal > 1;
+            if (!isFragmented)
             {
                 complete = payload;
             }
@@ -519,7 +534,9 @@ namespace Modules.Utilities
             // For ordered channel: deliver in order, buffering gaps.
             if (channel == (byte)ReliabilityMode.ReliableOrdered)
             {
-                chState.PushOrdered(sequence, action, complete);
+                var firstSeq = isFragmented ? sequence - fragIndex : sequence;
+                var span = isFragmented ? fragTotal : (ushort)1;
+                chState.PushOrdered(firstSeq, span, action, complete);
                 while (chState.TryPopNextOrdered(out var ordered))
                 {
                     DeliverMessage(peer, ordered.Action, ordered.Payload, ReliabilityMode.ReliableOrdered, flags);
@@ -979,8 +996,6 @@ namespace Modules.Utilities
             try { _discoveryUdp?.Close(); } catch { }
             _discoveryUdp = null;
 
-            try { _sendLock?.Dispose(); } catch { }
-            _sendLock = null;
 
             var snapshot = new List<PeerState>(_peers.Values);
             _peers.Clear();
@@ -1281,12 +1296,12 @@ namespace Modules.Utilities
                 }
             }
 
-            public void PushOrdered(uint seq, ushort action, byte[] payload)
+            public void PushOrdered(uint firstSeq, ushort span, ushort action, byte[] payload)
             {
                 lock (_orderedBuffer)
                 {
-                    if (_nextDeliverSeq == 1 && seq > 1) _nextDeliverSeq = seq;
-                    _orderedBuffer[seq] = new OrderedItem { Action = action, Payload = payload };
+                    if (_nextDeliverSeq == 1 && firstSeq > 1) _nextDeliverSeq = firstSeq;
+                    _orderedBuffer[firstSeq] = new OrderedItem { Action = action, Payload = payload, Span = span };
                 }
             }
 
@@ -1297,7 +1312,7 @@ namespace Modules.Utilities
                     if (_orderedBuffer.TryGetValue(_nextDeliverSeq, out item))
                     {
                         _orderedBuffer.Remove(_nextDeliverSeq);
-                        _nextDeliverSeq++;
+                        _nextDeliverSeq += item.Span;
                         return true;
                     }
                     item = default;
@@ -1321,6 +1336,7 @@ namespace Modules.Utilities
         {
             public ushort Action;
             public byte[] Payload;
+            public ushort Span;
         }
 
         private class SubscriptionToken : IDisposable
