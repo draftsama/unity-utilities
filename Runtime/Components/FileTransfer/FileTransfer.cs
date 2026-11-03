@@ -92,6 +92,7 @@ namespace Modules.Utilities
         private FileTransferClient _client;
         private CancellationTokenSource _cts;
         private IDisposable _offerSubscription;
+        private bool _inheritsHost;
 
         private readonly ConcurrentQueue<Action> _mainQueue = new ConcurrentQueue<Action>();
 
@@ -153,17 +154,13 @@ namespace Modules.Utilities
 
             if (m_ControlChannel != null)
             {
-                if (!m_IsServer && string.IsNullOrEmpty(m_Host))
-                {
-                    m_Host = m_ControlChannel.m_Host;
-                    Log($"Host inherited from the control channel: {m_Host}");
-                }
+                if (!m_IsServer && string.IsNullOrEmpty(m_Host)) _inheritsHost = true;
 
                 _offerSubscription = m_ControlChannel.Subscribe(ACTION_FILE_OFFER, OnOfferReceived);
             }
 
             if (m_IsServer) StartServerInternal();
-            else BuildClient();
+            else EnsureClient();
 
             m_IsRunning = true;
             await UniTask.CompletedTask;
@@ -212,6 +209,20 @@ namespace Modules.Utilities
             Dispatch(() => m_OnServerReady?.Invoke());
         }
 
+        // The control channel learns the server address from discovery after this component
+        // starts, and again on every reconnect, so the inherited host is re-read per transfer.
+        private void EnsureClient()
+        {
+            if (_inheritsHost && m_ControlChannel != null && m_Host != m_ControlChannel.m_Host)
+            {
+                m_Host = m_ControlChannel.m_Host;
+                _client = null;
+                Log($"Host inherited from the control channel: {m_Host}");
+            }
+
+            if (_client == null) BuildClient();
+        }
+
         private void BuildClient()
         {
             _client = new FileTransferClient(new FileTransferClientOptions
@@ -258,7 +269,7 @@ namespace Modules.Utilities
             CancellationToken ct = default)
         {
             if (m_IsServer) throw new InvalidOperationException("UploadAsync is client-only. Set m_IsServer = false.");
-            if (_client == null) BuildClient();
+            EnsureClient();
 
             var relay = BuildProgressRelay(progress);
             Dispatch(() => m_OnTransferStarted?.Invoke(new FileTransferProgress(Path.GetFileName(localPath), 0, 0, 0f)));
@@ -281,7 +292,7 @@ namespace Modules.Utilities
             CancellationToken ct = default)
         {
             if (m_IsServer) throw new InvalidOperationException("DownloadAsync is client-only. Set m_IsServer = false.");
-            if (_client == null) BuildClient();
+            EnsureClient();
 
             var relay = BuildProgressRelay(progress);
             Dispatch(() => m_OnTransferStarted?.Invoke(new FileTransferProgress(remoteName, 0, 0, 0f)));
