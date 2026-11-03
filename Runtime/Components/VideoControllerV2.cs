@@ -277,7 +277,10 @@ namespace Modules.Utilities
 
                 _VideoPlayer.Prepare();
                 Debug.Log($"[{name}] Preparing video: {_VideoPlayer.url}");
-                await UniTask.WaitUntil(() => _VideoPlayer.isPrepared, cancellationToken: token);
+                var destroyToken = this.GetCancellationTokenOnDestroy();
+                using var linked = CancellationTokenSource.CreateLinkedTokenSource(token, destroyToken);
+                await UniTask.WaitUntil(() => _VideoPlayer != null && _VideoPlayer.isPrepared,
+                    cancellationToken: linked.Token);
                 _IsPrepared = true;
             }
 
