@@ -22,6 +22,7 @@ namespace Modules.Utilities
         private const int MTU = 1200;
         private const int MAX_FRAGMENT_PAYLOAD = MTU - HEADER_SIZE;
         private const int CHANNEL_COUNT = 4;
+        private const int SOCKET_BUFFER_BYTES = 4 * 1024 * 1024;
 
         private const byte FLAG_FRAGMENTED = 0x01;
         private const byte FLAG_RELAY = 0x02;
@@ -484,8 +485,11 @@ namespace Modules.Utilities
 
             // DATA path
             if (channel >= CHANNEL_COUNT) return;
-            if (!_endpointToPeerId.TryGetValue(EndpointKey(sender), out var peerId)) return;
-            if (!_peers.TryGetValue(peerId, out var peer)) return;
+            if (!_endpointToPeerId.TryGetValue(EndpointKey(sender), out var peerId) || !_peers.TryGetValue(peerId, out var peer))
+            {
+                RejectUnknownPeer(sender);
+                return;
+            }
 
             peer.LastSeenTicks = DateTime.UtcNow.Ticks;
             var chState = peer.Channels[channel];
@@ -527,7 +531,8 @@ namespace Modules.Utilities
             }
             else
             {
-                complete = peer.AddFragment(fragmentId, fragIndex, fragTotal, payload, m_FragmentTtlMs);
+                complete = peer.AddFragment(fragmentId, fragIndex, fragTotal, payload,
+                    expires: channel != (byte)ReliabilityMode.ReliableOrdered);
                 if (complete == null) return; // not yet complete
             }
 
@@ -693,10 +698,12 @@ namespace Modules.Utilities
         private void HandlePing(IPEndPoint sender)
         {
             var key = EndpointKey(sender);
-            if (_endpointToPeerId.TryGetValue(key, out var peerId) && _peers.TryGetValue(peerId, out var peer))
+            if (!_endpointToPeerId.TryGetValue(key, out var peerId) || !_peers.TryGetValue(peerId, out var peer))
             {
-                peer.LastSeenTicks = DateTime.UtcNow.Ticks;
+                RejectUnknownPeer(sender);
+                return;
             }
+            peer.LastSeenTicks = DateTime.UtcNow.Ticks;
             var pong = BuildPacket(PacketType.Pong, ReliabilityMode.Unreliable, 0, 0, 0, 0, 0, 0, 0, Array.Empty<byte>());
             SendBytesToEndpoint(pong, sender, SafeToken()).Forget();
         }
@@ -717,6 +724,16 @@ namespace Modules.Utilities
             if (!_endpointToPeerId.TryGetValue(key, out var peerId)) return;
             if (!_peers.TryGetValue(peerId, out var peer)) return;
             peer.Channels[channel].RemovePending(sequence, recordRtt: peer);
+        }
+
+        // A client the server has timed out (e.g. a phone suspended by the OS camera app) still
+        // believes it is connected. Answering with FIN makes it reconnect instead of retrying
+        // into a server that silently drops everything it sends.
+        private void RejectUnknownPeer(IPEndPoint sender)
+        {
+            if (!m_IsServer) return;
+            var fin = BuildPacket(PacketType.Fin, ReliabilityMode.Unreliable, 0, 0, 0, 0, 0, 0, 0, Array.Empty<byte>());
+            SendBytesToEndpoint(fin, sender, SafeToken()).Forget();
         }
 
         private void SendAckPacket(IPEndPoint dest, byte channel, uint sequence, CancellationToken ct)
@@ -766,6 +783,7 @@ namespace Modules.Utilities
             while (!ct.IsCancellationRequested)
             {
                 await UniTask.Delay(m_HeartbeatMs, cancellationToken: ct);
+                if (!m_IsServer && !m_IsConnected) continue;
                 var ping = BuildPacket(PacketType.Ping, ReliabilityMode.Unreliable, 0, 0, 0, 0, 0, 0, 0, Array.Empty<byte>());
                 foreach (var kv in _peers)
                 {
@@ -948,6 +966,7 @@ namespace Modules.Utilities
             }
             _udp = new UdpClient(new IPEndPoint(bindAddr, m_Port));
             _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            EnlargeSocketBuffers(_udp);
             Log($"Server bound on {bindAddr}:{m_Port}");
         }
 
@@ -957,7 +976,23 @@ namespace Modules.Utilities
             _serverEndpoint = new IPEndPoint(resolved, m_Port);
             _udp = new UdpClient(0);
             _udp.Client.SetSocketOption(SocketOptionLevel.Socket, SocketOptionName.ReuseAddress, true);
+            EnlargeSocketBuffers(_udp);
             Log($"Client targeting {resolved}:{m_Port}");
+        }
+
+        // A large message is sent as a burst of fragments; Windows' default 64 KB UDP receive
+        // buffer overflows after ~50 of them and the rest are dropped before the receive loop runs.
+        private void EnlargeSocketBuffers(UdpClient udp)
+        {
+            try
+            {
+                udp.Client.ReceiveBufferSize = SOCKET_BUFFER_BYTES;
+                udp.Client.SendBufferSize = SOCKET_BUFFER_BYTES;
+            }
+            catch (Exception ex)
+            {
+                Log($"Socket buffer resize failed: {ex.Message}");
+            }
         }
 
         private static IPAddress ResolveHost(string host)
@@ -1200,9 +1235,9 @@ namespace Modules.Utilities
                 return new PeerStats { RttMs = RttMs, PendingAcks = pending };
             }
 
-            public byte[] AddFragment(uint fragmentId, ushort index, ushort total, byte[] data, int ttlMs)
+            public byte[] AddFragment(uint fragmentId, ushort index, ushort total, byte[] data, bool expires)
             {
-                var buf = _fragments.GetOrAdd(fragmentId, _ => new FragmentBuffer(total));
+                var buf = _fragments.GetOrAdd(fragmentId, _ => new FragmentBuffer(total, expires));
                 buf.Touch();
                 lock (buf.Lock)
                 {
@@ -1228,7 +1263,9 @@ namespace Modules.Utilities
             {
                 foreach (var kv in _fragments)
                 {
-                    if ((nowTicks - kv.Value.LastTouchTicks) > ttlTicks)
+                    // Ordered fragments are deduped on arrival, so a dropped buffer can never be
+                    // refilled and would stall the ordered channel for good.
+                    if (kv.Value.Expires && (nowTicks - kv.Value.LastTouchTicks) > ttlTicks)
                         _fragments.TryRemove(kv.Key, out _);
                 }
             }
@@ -1240,10 +1277,12 @@ namespace Modules.Utilities
             public int Received;
             public readonly int Total;
             public long LastTouchTicks;
+            public readonly bool Expires;
             public readonly object Lock = new object();
-            public FragmentBuffer(int total)
+            public FragmentBuffer(int total, bool expires)
             {
                 Total = total;
+                Expires = expires;
                 Chunks = new byte[total][];
                 LastTouchTicks = DateTime.UtcNow.Ticks;
             }
