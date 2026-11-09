@@ -28,6 +28,7 @@ namespace Modules.Utilities
         [SerializeField] private float m_Distance = 3f;
         [SerializeField] private float m_LeftDistance = 0f;
         [SerializeField] private float m_Height = 0f;
+        [SerializeField] private float m_DistanceScale = 1f;
 
         [SerializeField] private bool m_LookAt = false;
 
@@ -86,6 +87,18 @@ namespace Modules.Utilities
             m_LookAt = lookAt;
 
         }
+
+        /// <summary>
+        /// Multiplies the camera's Height and Distance offsets (LeftDistance is unchanged), keeping the
+        /// target at the same screen position while changing its apparent size. Clamped to at least 0.1.
+        /// </summary>
+        public void SetDistanceScale(float scale)
+        {
+            m_DistanceScale = Mathf.Max(MinDistanceScale, scale);
+            UpdateCameraProperties();
+        }
+
+        private const float MinDistanceScale = 0.1f;
 
 
 
@@ -183,7 +196,8 @@ namespace Modules.Utilities
             m_AxisX = Mathf.Clamp(m_AxisX, -90, 90);
 
             var rotation = Quaternion.Euler(m_AxisX, m_AxisY, 0);
-            var position = rotation * new Vector3(m_LeftDistance, m_Height, -m_Distance) + targetPos;
+            m_DistanceScale = Mathf.Max(MinDistanceScale, m_DistanceScale);
+            var position = rotation * new Vector3(m_LeftDistance, m_Height * m_DistanceScale, -m_Distance * m_DistanceScale) + targetPos;
             _Camera.transform.position = position;
 
             if (m_LookAt)
@@ -236,6 +250,7 @@ namespace Modules.Utilities.Editor
             var distanceProp = serializedObject.FindProperty("m_Distance");
             var leftDistanceProp = serializedObject.FindProperty("m_LeftDistance");
             var heightProp = serializedObject.FindProperty("m_Height");
+            var distanceScaleProp = serializedObject.FindProperty("m_DistanceScale");
             var lookAtProp = serializedObject.FindProperty("m_LookAt");
 
 
@@ -259,6 +274,7 @@ namespace Modules.Utilities.Editor
             EditorGUILayout.PropertyField(distanceProp);
             EditorGUILayout.PropertyField(leftDistanceProp);
             EditorGUILayout.PropertyField(heightProp);
+            EditorGUILayout.PropertyField(distanceScaleProp);
             EditorGUILayout.PropertyField(lookAtProp);
 
             EditorGUILayout.PropertyField(_LayerMaskProp);
