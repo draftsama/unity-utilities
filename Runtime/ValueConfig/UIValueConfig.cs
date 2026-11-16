@@ -47,6 +47,8 @@ public class UIValueConfig : Singleton<UIValueConfig>
 
     bool m_IsOpen = false;
 
+    public bool IsOpen => m_IsOpen;
+
     private int tapCount = 0;
     private float lastTap = -1;
 
